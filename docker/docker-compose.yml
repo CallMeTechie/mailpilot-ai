@@ -10,8 +10,11 @@ services:
     environment:
       APP_ENV: prod
       APP_DEBUG: "false"
-      APP_BASE_URL: https://mailpilot.s-techsmd.de
+      APP_BASE_URL: ${APP_BASE_URL:?APP_BASE_URL must be set in docker/.env}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-mailpilot.ai}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mailpilot-addin}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://outlook.office.com,https://outlook.office365.com}
       ENCRYPT_KEY: ${ENCRYPT_KEY}
       DB_HOST: mariadb
       DB_NAME: mailpilot
@@ -26,7 +29,7 @@ services:
       AWS_REGION: ${AWS_REGION:-eu-central-1}
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
-      MS_REDIRECT_URI: https://mailpilot.s-techsmd.de/api/v1/auth/oauth/callback
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI:?MS_REDIRECT_URI must be set in docker/.env}
     volumes:
       - ./var/log:/app/var/log
       - ./config:/app/config:ro

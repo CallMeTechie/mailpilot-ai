@@ -37,3 +37,6 @@ node_modules/
 *.tar.gz
 *.zip
 dist/
+
+# Generated Office Add-in manifest (built via addin/build-manifest.sh)
+addin/manifest.xml

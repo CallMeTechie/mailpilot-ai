@@ -18,8 +18,8 @@ final class IdTokenParserTest extends TestCase
 		$payload = [
 			'tid' => '11111111-2222-3333-4444-555555555555',
 			'oid' => '99999999-8888-7777-6666-555555555555',
-			'preferred_username' => 'marc@s-techsmd.de',
-			'name' => 'Marc Backes',
+			'preferred_username' => 'user@example.com',
+			'name' => 'Test User',
 			'iss' => 'https://login.microsoftonline.com/.../v2.0',
 			'aud' => 'app-id',
 			'exp' => time() + 3600,

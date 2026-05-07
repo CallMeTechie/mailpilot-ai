@@ -150,8 +150,12 @@ jobs:
           for f in $(find addin/src -name "*.js"); do
             node --check "$f" || { echo "SYNTAX ERROR: $f"; exit 1; }
           done
-      - name: Validate manifest XML
+      - name: Build manifest from template + validate XML
         run: |
           sudo apt-get update -y
           sudo apt-get install -y libxml2-utils
+          ADDIN_BASE_URL=https://ci.example.test addin/build-manifest.sh
           xmllint --noout addin/manifest.xml
+          if grep -q "__ADDIN_" addin/manifest.xml; then
+            echo "ERROR: unsubstituted placeholders remain in manifest.xml"; exit 1
+          fi

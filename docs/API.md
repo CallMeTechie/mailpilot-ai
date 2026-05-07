@@ -1,6 +1,6 @@
 # API.md — MailPilot Backend REST Contract
 
-**Base URL:** `https://mailpilot.s-techsmd.de/api/v1`
+**Base URL:** `https://your-host.example.com/api/v1`
 **Auth:** Bearer JWT (obtained via M365 OAuth2 flow)
 **Content-Type:** `application/json`
 

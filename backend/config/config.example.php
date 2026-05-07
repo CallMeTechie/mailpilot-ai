@@ -10,7 +10,8 @@ return [
 	'app' => [
 		'env'          => getenv('APP_ENV') ?: 'prod',
 		'debug'        => filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOL),
-		'base_url'     => getenv('APP_BASE_URL') ?: 'https://mailpilot.example.de',
+		// APP_BASE_URL must be set per deployment — there is no sensible default.
+		'base_url'     => getenv('APP_BASE_URL') ?: '',
 		'jwt_secret'   => getenv('JWT_SECRET') ?: '',
 		'jwt_ttl'      => 3600,
 		'jwt_issuer'   => getenv('JWT_ISSUER')   ?: 'mailpilot.ai',

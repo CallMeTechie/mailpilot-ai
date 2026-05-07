@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	MailPilot AI — Outlook Add-in manifest TEMPLATE.
+
+	Office requires absolute URLs in this file. Build the deployable
+	manifest.xml from this template:
+
+		ADDIN_BASE_URL=https://your-host.example ./build-manifest.sh
+
+	Placeholders:
+		__ADDIN_BASE_URL__   — full origin (no trailing slash, e.g. https://mp.example.com)
+		__ADDIN_PROVIDER__   — provider/vendor name displayed by Office
+		__ADDIN_DISPLAY__    — display name shown in the ribbon
+-->
 <OfficeApp
 	xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -8,16 +21,16 @@
 
 	<Id>d4f8c2a1-9b3e-4a2c-8f1d-6e5b4a3c2d1e</Id>
 	<Version>1.0.0.0</Version>
-	<ProviderName>S-TechSMD</ProviderName>
+	<ProviderName>__ADDIN_PROVIDER__</ProviderName>
 	<DefaultLocale>de-DE</DefaultLocale>
-	<DisplayName DefaultValue="MailPilot AI" />
+	<DisplayName DefaultValue="__ADDIN_DISPLAY__" />
 	<Description DefaultValue="KI-gestützte E-Mail-Triage. Relevanz, Kurz-Zusammenfassung, Antwort-Vorschläge." />
-	<IconUrl DefaultValue="https://mailpilot.s-techsmd.de/assets/icon-64.png" />
-	<HighResolutionIconUrl DefaultValue="https://mailpilot.s-techsmd.de/assets/icon-128.png" />
-	<SupportUrl DefaultValue="https://mailpilot.s-techsmd.de/support" />
+	<IconUrl DefaultValue="__ADDIN_BASE_URL__/assets/icon-64.png" />
+	<HighResolutionIconUrl DefaultValue="__ADDIN_BASE_URL__/assets/icon-128.png" />
+	<SupportUrl DefaultValue="__ADDIN_BASE_URL__/support" />
 
 	<AppDomains>
-		<AppDomain>https://mailpilot.s-techsmd.de</AppDomain>
+		<AppDomain>__ADDIN_BASE_URL__</AppDomain>
 	</AppDomains>
 
 	<Hosts>
@@ -33,7 +46,7 @@
 	<FormSettings>
 		<Form xsi:type="ItemRead">
 			<DesktopSettings>
-				<SourceLocation DefaultValue="https://mailpilot.s-techsmd.de/addin/taskpane.html" />
+				<SourceLocation DefaultValue="__ADDIN_BASE_URL__/addin/taskpane.html" />
 				<RequestedHeight>450</RequestedHeight>
 			</DesktopSettings>
 		</Form>
@@ -93,13 +106,13 @@
 
 		<Resources>
 			<bt:Images>
-				<bt:Image id="Icon.16" DefaultValue="https://mailpilot.s-techsmd.de/assets/icon-16.png" />
-				<bt:Image id="Icon.32" DefaultValue="https://mailpilot.s-techsmd.de/assets/icon-32.png" />
-				<bt:Image id="Icon.80" DefaultValue="https://mailpilot.s-techsmd.de/assets/icon-80.png" />
+				<bt:Image id="Icon.16" DefaultValue="__ADDIN_BASE_URL__/assets/icon-16.png" />
+				<bt:Image id="Icon.32" DefaultValue="__ADDIN_BASE_URL__/assets/icon-32.png" />
+				<bt:Image id="Icon.80" DefaultValue="__ADDIN_BASE_URL__/assets/icon-80.png" />
 			</bt:Images>
 			<bt:Urls>
-				<bt:Url id="Taskpane.Url" DefaultValue="https://mailpilot.s-techsmd.de/addin/taskpane.html" />
-				<bt:Url id="Commands.Url" DefaultValue="https://mailpilot.s-techsmd.de/addin/commands.html" />
+				<bt:Url id="Taskpane.Url" DefaultValue="__ADDIN_BASE_URL__/addin/taskpane.html" />
+				<bt:Url id="Commands.Url" DefaultValue="__ADDIN_BASE_URL__/addin/commands.html" />
 			</bt:Urls>
 			<bt:ShortStrings>
 				<bt:String id="Group.Label" DefaultValue="MailPilot" />

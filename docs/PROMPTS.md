@@ -76,7 +76,7 @@ in derselben Reihenfolge.
   "id": "AAMk…",
   "from": "alice@example.com",
   "from_name": "Alice Example",
-  "to": ["marc@s-techsmd.de"],
+  "to": ["user@example.com"],
   "cc": [],
   "subject": "Re: Q2 Angebot",
   "body_preview": "Hi Marc, kurze Rückfrage zum Angebot...",

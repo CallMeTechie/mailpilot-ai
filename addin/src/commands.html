@@ -14,7 +14,7 @@
 		// Called when a new message is composed — pre-warm backend, non-blocking
 		function onNewMessage(event) {
 			// Best-effort ping to warm up backend; don't block user
-			fetch('https://mailpilot.s-techsmd.de/api/v1/ping', { method: 'GET', mode: 'no-cors' })
+			fetch(window.location.origin + '/api/v1/ping', { method: 'GET', mode: 'no-cors' })
 				.finally(() => event.completed());
 		}
 

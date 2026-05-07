@@ -3,7 +3,15 @@
  * Stores JWT in sessionStorage (per-session, cleared on Outlook close).
  */
 
-const BASE_URL = 'https://mailpilot.s-techsmd.de/api/v1';
+// The task pane is served by our own backend, so the API lives on the
+// same origin. Avoids hardcoding a deployment-specific domain.
+// An optional <meta name="mp-api-base" content="https://…/api/v1"> overrides
+// this — useful for sideloaded dev where the taskpane and backend may
+// run on different hosts.
+const META_BASE = document.querySelector('meta[name="mp-api-base"]')?.content;
+const BASE_URL = (META_BASE && META_BASE.length > 0)
+	? META_BASE.replace(/\/$/, '')
+	: `${window.location.origin}/api/v1`;
 const TOKEN_KEY = 'mp_jwt';
 
 export class ApiError extends Error {

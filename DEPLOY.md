@@ -8,7 +8,7 @@ Step-by-step um MailPilot auf dem Synology DS218+ zum Laufen zu bringen.
 
 - [ ] https://entra.microsoft.com öffnen → App registrations → **New registration**
 - [ ] Name: `MailPilot AI` · Accounts: "Multitenant + Personal" (für Gmail/Outlook.com Kompatibilität)
-- [ ] Redirect URI (Web): `https://mailpilot.s-techsmd.de/api/v1/auth/oauth/callback`
+- [ ] Redirect URI (Web): `https://your-host.example.com/api/v1/auth/oauth/callback`
 - [ ] Notieren: `Application (client) ID`
 - [ ] **Certificates & secrets** → New client secret → 24 Monate → Notieren (nur einmal sichtbar!)
 - [ ] **API permissions** → Add permission → Microsoft Graph → Delegated:
@@ -22,9 +22,9 @@ Step-by-step um MailPilot auf dem Synology DS218+ zum Laufen zu bringen.
 
 ## Phase 2 — DNS + Reverse Proxy
 
-- [ ] DNS-Record: `mailpilot.s-techsmd.de` → NAS-IP (A-Record oder CNAME auf deine dynamische DNS)
+- [ ] DNS-Record: `your-host.example.com` → NAS-IP (A-Record oder CNAME auf deine dynamische DNS)
 - [ ] Synology Control Panel → Login Portal → Advanced → Reverse Proxy → Neu:
-	- Source: `https://mailpilot.s-techsmd.de:443`
+	- Source: `https://your-host.example.com:443`
 	- Destination: `http://localhost:<mapped-port>` (z.B. 18080)
 	- Custom Header → WebSocket: Upgrade + Connection
 - [ ] Let's Encrypt Zertifikat über DSM Control Panel → Security → Certificate (ggf. DNS-Challenge, wenn Port 80 nicht offen)
@@ -81,7 +81,7 @@ docker compose logs -f backend worker
 ```
 
 - [ ] DB wird beim ersten Start automatisch aus `sql/schema.sql` initialisiert
-- [ ] Auf `https://mailpilot.s-techsmd.de/api/v1/health` prüfen → `{"ok":true,...}`
+- [ ] Auf `https://your-host.example.com/api/v1/health` prüfen → `{"ok":true,...}`
 
 ## Phase 6 — Smoke-Test
 

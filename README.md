@@ -42,7 +42,7 @@ Claude API (Haiku → Scoring, Opus → Summary/Reply)
 ### 1. Azure App Registration
 
 1. https://entra.microsoft.com → App registrations → New
-2. Redirect URI: `https://mailpilot.your-domain.de/api/v1/auth/oauth/callback`
+2. Redirect URI: `https://your-host.example.com/api/v1/auth/oauth/callback`
 3. API permissions (delegated):
    - `Mail.Read`
    - `Mail.ReadWrite`
