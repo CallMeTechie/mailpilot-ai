@@ -66,6 +66,10 @@ services:
     command: ["php", "/app/bin/worker.php"]
     environment:
       APP_ENV: prod
+      APP_BASE_URL: ${APP_BASE_URL:?APP_BASE_URL must be set in docker/.env}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-mailpilot.ai}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mailpilot-addin}
       DB_HOST: mariadb
       DB_NAME: mailpilot
       DB_USER: mailpilot
