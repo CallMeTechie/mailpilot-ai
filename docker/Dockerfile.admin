@@ -1,0 +1,30 @@
+FROM php:8.4-fpm-alpine
+
+RUN apk add --no-cache nginx supervisor \
+	&& docker-php-ext-install pdo_mysql opcache
+
+WORKDIR /app
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Backend code is needed for autoload + models
+COPY backend/composer.json backend/composer.lock* backend/
+RUN cd backend && composer install --no-dev --no-scripts --prefer-dist
+COPY backend/ backend/
+COPY admin/   admin/
+RUN cd backend && composer dump-autoload --optimize
+
+COPY backend/composer.json admin/composer.json* ./
+
+# Register Admin namespace in backend autoloader
+RUN cd backend && composer config autoload.psr-4.MailPilot\\\\Admin\\\\ ../admin/src/ && composer dump-autoload --optimize
+
+COPY docker/nginx.admin.conf  /etc/nginx/nginx.conf
+COPY docker/supervisord.conf  /etc/supervisord.conf
+COPY docker/php-fpm.conf      /usr/local/etc/php-fpm.d/www.conf
+
+RUN mkdir -p /app/var/log && chown -R www-data:www-data /app/var
+
+EXPOSE 80
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

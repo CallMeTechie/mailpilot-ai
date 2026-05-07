@@ -1,0 +1,39 @@
+# Composer
+vendor/
+composer.lock
+
+# Local config — secrets must never be committed
+backend/config/config.php
+admin/config/admin.local.php
+docker/.env
+.env
+.env.local
+.env.*.local
+
+# Logs / runtime
+backend/var/
+*.log
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# PHPUnit
+backend/.phpunit.cache/
+backend/.phpunit.result.cache
+backend/coverage/
+
+# php-cs-fixer
+.php-cs-fixer.cache
+
+# Node (Add-in dev server)
+node_modules/
+
+# Build artefacts
+*.tar.gz
+*.zip
+dist/

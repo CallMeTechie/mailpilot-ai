@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8">
+	<title>MailPilot — Anmeldung abgeschlossen</title>
+	<link rel="stylesheet" href="src/taskpane.css">
+	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+</head>
+<body>
+	<main class="mp-main" style="text-align:center; padding:60px 20px;">
+		<h1>✓ Angemeldet</h1>
+		<p class="mp-muted" id="status">Anmeldung wird verarbeitet…</p>
+	</main>
+
+	<script>
+		// Token arrives in URL fragment — never logged, never sent to server
+		const fragment = window.location.hash.substring(1);
+		const params = new URLSearchParams(fragment);
+		const token = params.get('token');
+
+		if (token) {
+			// Store in sessionStorage so taskpane.js picks it up
+			sessionStorage.setItem('mp_jwt', token);
+			document.getElementById('status').textContent = 'Du kannst dieses Fenster schließen. MailPilot ist jetzt aktiv.';
+
+			// Notify opener (taskpane) if we're in a popup
+			if (window.opener && !window.opener.closed) {
+				try {
+					window.opener.postMessage({ type: 'mp-auth-complete', token }, window.location.origin);
+					setTimeout(() => window.close(), 1500);
+				} catch (e) {
+					// ignore
+				}
+			}
+		} else {
+			document.getElementById('status').textContent = 'Anmeldung fehlgeschlagen.';
+		}
+	</script>
+</body>
+</html>

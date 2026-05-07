@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8">
+	<title>MailPilot Commands</title>
+	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+</head>
+<body>
+	<script>
+		Office.onReady(() => {
+			// Registered function file — handles LaunchEvent hooks
+		});
+
+		// Called when a new message is composed — pre-warm backend, non-blocking
+		function onNewMessage(event) {
+			// Best-effort ping to warm up backend; don't block user
+			fetch('https://mailpilot.s-techsmd.de/api/v1/ping', { method: 'GET', mode: 'no-cors' })
+				.finally(() => event.completed());
+		}
+
+		// Register for Office
+		if (typeof Office !== 'undefined' && Office.actions) {
+			Office.actions.associate('onNewMessage', onNewMessage);
+		}
+	</script>
+</body>
+</html>

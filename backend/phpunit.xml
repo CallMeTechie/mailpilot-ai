@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+		 bootstrap="vendor/autoload.php"
+		 colors="true"
+		 cacheDirectory=".phpunit.cache"
+		 failOnRisky="true"
+		 failOnWarning="true"
+		 executionOrder="depends,defects"
+		 beStrictAboutOutputDuringTests="true">
+
+	<testsuites>
+		<testsuite name="Unit">
+			<directory>tests/Unit</directory>
+		</testsuite>
+		<testsuite name="Integration">
+			<directory>tests/Integration</directory>
+		</testsuite>
+	</testsuites>
+
+	<source>
+		<include>
+			<directory>src</directory>
+		</include>
+		<exclude>
+			<directory>src/Http</directory>
+		</exclude>
+	</source>
+
+	<php>
+		<env name="APP_ENV" value="test"/>
+		<env name="DB_HOST" value="127.0.0.1"/>
+		<env name="DB_PORT" value="3306"/>
+		<env name="DB_NAME" value="mailpilot_test"/>
+		<env name="DB_USER" value="root"/>
+		<env name="DB_PASS" value=""/>
+		<env name="ENCRYPT_KEY" value="0000000000000000000000000000000000000000000000000000000000000001"/>
+		<env name="JWT_SECRET" value="test-secret-not-for-production"/>
+		<env name="JWT_ISSUER" value="mailpilot.ai.test"/>
+		<env name="JWT_AUDIENCE" value="mailpilot-test-audience"/>
+		<env name="CLAUDE_API_KEY" value="sk-ant-test"/>
+		<env name="CORS_ALLOWED_ORIGINS" value="https://outlook.office.com"/>
+	</php>
+</phpunit>

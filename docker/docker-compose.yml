@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: mailpilot-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: "false"
+      APP_BASE_URL: https://mailpilot.s-techsmd.de
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPT_KEY: ${ENCRYPT_KEY}
+      DB_HOST: mariadb
+      DB_NAME: mailpilot
+      DB_USER: mailpilot
+      DB_PASS: ${DB_PASS}
+      REDIS_HOST: redis
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_PROVIDER: ${CLAUDE_PROVIDER:-anthropic}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      MS_CLIENT_ID: ${MS_CLIENT_ID}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
+      MS_REDIRECT_URI: https://mailpilot.s-techsmd.de/api/v1/auth/oauth/callback
+    volumes:
+      - ./var/log:/app/var/log
+      - ./config:/app/config:ro
+    networks:
+      - mailpilot
+      - proxy
+    depends_on:
+      - mariadb
+      - redis
+
+  mariadb:
+    image: mariadb:11.4
+    container_name: mailpilot-db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: mailpilot
+      MARIADB_USER: mailpilot
+      MARIADB_PASSWORD: ${DB_PASS}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
+    volumes:
+      - mailpilot-db:/var/lib/mysql
+      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - mailpilot
+
+  redis:
+    image: redis:7-alpine
+    container_name: mailpilot-redis
+    restart: unless-stopped
+    volumes:
+      - mailpilot-redis:/data
+    networks:
+      - mailpilot
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: mailpilot-worker
+    restart: unless-stopped
+    command: ["php", "/app/bin/worker.php"]
+    environment:
+      APP_ENV: prod
+      DB_HOST: mariadb
+      DB_NAME: mailpilot
+      DB_USER: mailpilot
+      DB_PASS: ${DB_PASS}
+      REDIS_HOST: redis
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_PROVIDER: ${CLAUDE_PROVIDER:-anthropic}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      ENCRYPT_KEY: ${ENCRYPT_KEY}
+      MS_CLIENT_ID: ${MS_CLIENT_ID}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
+    networks:
+      - mailpilot
+    depends_on:
+      - mariadb
+      - redis
+
+  admin:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.admin
+    container_name: mailpilot-admin
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod
+      DB_HOST: mariadb
+      DB_NAME: mailpilot
+      DB_USER: mailpilot
+      DB_PASS: ${DB_PASS}
+      REDIS_HOST: redis
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASS_HASH: ${ADMIN_PASS_HASH}
+      ADMIN_IP_RESTRICT: ${ADMIN_IP_RESTRICT:-false}
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-}
+      ENCRYPT_KEY: ${ENCRYPT_KEY}
+    networks:
+      - mailpilot
+      - proxy
+    depends_on:
+      - mariadb
+
+networks:
+  mailpilot:
+    driver: bridge
+  proxy:
+    external: true
+    name: nginx-proxy
+
+volumes:
+  mailpilot-db:
+  mailpilot-redis:

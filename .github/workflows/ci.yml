@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  php-lint:
+    name: PHP Syntax Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: none
+          coverage: none
+      - name: Lint backend + admin
+        run: |
+          set -e
+          fail=0
+          for f in $(find backend admin -name "*.php" -not -path "*/vendor/*"); do
+            php -l "$f" >/dev/null 2>&1 || { echo "SYNTAX ERROR: $f"; fail=1; }
+          done
+          exit $fail
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, openssl, json, curl, pdo_mysql
+          coverage: none
+      - name: Cache composer
+        uses: actions/cache@v4
+        with:
+          path: backend/vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('backend/composer.json') }}
+      - name: Install
+        run: composer install --no-interaction --no-progress --prefer-dist
+        working-directory: backend
+      - name: Run Unit suite
+        run: ./vendor/bin/phpunit --testsuite Unit --no-coverage
+        working-directory: backend
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ''
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
+          MARIADB_DATABASE: mailpilot_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, openssl, json, curl, pdo_mysql
+          coverage: none
+      - name: Cache composer
+        uses: actions/cache@v4
+        with:
+          path: backend/vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('backend/composer.json') }}
+      - name: Install
+        run: composer install --no-interaction --no-progress --prefer-dist
+        working-directory: backend
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 --silent 2>/dev/null; then
+              echo "MariaDB is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MariaDB did not become ready"; exit 1
+      - name: Load initial schema
+        run: mysql -h 127.0.0.1 -P 3306 -u root mailpilot_test < sql/schema.sql
+      - name: Apply additional migrations
+        run: |
+          for m in backend/migrations/[0-9]*.sql; do
+            n=$(basename "$m" .sql)
+            if [ "$n" != "0001_initial_schema" ]; then
+              echo "Applying $n"
+              mysql -h 127.0.0.1 -P 3306 -u root mailpilot_test < "$m"
+            fi
+          done
+      - name: Run Integration suite
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: mailpilot_test
+          DB_USER: root
+          DB_PASS: ''
+        run: ./vendor/bin/phpunit --testsuite Integration --no-coverage
+        working-directory: backend
+
+  composer-audit:
+    name: Composer Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Install
+        run: composer install --no-interaction --no-progress --prefer-dist
+        working-directory: backend
+      - name: Audit
+        run: composer audit --no-interaction || true
+        working-directory: backend
+
+  addin-lint:
+    name: Add-in JS Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check JS modules
+        run: |
+          for f in $(find addin/src -name "*.js"); do
+            node --check "$f" || { echo "SYNTAX ERROR: $f"; exit 1; }
+          done
+      - name: Validate manifest XML
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libxml2-utils
+          xmllint --noout addin/manifest.xml

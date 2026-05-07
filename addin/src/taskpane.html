@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>MailPilot AI</title>
+
+	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+	<link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+	<header class="mp-header">
+		<div class="mp-brand">
+			<img src="../assets/icon-32.png" alt="" width="24" height="24">
+			<span>MailPilot</span>
+		</div>
+		<nav class="mp-tabs" role="tablist">
+			<button class="mp-tab is-active" data-tab="briefing" role="tab">Briefing</button>
+			<button class="mp-tab" data-tab="current" role="tab">Diese Mail</button>
+			<button class="mp-tab" data-tab="settings" role="tab">Einstellungen</button>
+		</nav>
+	</header>
+
+	<main class="mp-main">
+		<!-- ===================== BRIEFING ===================== -->
+		<section class="mp-panel is-active" data-panel="briefing">
+			<div class="mp-loader" data-hidden="true" id="briefing-loader">
+				<div class="mp-spinner"></div>
+				<p>Analysiere Posteingang…</p>
+			</div>
+
+			<div id="briefing-content" data-hidden="true">
+				<div class="mp-headline">
+					<h1 id="briefing-title">Heute</h1>
+					<p id="briefing-subtitle" class="mp-muted"></p>
+				</div>
+
+				<div class="mp-counters">
+					<div class="mp-counter" data-label="direct">
+						<div class="mp-counter-dot" style="background:#ef4444"></div>
+						<span class="mp-counter-value" id="c-direct">0</span>
+						<span class="mp-counter-label">Direkt</span>
+					</div>
+					<div class="mp-counter" data-label="action">
+						<div class="mp-counter-dot" style="background:#f97316"></div>
+						<span class="mp-counter-value" id="c-action">0</span>
+						<span class="mp-counter-label">Aktion</span>
+					</div>
+					<div class="mp-counter" data-label="cc">
+						<div class="mp-counter-dot" style="background:#3b82f6"></div>
+						<span class="mp-counter-value" id="c-cc">0</span>
+						<span class="mp-counter-label">CC</span>
+					</div>
+					<div class="mp-counter" data-label="newsletter">
+						<div class="mp-counter-dot" style="background:#94a3b8"></div>
+						<span class="mp-counter-value" id="c-newsletter">0</span>
+						<span class="mp-counter-label">Newsletter</span>
+					</div>
+					<div class="mp-counter" data-label="auto">
+						<div class="mp-counter-dot" style="background:#64748b"></div>
+						<span class="mp-counter-value" id="c-auto">0</span>
+						<span class="mp-counter-label">Auto</span>
+					</div>
+					<div class="mp-counter" data-label="noise">
+						<div class="mp-counter-dot" style="background:#cbd5e1"></div>
+						<span class="mp-counter-value" id="c-noise">0</span>
+						<span class="mp-counter-label">Noise</span>
+					</div>
+				</div>
+
+				<div class="mp-section">
+					<h2>Top-Priorität</h2>
+					<ul class="mp-mail-list" id="top-priority-list"></ul>
+				</div>
+
+				<button class="mp-btn mp-btn-secondary" id="btn-sync">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+					Jetzt aktualisieren
+				</button>
+			</div>
+
+			<div class="mp-empty" data-hidden="true" id="briefing-empty">
+				<p>Noch kein Postfach verbunden.</p>
+				<button class="mp-btn mp-btn-primary" id="btn-connect">Mit Microsoft 365 verbinden</button>
+			</div>
+		</section>
+
+		<!-- ===================== CURRENT MAIL ===================== -->
+		<section class="mp-panel" data-panel="current">
+			<div class="mp-loader" data-hidden="true" id="current-loader">
+				<div class="mp-spinner"></div>
+				<p>Analysiere Mail…</p>
+			</div>
+
+			<div id="current-content" data-hidden="true">
+				<div class="mp-mail-header">
+					<span class="mp-badge" id="current-badge">—</span>
+					<span class="mp-priority" id="current-priority"></span>
+				</div>
+				<h2 id="current-subject">—</h2>
+				<p class="mp-from" id="current-from">—</p>
+
+				<div class="mp-section">
+					<h3>Kurzfassung</h3>
+					<p id="current-summary" class="mp-summary-text">—</p>
+				</div>
+
+				<div class="mp-section" id="current-action-section" data-hidden="true">
+					<h3>Aktion erforderlich</h3>
+					<p id="current-action" class="mp-action-text"></p>
+				</div>
+
+				<div class="mp-section">
+					<h3>Aktionen</h3>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-secondary" id="btn-summarize">Ausführliche Zusammenfassung</button>
+						<button class="mp-btn mp-btn-primary" id="btn-draft">Antwort entwerfen</button>
+						<button class="mp-btn mp-btn-ghost" id="btn-rescore">Neu bewerten</button>
+					</div>
+				</div>
+
+				<div class="mp-section" id="draft-section" data-hidden="true">
+					<h3>Antwort-Entwurf</h3>
+					<textarea id="draft-text" rows="8"></textarea>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary" id="btn-use-draft">In Outlook öffnen</button>
+						<button class="mp-btn mp-btn-ghost" id="btn-regenerate">Neu generieren</button>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- ===================== SETTINGS ===================== -->
+		<section class="mp-panel" data-panel="settings">
+			<div class="mp-section">
+				<h2>VIP-Absender</h2>
+				<p class="mp-muted">Mails von diesen Adressen werden nie als Newsletter oder Noise klassifiziert.</p>
+				<div class="mp-field">
+					<input type="email" id="vip-email" placeholder="name@example.com">
+					<button class="mp-btn mp-btn-secondary" id="btn-add-vip">Hinzufügen</button>
+				</div>
+				<ul class="mp-list" id="vip-list"></ul>
+			</div>
+
+			<div class="mp-section">
+				<h2>Projekt-Stichworte</h2>
+				<p class="mp-muted">Mails, die diese Stichworte enthalten, werden prioritär behandelt.</p>
+				<div class="mp-field">
+					<input type="text" id="kw-input" placeholder="z. B. Ori:Dev, SocialPilot">
+					<button class="mp-btn mp-btn-secondary" id="btn-add-kw">Hinzufügen</button>
+				</div>
+				<ul class="mp-list" id="kw-list"></ul>
+			</div>
+
+			<div class="mp-section">
+				<h2>Redaktions-Regeln</h2>
+				<p class="mp-muted">Regex-Muster, die vor dem Versand an Claude aus Mail-Inhalten entfernt werden.</p>
+				<div class="mp-field">
+					<input type="text" id="red-pattern" placeholder="regex pattern">
+					<input type="text" id="red-desc" placeholder="Beschreibung">
+					<button class="mp-btn mp-btn-secondary" id="btn-add-red">Hinzufügen</button>
+				</div>
+				<ul class="mp-list" id="red-list"></ul>
+			</div>
+
+			<div class="mp-section mp-danger">
+				<h2>Daten</h2>
+				<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
+				<button class="mp-btn mp-btn-danger" id="btn-delete">Account + alle Daten löschen</button>
+			</div>
+		</section>
+	</main>
+
+	<footer class="mp-footer">
+		<span id="status-text" class="mp-muted">Bereit</span>
+	</footer>
+
+	<script type="module" src="taskpane.js"></script>
+</body>
+</html>
