@@ -30,5 +30,12 @@
 	"scripts": {
 		"test": "phpunit",
 		"cs-fix": "php-cs-fixer fix --using-cache=no"
+	},
+	"config": {
+		"audit": {
+			"ignore": {
+				"PKSA-y2cr-5h3j-g3ys": "We use HS256 only — algorithm-confusion advisory does not apply"
+			}
+		}
 	}
 }
