@@ -6,7 +6,7 @@ namespace MailPilot\Repositories;
 use MailPilot\Util\Uuid;
 use PDO;
 
-final class MailboxRepository
+class MailboxRepository
 {
 	public function __construct(private readonly PDO $db)
 	{

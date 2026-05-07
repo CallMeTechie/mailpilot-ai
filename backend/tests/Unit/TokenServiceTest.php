@@ -14,7 +14,7 @@ final class TokenServiceTest extends TestCase
 	private function makeService(?GraphClient $graph = null): TokenService
 	{
 		$graph = $graph ?? new GraphClient('cid','cs','https://r','common','Mail.Read', new NullLogger());
-		$mailboxes = $this->createMock(MailboxRepository::class);
+		$mailboxes = $this->createStub(MailboxRepository::class);
 		return new TokenService(
 			$graph,
 			$mailboxes,
@@ -45,7 +45,7 @@ final class TokenServiceTest extends TestCase
 	public function testInvalidKeyLengthIsRejected(): void
 	{
 		$this->expectException(\RuntimeException::class);
-		$mailboxes = $this->createMock(MailboxRepository::class);
+		$mailboxes = $this->createStub(MailboxRepository::class);
 		new TokenService(
 			new GraphClient('cid','cs','https://r','common','Mail.Read', new NullLogger()),
 			$mailboxes,
