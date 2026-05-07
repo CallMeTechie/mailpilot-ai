@@ -6,30 +6,60 @@
 #   - Backend / admin ports are exposed directly to the host
 #   - Schema mount uses a relative path that matches the project directory
 #
-# Setup
-# -----
-# 1) On the NAS, clone the whole repo to e.g. /volume1/docker/mailpilot-ai
-#    (the repo is required because schema.sql is mounted relatively).
-# 2) Copy .env.example to .env in the same directory as this file and fill in
-#    secrets (JWT_SECRET, ENCRYPT_KEY, DB_PASS, DB_ROOT_PASS, MS_CLIENT_ID,
-#    MS_CLIENT_SECRET, CLAUDE_API_KEY, APP_BASE_URL, MS_REDIRECT_URI, ADMIN_*).
-# 3) DSM → Container Manager → Project → Create:
-#       Source: docker-compose.yml from existing folder
-#       Path:   /volume1/docker/mailpilot-ai/docker
-#       File:   docker-compose.synology.yml
-# 4) Set up Reverse Proxy (DSM → Login Portal → Advanced → Reverse Proxy):
-#       Source: https://mailpilot.your-host.example   →  http://localhost:${BACKEND_PORT:-8080}
-#       Source: https://admin.mailpilot.your-host.example  →  http://localhost:${ADMIN_PORT:-8081}
-# 5) After first startup, apply migrations once:
-#       docker exec mailpilot-backend php bin/migrate.php
+# Setup (no SSH required — File Station + Container Manager only)
+# ---------------------------------------------------------------
+# 1) DSM → File Station → create folder /docker/mailpilot-ai
+# 2) Create file /docker/mailpilot-ai/.env with the required values.
+#    Template: see docker/.env.example in the GitHub repo.
+# 3) Upload THIS file (docker-compose.synology.yml) to /docker/mailpilot-ai/.
+# 4) DSM → Container Manager → Project → Create:
+#       Project name: mailpilot-ai
+#       Path:         /docker/mailpilot-ai
+#       Source:       Use existing docker-compose.yml
+#       File:         docker-compose.synology.yml
+#    Container Manager pulls the public images from GHCR — no login needed.
+# 5) Set up Reverse Proxy (DSM → Login Portal → Advanced → Reverse Proxy):
+#       Source: https://mailpilot.your-host.example   →  http://localhost:${BACKEND_PORT:-18080}
+#       Source: https://admin.mailpilot.your-host.example  →  http://localhost:${ADMIN_PORT:-18081}
+#
+# Schema initialisation is automatic on first start — the 'migrate' service
+# applies all backend/migrations/*.sql files, then exits.
 
 services:
+  migrate:
+    image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
+    container_name: mailpilot-migrate
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for MariaDB ..."
+        until php -r 'new PDO("mysql:host=mariadb;dbname=mailpilot", getenv("DB_USER"), getenv("DB_PASS"));' 2>/dev/null; do
+          sleep 2
+        done
+        echo "Applying migrations ..."
+        cd /app && php bin/migrate.php
+    environment:
+      DB_HOST: mariadb
+      DB_NAME: mailpilot
+      DB_USER: mailpilot
+      DB_PASS: ${DB_PASS}
+      ENCRYPT_KEY: ${ENCRYPT_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL}
+      MS_REDIRECT_URI: ${MS_REDIRECT_URI}
+    depends_on:
+      - mariadb
+    networks:
+      - mailpilot
+
   backend:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
     container_name: mailpilot-backend
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8080}:80"
+      - "${BACKEND_PORT:-18080}:80"
     environment:
       APP_ENV: prod
       APP_DEBUG: "false"
@@ -60,6 +90,7 @@ services:
     depends_on:
       - mariadb
       - redis
+      - migrate
 
   worker:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
@@ -95,7 +126,7 @@ services:
     container_name: mailpilot-admin
     restart: unless-stopped
     ports:
-      - "${ADMIN_PORT:-8081}:80"
+      - "${ADMIN_PORT:-18081}:80"
     environment:
       APP_ENV: prod
       DB_HOST: mariadb
@@ -124,7 +155,6 @@ services:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
     volumes:
       - mailpilot-db:/var/lib/mysql
-      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks:
       - mailpilot
 
