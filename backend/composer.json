@@ -19,7 +19,8 @@
 	},
 	"autoload": {
 		"psr-4": {
-			"MailPilot\\": "src/"
+			"MailPilot\\": "src/",
+			"MailPilot\\Admin\\": "../admin/src/"
 		}
 	},
 	"autoload-dev": {

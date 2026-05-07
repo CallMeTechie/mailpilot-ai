@@ -14,11 +14,6 @@ COPY backend/ backend/
 COPY admin/   admin/
 RUN cd backend && composer dump-autoload --optimize
 
-COPY backend/composer.json admin/composer.json* ./
-
-# Register Admin namespace in backend autoloader
-RUN cd backend && composer config autoload.psr-4.MailPilot\\\\Admin\\\\ ../admin/src/ && composer dump-autoload --optimize
-
 COPY docker/nginx.admin.conf  /etc/nginx/nginx.conf
 COPY docker/supervisord.conf  /etc/supervisord.conf
 COPY docker/php-fpm.conf      /usr/local/etc/php-fpm.d/www.conf
