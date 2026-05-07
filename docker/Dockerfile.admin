@@ -12,7 +12,8 @@ COPY backend/composer.json backend/composer.lock* backend/
 RUN cd backend && composer install --no-dev --no-scripts --prefer-dist
 COPY backend/ backend/
 COPY admin/   admin/
-RUN cd backend && composer dump-autoload --optimize
+RUN cd backend && composer dump-autoload --optimize \
+	&& cp config/config.example.php config/config.php
 
 COPY docker/nginx.admin.conf  /etc/nginx/nginx.conf
 COPY docker/supervisord.conf  /etc/supervisord.conf

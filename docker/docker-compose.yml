@@ -28,7 +28,6 @@ services:
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:?MS_REDIRECT_URI must be set in docker/.env}
     volumes:
       - ./var/log:/app/var/log
-      - ./config:/app/config:ro
     networks:
       - mailpilot
       - proxy
