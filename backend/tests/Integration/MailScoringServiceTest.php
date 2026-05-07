@@ -98,16 +98,14 @@ final class MailScoringServiceTest extends TestCase
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
-		// Two mails with identical from+subject+body
 		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'x@a.de', 'subject' => 'Same', 'body_text' => 'Same body']);
-		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'x@a.de', 'subject' => 'Same', 'body_text' => 'Same body']);
-
-		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$repo = new MailRepository($this->pdo());
+		$first = $repo->findUnscoredForMailbox($tenantId, $mailboxId);
 
 		$claude = new FakeClaudeClient();
 		$claude->scriptJson([
 			'results' => [[
-				'id' => $mails[0]['id'],
+				'id' => $first[0]['id'],
 				'label' => 'direct',
 				'action_required' => false,
 				'priority' => 3,
@@ -115,16 +113,21 @@ final class MailScoringServiceTest extends TestCase
 				'reasoning' => 'r',
 			]],
 		]);
-
 		$service = $this->makeService($claude);
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
-		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+		$service->scoreBatch($tenantId, $profile, $first);
+		$this->assertSame(1, $claude->callCount());
 
-		$this->assertCount(2, $scores);
-		$this->assertSame(1, $claude->callCount(), 'Second mail should hit cache, not Claude');
+		// Second batch: another mail with identical content — must hit cache,
+		// must NOT trigger a new Claude call.
+		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'x@a.de', 'subject' => 'Same', 'body_text' => 'Same body']);
+		$second = $repo->findUnscoredForMailbox($tenantId, $mailboxId);
+		$this->assertCount(1, $second, 'Only the new unscored mail should remain');
 
-		$cached = array_filter($scores, fn($s) => $s['cached'] === 1);
-		$this->assertCount(1, $cached);
+		$scores = $service->scoreBatch($tenantId, $profile, $second);
+		$this->assertSame(1, $claude->callCount(), 'Second mail must hit cache, not Claude');
+		$this->assertCount(1, $scores);
+		$this->assertSame(1, (int)$scores[0]['cached']);
 	}
 
 	public function testInvalidLabelIsCoercedToAuto(): void
