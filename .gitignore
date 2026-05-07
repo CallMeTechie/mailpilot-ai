@@ -14,9 +14,10 @@ docker/.env
 backend/var/
 *.log
 
-# Editor / IDE
+# Editor / IDE / agent
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 .DS_Store
