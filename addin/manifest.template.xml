@@ -67,8 +67,6 @@
 		<Hosts>
 			<Host xsi:type="MailHost">
 				<DesktopFormFactor>
-					<FunctionFile resid="Commands.Url" />
-
 					<!-- Reading pane: single mail triage -->
 					<ExtensionPoint xsi:type="MessageReadCommandSurface">
 						<OfficeTab id="TabDefault">
@@ -91,14 +89,6 @@
 								</Control>
 							</Group>
 						</OfficeTab>
-					</ExtensionPoint>
-
-					<!-- Inbox-level: briefing -->
-					<ExtensionPoint xsi:type="LaunchEvent">
-						<LaunchEvents>
-							<LaunchEvent Type="OnNewMessageCompose" FunctionName="onNewMessage" />
-						</LaunchEvents>
-						<SourceLocation resid="Commands.Url" />
 					</ExtensionPoint>
 				</DesktopFormFactor>
 			</Host>
