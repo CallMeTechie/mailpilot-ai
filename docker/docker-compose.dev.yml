@@ -1,0 +1,27 @@
+# Local development override.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.dev.yml up --build
+#
+# This rebuilds the images locally instead of pulling from GHCR. Useful when
+# you have uncommitted changes or no network access to ghcr.io.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: mailpilot-ai-backend:dev
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: mailpilot-ai-backend:dev
+
+  admin:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.admin
+    image: mailpilot-ai-admin:dev

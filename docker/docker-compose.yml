@@ -1,10 +1,6 @@
-version: '3.8'
-
 services:
   backend:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
     container_name: mailpilot-backend
     restart: unless-stopped
     environment:
@@ -65,9 +61,7 @@ services:
       - mailpilot
 
   worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
     container_name: mailpilot-worker
     restart: unless-stopped
     command: ["php", "/app/bin/worker.php"]
@@ -94,9 +88,7 @@ services:
       - redis
 
   admin:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.admin
+    image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-admin:${IMAGE_TAG:-latest}
     container_name: mailpilot-admin
     restart: unless-stopped
     environment:
