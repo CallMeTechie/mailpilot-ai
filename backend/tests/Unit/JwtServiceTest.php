@@ -12,7 +12,7 @@ final class JwtServiceTest extends TestCase
 	private function svc(?\PDO $pdo = null): JwtService
 	{
 		return new JwtService(
-			'a-strong-test-secret',
+			str_repeat('s', 64),
 			'mailpilot.ai.test',
 			'mailpilot-test-audience',
 			3600,
@@ -48,7 +48,7 @@ final class JwtServiceTest extends TestCase
 
 	public function testRejectsTokenFromDifferentIssuer(): void
 	{
-		$other = new JwtService('a-strong-test-secret', 'evil-issuer', 'mailpilot-test-audience', 3600);
+		$other = new JwtService(str_repeat('s', 64), 'evil-issuer', 'mailpilot-test-audience', 3600);
 		$out = $other->issue('t', 'u', 'e@x.de');
 
 		$this->expectException(HttpException::class);
@@ -58,7 +58,7 @@ final class JwtServiceTest extends TestCase
 
 	public function testRejectsTokenForWrongAudience(): void
 	{
-		$other = new JwtService('a-strong-test-secret', 'mailpilot.ai.test', 'wrong-audience', 3600);
+		$other = new JwtService(str_repeat('s', 64), 'mailpilot.ai.test', 'wrong-audience', 3600);
 		$out = $other->issue('t', 'u', 'e@x.de');
 
 		$this->expectException(HttpException::class);

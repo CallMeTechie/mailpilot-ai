@@ -35,7 +35,7 @@
 		<env name="DB_USER" value="root"/>
 		<env name="DB_PASS" value=""/>
 		<env name="ENCRYPT_KEY" value="0000000000000000000000000000000000000000000000000000000000000001"/>
-		<env name="JWT_SECRET" value="test-secret-not-for-production"/>
+		<env name="JWT_SECRET" value="ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"/>
 		<env name="JWT_ISSUER" value="mailpilot.ai.test"/>
 		<env name="JWT_AUDIENCE" value="mailpilot-test-audience"/>
 		<env name="CLAUDE_API_KEY" value="sk-ant-test"/>
