@@ -11,7 +11,7 @@ namespace MailPilot\Claude;
  *   - Existing Services that still reference ClaudeClient
  *   - The static extractText() helper used everywhere
  */
-final class ClaudeClient implements ClaudeProvider
+class ClaudeClient implements ClaudeProvider
 {
 	private readonly AnthropicClient $inner;
 
