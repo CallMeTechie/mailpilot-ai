@@ -31,7 +31,7 @@ use PDO;
  * Minimal service container. Lazy-constructed services via ->get().
  * No third-party DI lib on purpose — fewer moving parts, easier to reason about.
  */
-final class Kernel
+class Kernel
 {
 	/** @var array<string, mixed> */
 	private array $instances = [];
