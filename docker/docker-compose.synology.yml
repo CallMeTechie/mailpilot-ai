@@ -34,10 +34,12 @@ services:
     command:
       - |
         set -e
-        echo "Waiting for MariaDB ..."
-        until php -r 'new PDO("mysql:host=mariadb;dbname=mailpilot", getenv("DB_USER"), getenv("DB_PASS"));' 2>/dev/null; do
+        echo "Waiting for MariaDB (root login) ..."
+        until php -r 'new PDO("mysql:host=mariadb;dbname=mysql", "root", getenv("DB_ROOT_PASS"));' 2>/dev/null; do
           sleep 2
         done
+        echo "Ensuring DB user has wildcard host grant ..."
+        php /app/bin/ensure_db_user.php
         echo "Applying migrations ..."
         cd /app && php bin/migrate.php
     environment:
@@ -45,6 +47,7 @@ services:
       DB_NAME: mailpilot
       DB_USER: mailpilot
       DB_PASS: ${DB_PASS}
+      DB_ROOT_PASS: ${DB_ROOT_PASS}
       ENCRYPT_KEY: ${ENCRYPT_KEY}
       JWT_SECRET: ${JWT_SECRET}
       APP_BASE_URL: ${APP_BASE_URL}
