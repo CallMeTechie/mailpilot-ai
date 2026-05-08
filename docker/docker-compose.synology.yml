@@ -53,7 +53,8 @@ services:
       APP_BASE_URL: ${APP_BASE_URL}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI}
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     networks:
       - mailpilot
 
@@ -91,9 +92,12 @@ services:
     networks:
       - mailpilot
     depends_on:
-      - mariadb
-      - redis
-      - migrate
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
@@ -125,8 +129,12 @@ services:
     networks:
       - mailpilot
     depends_on:
-      - mariadb
-      - redis
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   admin:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-admin:${IMAGE_TAG:-latest}
@@ -149,7 +157,10 @@ services:
     networks:
       - mailpilot
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   mariadb:
     image: mariadb:11.4
@@ -164,6 +175,12 @@ services:
       - mailpilot-db:/var/lib/mysql
     networks:
       - mailpilot
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
