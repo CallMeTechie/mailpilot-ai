@@ -42,3 +42,8 @@ dist/
 # Generated Office Add-in manifest (built via addin/build-manifest.sh)
 addin/manifest.xml
 mailpilot-worker.json
+
+# Workspace dumps from operator (never commit)
+/.env
+/.env.example
+/docker-compose*.yml
