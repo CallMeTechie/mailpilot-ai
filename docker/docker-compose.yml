@@ -74,6 +74,7 @@ services:
       DB_NAME: mailpilot
       DB_USER: mailpilot
       DB_PASS: ${DB_PASS}
+      DB_ROOT_PASS: ${DB_ROOT_PASS:-}
       REDIS_HOST: redis
       CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
       CLAUDE_PROVIDER: ${CLAUDE_PROVIDER:-anthropic}

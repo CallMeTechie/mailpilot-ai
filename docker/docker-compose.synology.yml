@@ -114,6 +114,8 @@ services:
       DB_NAME: mailpilot
       DB_USER: mailpilot
       DB_PASS: ${DB_PASS}
+      # Optional — when set, worker self-heals 1130 errors via ensure_db_user.php
+      DB_ROOT_PASS: ${DB_ROOT_PASS:-}
       REDIS_HOST: redis
       CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
       CLAUDE_PROVIDER: ${CLAUDE_PROVIDER:-anthropic}

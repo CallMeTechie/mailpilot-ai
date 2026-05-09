@@ -17,6 +17,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+// Block until DB is reachable as the app user. Self-heals 1130 errors
+// (wrong host grant) when DB_ROOT_PASS is provided to this container.
+require_once __DIR__ . '/wait_for_db.php';
+
 use MailPilot\Http\Kernel;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
