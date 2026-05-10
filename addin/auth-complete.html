@@ -19,19 +19,23 @@
 		const token = params.get('token');
 
 		if (token) {
-			// Store in sessionStorage so taskpane.js picks it up
+			// Hand-off via localStorage so the taskpane (in a different tab,
+			// possibly with window.opener stripped by Cross-Origin-Opener-Policy)
+			// receives a `storage` event and picks the token up. sessionStorage
+			// is also set as a fallback for same-tab reloads.
 			sessionStorage.setItem('mp_jwt', token);
+			localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
+
 			document.getElementById('status').textContent = 'Du kannst dieses Fenster schließen. MailPilot ist jetzt aktiv.';
 
-			// Notify opener (taskpane) if we're in a popup
+			// Best-effort opener postMessage as third path (works in some browsers
+			// when COOP doesn't strip the opener relationship).
 			if (window.opener && !window.opener.closed) {
 				try {
-					window.opener.postMessage({ type: 'mp-auth-complete', token }, window.location.origin);
-					setTimeout(() => window.close(), 1500);
-				} catch (e) {
-					// ignore
-				}
+					window.opener.postMessage({ type: 'mp-auth-complete', token: token }, window.location.origin);
+				} catch (e) { /* ignore */ }
 			}
+			setTimeout(function () { window.close(); }, 1500);
 		} else {
 			document.getElementById('status').textContent = 'Anmeldung fehlgeschlagen.';
 		}

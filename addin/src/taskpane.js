@@ -23,15 +23,29 @@ Office.onReady((info) => {
 		return;
 	}
 
+	// Pick up a token left behind by a recent auth-complete popup. localStorage
+	// survives across the popup → taskpane handoff even when window.opener is
+	// stripped by Cross-Origin-Opener-Policy.
+	consumeHandoff();
+
 	initTabs();
 	initBriefing();
 	initCurrentMail();
 	initSettings();
 
-	// Listen for auth-complete popup
+	// Path 1: postMessage (works when window.opener survived).
 	window.addEventListener('message', (event) => {
 		if (event.data?.type === 'mp-auth-complete' && event.data.token) {
 			sessionStorage.setItem('mp_jwt', event.data.token);
+			setStatus('Angemeldet — lade Briefing…');
+			loadBriefing();
+		}
+	});
+
+	// Path 2: storage event from auth-complete.html running in another tab.
+	window.addEventListener('storage', (event) => {
+		if (event.key === 'mp_jwt_handoff' && event.newValue) {
+			consumeHandoff();
 			setStatus('Angemeldet — lade Briefing…');
 			loadBriefing();
 		}
@@ -45,6 +59,21 @@ Office.onReady((info) => {
 
 	onItemChanged();
 });
+
+// ============================================================
+// Auth handoff — drain any token written by auth-complete.html
+// ============================================================
+function consumeHandoff() {
+	const raw = localStorage.getItem('mp_jwt_handoff');
+	if (!raw) return;
+	try {
+		const { token, ts } = JSON.parse(raw);
+		if (token && typeof ts === 'number' && Date.now() - ts < 5 * 60 * 1000) {
+			sessionStorage.setItem('mp_jwt', token);
+		}
+	} catch (e) { /* ignore malformed handoff */ }
+	localStorage.removeItem('mp_jwt_handoff');
+}
 
 // ============================================================
 // Tabs
