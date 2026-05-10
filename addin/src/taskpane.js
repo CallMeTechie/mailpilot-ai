@@ -87,7 +87,9 @@ function initTabs() {
 			tab.classList.add('is-active');
 			document.querySelector(`.mp-panel[data-panel="${name}"]`).classList.add('is-active');
 
-			if (name === 'briefing' && !state.briefingLoaded) {
+			if (name === 'briefing') {
+				// Always refresh when the user opens the briefing tab — the
+				// counts can change anytime as the worker keeps scoring.
 				loadBriefing();
 			}
 			if (name === 'current') {
