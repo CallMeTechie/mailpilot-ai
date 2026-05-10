@@ -21,7 +21,15 @@
 
 	<label>
 		<span>Modell</span>
-		<input type="text" name="model" value="<?= htmlspecialchars($prompt['model'] ?? 'claude-haiku-4-5-20251001') ?>" required <?= $prompt ? 'disabled' : '' ?>>
+		<input type="text" name="model" list="model-suggestions"
+			value="<?= htmlspecialchars($prompt['model'] ?? 'claude-haiku-4-5-20251001') ?>"
+			required <?= $prompt ? 'disabled' : '' ?>>
+		<datalist id="model-suggestions">
+			<option value="claude-haiku-4-5-20251001">Schnell + günstig — Scoring (P-SCORE)</option>
+			<option value="claude-sonnet-4-6">Mittlerer Tier — Allgemein</option>
+			<option value="claude-opus-4-7">Höchste Qualität — Summary / Reply</option>
+		</datalist>
+		<small class="muted">Vorschläge sind die im Code referenzierten Modelle. Freitext erlaubt für zukünftige Versionen.</small>
 	</label>
 
 	<div class="field-row">
