@@ -36,7 +36,9 @@ RUN composer dump-autoload --optimize \
 # so the manifest and OAuth callback resolve under one domain.
 COPY addin/src/                /app/public/addin/
 COPY addin/assets/             /app/public/assets/
-COPY addin/auth-complete.html  /app/public/auth-complete.html
+# auth-complete.html lives under /addin/ because AuthController redirects
+# to "${base_url}/addin/auth-complete.html#token=…"
+COPY addin/auth-complete.html  /app/public/addin/auth-complete.html
 
 COPY docker/nginx.conf         /etc/nginx/nginx.conf
 COPY docker/supervisord.conf   /etc/supervisord.conf
