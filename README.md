@@ -39,57 +39,53 @@ Claude API (Haiku → Scoring, Opus → Summary/Reply)
 
 ## Setup
 
+Drei Schritte: Azure App Registration → Container-Stack hochfahren → Outlook
+Add-in sideloaden. Der Stack läuft auf Synology DS218+/DS220+/DS920+ mit
+DSM 7.2+ über den Container Manager — alternativ überall, wo `docker compose`
+verfügbar ist.
+
 ### 1. Azure App Registration
 
-1. https://entra.microsoft.com → App registrations → New
-2. Redirect URI: `https://your-host.example.com/api/v1/auth/oauth/callback`
+1. https://entra.microsoft.com → **App registrations** → **New**
+2. Redirect URI: `https://mailpilot.deine-domain.de/api/v1/auth/oauth/callback`
 3. API permissions (delegated):
-   - `Mail.Read`
-   - `Mail.ReadWrite`
-   - `MailboxSettings.Read`
-   - `User.Read`
-   - `offline_access`
-4. Client secret erzeugen, notieren
+   - `Mail.Read` · `Mail.ReadWrite` · `MailboxSettings.Read` · `User.Read` · `offline_access`
+4. **Certificates & secrets** → Client-Secret erzeugen, **Wert** notieren
+5. Tenant-ID, Client-ID notieren
 
-### 2. Secrets generieren
+### 2. Container-Stack auf der NAS deployen
 
-```bash
-# JWT secret (32 bytes)
-openssl rand -hex 32
+Detail-Anleitung mit DSM-spezifischen Hinweisen: **[docs/SYNOLOGY-INSTALL.md](docs/SYNOLOGY-INSTALL.md)**.
 
-# Encryption key für Token-Verschlüsselung (32 bytes)
-openssl rand -hex 32
-```
+Kurz-Version:
 
-### 3. `.env` erstellen (im `docker/` Ordner)
+1. **DSM File Station** → Ordner `/docker/mailpilot-ai/` anlegen
+2. `.env` aus [`docker/.env.example`](docker/.env.example) ableiten und mit echten Werten
+   füllen. Mindestens `JWT_SECRET`, `ENCRYPT_KEY` (je `openssl rand -hex 32`),
+   `DB_PASS`, `DB_ROOT_PASS`, `CLAUDE_API_KEY`, `MS_CLIENT_ID/SECRET`,
+   `APP_BASE_URL`, `MS_REDIRECT_URI`, `ADMIN_USER`, `ADMIN_PASS_HASH_B64`.
+3. [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml)
+   nach `/docker/mailpilot-ai/docker-compose.yml` hochladen (rename auf
+   `docker-compose.yml` — DSM erwartet diesen Namen).
+4. **DSM Container Manager** → **Projekt** → **Erstellen** mit Namen `mailpilot-ai`,
+   Pfad `/docker/mailpilot-ai`, Quelle „bestehende docker-compose.yml".
+5. **DSM Login Portal** → **Reverse Proxy** für Backend (`:19080`) und Admin (`:19081`)
+   auf deine Domain einrichten.
 
-```env
-JWT_SECRET=<aus Schritt 2>
-ENCRYPT_KEY=<aus Schritt 2>
-DB_PASS=<sicheres Passwort>
-DB_ROOT_PASS=<sicheres Passwort>
-CLAUDE_API_KEY=sk-ant-...
-MS_CLIENT_ID=<aus Azure>
-MS_CLIENT_SECRET=<aus Azure>
-```
+Beim ersten Start dauert es ~30–60 s, bis das Backend-Init Migrations
+eingespielt hat und der Healthcheck grün wird. Danach starten Worker und
+Admin automatisch.
 
-### 4. Deploy
+Lokal (Linux/macOS, Dev-Maschine): `cd docker/ && docker compose up -d` mit
+[`docker/docker-compose.yml`](docker/docker-compose.yml).
 
-```bash
-cd docker/
-docker compose up -d
-docker compose logs -f backend
-```
+### 3. Add-in sideloaden
 
-Die DB wird beim ersten Start aus `sql/schema.sql` initialisiert.
+In Outlook: **Datei → Add-Ins verwalten → Meine Add-Ins → Benutzerdefiniertes
+Add-In hinzufügen → aus Datei** → `addin/manifest.xml` auswählen.
 
-### 5. Add-in sideloaden
-
-In Outlook: Datei → Add-Ins verwalten → Meine Add-Ins → Benutzerdefiniertes
-Add-In hinzufügen → aus Datei → `addin/manifest.xml` auswählen.
-
-Für Office 365 Admin Center (Team-Rollout): Zentrale Bereitstellung über
-Integrated Apps.
+Für Team-Rollout (Office 365 Admin Center): Zentrale Bereitstellung über
+**Integrated Apps**.
 
 ## Development
 
