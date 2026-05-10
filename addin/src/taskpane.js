@@ -147,7 +147,16 @@ function initBriefing() {
 						dialog.close();
 					});
 					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
-						// User closed the dialog or it was destroyed by Office.
+						// Dialog closed (manually, by Office, or after messageParent).
+						// As a safety net, check whether auth-complete.html wrote
+						// the token directly into localStorage (Path 1) and load
+						// the briefing if so. messageParent path already calls
+						// loadBriefing(); this is a no-op in that case.
+						consumeHandoff();
+						if (localStorage.getItem('mp_jwt')) {
+							setStatus('Angemeldet — lade Briefing…');
+							loadBriefing();
+						}
 					});
 				},
 			);
