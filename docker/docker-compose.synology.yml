@@ -22,42 +22,11 @@
 #       Source: https://mailpilot.your-host.example   →  http://localhost:${BACKEND_PORT:-18080}
 #       Source: https://admin.mailpilot.your-host.example  →  http://localhost:${ADMIN_PORT:-18081}
 #
-# Schema initialisation is automatic on first start — the 'migrate' service
-# applies all backend/migrations/*.sql files, then exits.
+# Schema initialisation is automatic on first start — the backend service's
+# entrypoint runs ensure_db_user.php and migrate.php before php-fpm starts.
+# Worker and admin wait via depends_on: backend / service_healthy.
 
 services:
-  migrate:
-    image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
-    container_name: mailpilot-migrate
-    restart: "no"
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        set -e
-        echo "Waiting for MariaDB (root login) ..."
-        until php -r 'new PDO("mysql:host=mariadb;dbname=mysql", "root", getenv("DB_ROOT_PASS"));' 2>/dev/null; do
-          sleep 2
-        done
-        echo "Ensuring DB user has wildcard host grant ..."
-        php /app/bin/ensure_db_user.php
-        echo "Applying migrations ..."
-        cd /app && php bin/migrate.php
-    environment:
-      DB_HOST: mariadb
-      DB_NAME: mailpilot
-      DB_USER: mailpilot
-      DB_PASS: ${DB_PASS}
-      DB_ROOT_PASS: ${DB_ROOT_PASS}
-      ENCRYPT_KEY: ${ENCRYPT_KEY}
-      JWT_SECRET: ${JWT_SECRET}
-      APP_BASE_URL: ${APP_BASE_URL}
-      MS_REDIRECT_URI: ${MS_REDIRECT_URI}
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    networks:
-      - mailpilot
-
   backend:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
     container_name: mailpilot-backend
@@ -87,6 +56,8 @@ services:
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:?MS_REDIRECT_URI must be set in .env}
+      RUN_INIT_TASKS: "1"
+      DB_ROOT_PASS: ${DB_ROOT_PASS:?DB_ROOT_PASS must be set in .env (used by entrypoint-init.sh for migrations)}
     volumes:
       - ./var/log:/app/var/log
     networks:
@@ -96,8 +67,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      migrate:
-        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-m", "3", "http://localhost/api/v1/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
   worker:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-backend:${IMAGE_TAG:-latest}
@@ -135,8 +110,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      migrate:
-        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
 
   admin:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-admin:${IMAGE_TAG:-latest}
@@ -162,8 +137,8 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
 
   mariadb:
     image: mariadb:11.4

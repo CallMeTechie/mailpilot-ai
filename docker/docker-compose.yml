@@ -26,14 +26,24 @@ services:
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
       MS_REDIRECT_URI: ${MS_REDIRECT_URI:?MS_REDIRECT_URI must be set in docker/.env}
+      RUN_INIT_TASKS: "1"
+      DB_ROOT_PASS: ${DB_ROOT_PASS:?DB_ROOT_PASS must be set in docker/.env (used by entrypoint-init.sh for migrations)}
     volumes:
       - ./var/log:/app/var/log
     networks:
       - mailpilot
       - proxy
     depends_on:
-      - mariadb
-      - redis
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-m", "3", "http://localhost/api/v1/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
   mariadb:
     image: mariadb:11.4
@@ -46,9 +56,14 @@ services:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
     volumes:
       - mailpilot-db:/var/lib/mysql
-      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks:
       - mailpilot
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -88,8 +103,12 @@ services:
     networks:
       - mailpilot
     depends_on:
-      - mariadb
-      - redis
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
 
   admin:
     image: ${IMAGE_REGISTRY:-ghcr.io/callmetechie}/mailpilot-ai-admin:${IMAGE_TAG:-latest}
@@ -112,7 +131,10 @@ services:
       - mailpilot
       - proxy
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
 
 networks:
   mailpilot:

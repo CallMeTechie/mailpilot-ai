@@ -32,12 +32,15 @@ COPY backend/ ./
 RUN composer dump-autoload --optimize \
 	&& cp config/config.example.php config/config.php
 
-COPY docker/nginx.conf        /etc/nginx/nginx.conf
-COPY docker/supervisord.conf  /etc/supervisord.conf
-COPY docker/php-fpm.conf      /usr/local/etc/php-fpm.d/www.conf
+COPY docker/nginx.conf         /etc/nginx/nginx.conf
+COPY docker/supervisord.conf   /etc/supervisord.conf
+COPY docker/php-fpm.conf       /usr/local/etc/php-fpm.d/www.conf
+COPY docker/entrypoint-init.sh /usr/local/bin/entrypoint-init.sh
+RUN  chmod +x /usr/local/bin/entrypoint-init.sh
 
 RUN mkdir -p /app/var/log && chown -R www-data:www-data /app/var
 
 EXPOSE 80
 
+ENTRYPOINT ["/usr/local/bin/entrypoint-init.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
