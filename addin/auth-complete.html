@@ -30,7 +30,7 @@
 				} catch (e) {
 					// Fallbacks for the (rare) case the page was opened outside
 					// an Office Dialog — same-origin storage handoff and opener.
-					sessionStorage.setItem('mp_jwt', token);
+					localStorage.setItem('mp_jwt', token);
 					localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
 					if (window.opener && !window.opener.closed) {
 						try {

@@ -36,7 +36,7 @@ Office.onReady((info) => {
 	// Path 1: postMessage (works when window.opener survived).
 	window.addEventListener('message', (event) => {
 		if (event.data?.type === 'mp-auth-complete' && event.data.token) {
-			sessionStorage.setItem('mp_jwt', event.data.token);
+			localStorage.setItem('mp_jwt', event.data.token);
 			setStatus('Angemeldet — lade Briefing…');
 			loadBriefing();
 		}
@@ -69,7 +69,7 @@ function consumeHandoff() {
 	try {
 		const { token, ts } = JSON.parse(raw);
 		if (token && typeof ts === 'number' && Date.now() - ts < 5 * 60 * 1000) {
-			sessionStorage.setItem('mp_jwt', token);
+			localStorage.setItem('mp_jwt', token);
 		}
 	} catch (e) { /* ignore malformed handoff */ }
 	localStorage.removeItem('mp_jwt_handoff');
@@ -139,7 +139,7 @@ function initBriefing() {
 						try {
 							const data = JSON.parse(arg.message);
 							if (data.type === 'mp-auth-complete' && data.token) {
-								sessionStorage.setItem('mp_jwt', data.token);
+								localStorage.setItem('mp_jwt', data.token);
 								setStatus('Angemeldet — lade Briefing…');
 								loadBriefing();
 							}

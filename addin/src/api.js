@@ -1,6 +1,6 @@
 /**
  * MailPilot API client — talks to our PHP backend.
- * Stores JWT in sessionStorage (per-session, cleared on Outlook close).
+ * Stores JWT in localStorage (per-session, cleared on Outlook close).
  */
 
 // The task pane is served by our own backend, so the API lives on the
@@ -23,15 +23,15 @@ export class ApiError extends Error {
 }
 
 function getToken() {
-	return sessionStorage.getItem(TOKEN_KEY);
+	return localStorage.getItem(TOKEN_KEY);
 }
 
 export function setToken(token) {
-	sessionStorage.setItem(TOKEN_KEY, token);
+	localStorage.setItem(TOKEN_KEY, token);
 }
 
 export function clearToken() {
-	sessionStorage.removeItem(TOKEN_KEY);
+	localStorage.removeItem(TOKEN_KEY);
 }
 
 async function request(method, path, body = null) {
