@@ -23,7 +23,10 @@ final class BriefingController extends BaseController
 
 		$scores = $this->kernel->get(ScoreRepository::class);
 
-		$sinceUtc = gmdate('Y-m-d 00:00:00.000');
+		// Last 7 days — covers the realistic "what's in my inbox right now"
+		// window. A pure "today UTC" filter looked empty for users whose
+		// initial sync brought in mostly older mail.
+		$sinceUtc = gmdate('Y-m-d H:i:s.000', time() - 7 * 86400);
 
 		$countersTotal = ['direct' => 0, 'action' => 0, 'cc' => 0, 'newsletter' => 0, 'auto' => 0, 'noise' => 0];
 		$top = [];

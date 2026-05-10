@@ -170,7 +170,10 @@ final class GraphClient
 			CURLOPT_TIMEOUT        => 30,
 			CURLOPT_HTTPHEADER     => [
 				'Authorization: Bearer ' . $accessToken,
-				'Prefer: IdType="ImmutableId"',
+				// REST-ID (the default) is what Office.js convertToRestId()
+				// returns — keeping the on-disk format and the add-in's
+				// identifier in sync. ImmutableId would survive folder moves
+				// but is unreachable from Office.js.
 			],
 		]);
 		$body = curl_exec($ch);

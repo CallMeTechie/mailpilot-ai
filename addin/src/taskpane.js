@@ -237,7 +237,12 @@ function onItemChanged() {
 		return;
 	}
 
-	const msMessageId = item.itemId;
+	// Office gives us an EWS-format itemId; the backend stores the
+	// Microsoft Graph REST-ID. Convert client-side so the lookup matches.
+	const msMessageId = Office.context.mailbox.convertToRestId(
+		item.itemId,
+		Office.MailboxEnums.RestVersion.v2_0,
+	);
 	state.currentMailId = msMessageId;
 
 	document.getElementById('current-subject').textContent = item.subject ?? '—';
@@ -253,7 +258,9 @@ async function loadCurrentMailScore(msMessageId, attempt = 0) {
 	const MAX_POLL_ATTEMPTS = 20;   // 20 × 3s = 60s budget for first-sync
 	const POLL_INTERVAL_MS  = 3000;
 
-	toggle('current-loader', attempt === 0);
+	// Loader stays visible for the entire polling window; only hidden
+	// when the score arrives or the budget is exhausted.
+	toggle('current-loader', true);
 	toggle('current-content', false);
 
 	try {
