@@ -6,6 +6,8 @@ composer.lock
 backend/config/config.php
 admin/config/admin.local.php
 docker/.env
+docker/.env.*
+!docker/.env.example
 .env
 .env.local
 .env.*.local
@@ -41,7 +43,7 @@ dist/
 
 # Generated Office Add-in manifest (built via addin/build-manifest.sh)
 addin/manifest.xml
-mailpilot-worker.json
+mailpilot-worker.*
 
 # Workspace dumps from operator (never commit)
 /.env
