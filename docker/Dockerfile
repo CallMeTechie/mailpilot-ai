@@ -32,6 +32,12 @@ COPY backend/ ./
 RUN composer dump-autoload --optimize \
 	&& cp config/config.example.php config/config.php
 
+# Outlook Add-in static files — served from the same origin as the API
+# so the manifest and OAuth callback resolve under one domain.
+COPY addin/src/                /app/public/addin/
+COPY addin/assets/             /app/public/assets/
+COPY addin/auth-complete.html  /app/public/auth-complete.html
+
 COPY docker/nginx.conf         /etc/nginx/nginx.conf
 COPY docker/supervisord.conf   /etc/supervisord.conf
 COPY docker/php-fpm.conf       /usr/local/etc/php-fpm.d/www.conf
