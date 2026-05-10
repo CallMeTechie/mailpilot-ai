@@ -88,19 +88,30 @@
 
 		<!-- ===================== CURRENT MAIL ===================== -->
 		<section class="mp-panel" data-panel="current">
-			<div class="mp-loader" data-hidden="true" id="current-loader">
-				<div class="mp-spinner"></div>
-				<p>Analysiere Mail…</p>
-			</div>
-
-			<div id="current-content" data-hidden="true">
+			<!-- Header (subject + from) is always shown when a mail is selected. -->
+			<div id="current-header" data-hidden="true">
 				<div class="mp-mail-header">
-					<span class="mp-badge" id="current-badge">—</span>
+					<span class="mp-badge" id="current-badge" data-hidden="true">—</span>
 					<span class="mp-priority" id="current-priority"></span>
 				</div>
 				<h2 id="current-subject">—</h2>
 				<p class="mp-from" id="current-from">—</p>
+			</div>
 
+			<!-- No mail selected in Outlook reading pane. -->
+			<div class="mp-empty" id="current-empty" data-hidden="true">
+				<p>Keine Mail im Lese­bereich geöffnet.</p>
+				<p class="mp-muted">Klick eine Mail in Outlook an, um sie hier zu analysieren.</p>
+			</div>
+
+			<!-- Mail is open but not yet scored — sync is running in the worker. -->
+			<div class="mp-loader" data-hidden="true" id="current-loader">
+				<div class="mp-spinner"></div>
+				<p>Mail wird analysiert…</p>
+				<p class="mp-muted">Erste Sync nach Login dauert oft 30–90 s.</p>
+			</div>
+
+			<div id="current-content" data-hidden="true">
 				<div class="mp-section">
 					<h3>Kurzfassung</h3>
 					<p id="current-summary" class="mp-summary-text">—</p>

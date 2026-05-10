@@ -90,6 +90,10 @@ function initTabs() {
 			if (name === 'briefing' && !state.briefingLoaded) {
 				loadBriefing();
 			}
+			if (name === 'current') {
+				// Re-evaluate the currently-open mail when user opens this tab.
+				onItemChanged();
+			}
 			if (name === 'settings') {
 				loadSettings();
 			}
@@ -222,39 +226,66 @@ function initCurrentMail() {
 function onItemChanged() {
 	const item = Office.context.mailbox.item;
 	if (!item || !item.itemId) {
+		state.currentMailId = null;
+		state.currentMailData = null;
+		toggle('current-header', false);
+		toggle('current-loader', false);
+		toggle('current-content', false);
+		toggle('current-empty', true);
 		return;
 	}
 
-	// Convert REST/EWS ID to Graph-compatible ID if needed
 	const msMessageId = item.itemId;
 	state.currentMailId = msMessageId;
 
 	document.getElementById('current-subject').textContent = item.subject ?? '—';
 	document.getElementById('current-from').textContent =
 		item.from ? `${item.from.displayName ?? ''} <${item.from.emailAddress ?? ''}>` : '—';
+	toggle('current-header', true);
+	toggle('current-empty', false);
 
 	loadCurrentMailScore(msMessageId);
 }
 
-async function loadCurrentMailScore(msMessageId) {
-	toggle('current-loader', true);
+async function loadCurrentMailScore(msMessageId, attempt = 0) {
+	const MAX_POLL_ATTEMPTS = 20;   // 20 × 3s = 60s budget for first-sync
+	const POLL_INTERVAL_MS  = 3000;
+
+	toggle('current-loader', attempt === 0);
 	toggle('current-content', false);
 
 	try {
 		const result = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
 		const row = result.items?.[0];
-		if (!row) {
-			// Mail not yet synced — trigger and poll
-			setStatus('Mail wird analysiert…');
-			await api.sync.trigger();
+
+		if (row) {
+			renderCurrentMail(row);
+			toggle('current-loader', false);
+			toggle('current-content', true);
 			return;
 		}
-		renderCurrentMail(row);
-		toggle('current-content', true);
+
+		// Not yet scored.
+		if (attempt === 0) {
+			// Kick the worker on the first miss; subsequent polls just wait for it.
+			try { await api.sync.trigger(); } catch (_) { /* tolerate already-running */ }
+		}
+
+		if (attempt + 1 >= MAX_POLL_ATTEMPTS) {
+			toggle('current-loader', false);
+			setStatus('Sync dauert länger als erwartet — bitte „Aktualisieren" im Briefing-Tab probieren.');
+			return;
+		}
+
+		// Bail out if the user moved to another mail in the meantime.
+		if (state.currentMailId !== msMessageId) {
+			return;
+		}
+
+		setTimeout(() => loadCurrentMailScore(msMessageId, attempt + 1), POLL_INTERVAL_MS);
 	} catch (err) {
-		handleError(err);
-	} finally {
 		toggle('current-loader', false);
+		handleError(err);
 	}
 }
 
@@ -264,6 +295,7 @@ function renderCurrentMail(row) {
 	const badge = document.getElementById('current-badge');
 	badge.textContent = labelText(score.label);
 	badge.dataset.label = score.label ?? 'auto';
+	toggle('current-badge', true);
 	document.getElementById('current-priority').textContent = `Priorität ${score.priority ?? '—'}`;
 	document.getElementById('current-summary').textContent = score.summary ?? '—';
 
