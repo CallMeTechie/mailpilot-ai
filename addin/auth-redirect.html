@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8">
+	<title>MailPilot — Weiterleitung</title>
+	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+</head>
+<body>
+	<main style="font-family: system-ui, sans-serif; padding: 40px; text-align: center;">
+		<p>Weiterleitung zu Microsoft…</p>
+	</main>
+
+	<script>
+		// Office Dialog API requires the initial URL to be inside the add-in's
+		// AppDomain. Microsoft's login is not. So this wrapper page lives on our
+		// domain, takes the actual MS authorize URL via ?ms=…, and forwards.
+		// After the OAuth round-trip the user lands on /addin/auth-complete.html
+		// which sends the token back via Office.context.ui.messageParent().
+		const params = new URLSearchParams(window.location.search);
+		const target = params.get('ms');
+		if (target) {
+			window.location.replace(target);
+		} else {
+			document.querySelector('main p').textContent = 'Fehler: kein Ziel angegeben.';
+		}
+	</script>
+</body>
+</html>

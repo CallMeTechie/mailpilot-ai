@@ -19,23 +19,26 @@
 		const token = params.get('token');
 
 		if (token) {
-			// Hand-off via localStorage so the taskpane (in a different tab,
-			// possibly with window.opener stripped by Cross-Origin-Opener-Policy)
-			// receives a `storage` event and picks the token up. sessionStorage
-			// is also set as a fallback for same-tab reloads.
-			sessionStorage.setItem('mp_jwt', token);
-			localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
-
 			document.getElementById('status').textContent = 'Du kannst dieses Fenster schließen. MailPilot ist jetzt aktiv.';
 
-			// Best-effort opener postMessage as third path (works in some browsers
-			// when COOP doesn't strip the opener relationship).
-			if (window.opener && !window.opener.closed) {
+			// Primary path — Office Dialog API: messageParent() crosses the
+			// dialog/parent boundary that Office manages, no Browser COOP /
+			// storage-partitioning issues.
+			Office.onReady(function () {
 				try {
-					window.opener.postMessage({ type: 'mp-auth-complete', token: token }, window.location.origin);
-				} catch (e) { /* ignore */ }
-			}
-			setTimeout(function () { window.close(); }, 1500);
+					Office.context.ui.messageParent(JSON.stringify({ type: 'mp-auth-complete', token: token }));
+				} catch (e) {
+					// Fallbacks for the (rare) case the page was opened outside
+					// an Office Dialog — same-origin storage handoff and opener.
+					sessionStorage.setItem('mp_jwt', token);
+					localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
+					if (window.opener && !window.opener.closed) {
+						try {
+							window.opener.postMessage({ type: 'mp-auth-complete', token: token }, window.location.origin);
+						} catch (e2) { /* ignore */ }
+					}
+				}
+			});
 		} else {
 			document.getElementById('status').textContent = 'Anmeldung fehlgeschlagen.';
 		}

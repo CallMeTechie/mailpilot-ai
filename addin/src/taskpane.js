@@ -115,7 +115,36 @@ function initBriefing() {
 	document.getElementById('btn-connect').addEventListener('click', async () => {
 		try {
 			const { auth_url } = await api.auth.oauthStart();
-			window.open(auth_url, '_blank', 'width=520,height=640');
+			// Office Dialog API: initial URL must be inside the add-in's AppDomain,
+			// so we go through a wrapper on our own host that immediately redirects
+			// to Microsoft. After OAuth, the user lands on /addin/auth-complete.html
+			// (also our origin) which sends the token via Office.context.ui.messageParent().
+			const wrapper = `${window.location.origin}/addin/auth-redirect.html?ms=${encodeURIComponent(auth_url)}`;
+			Office.context.ui.displayDialogAsync(
+				wrapper,
+				{ width: 50, height: 70, displayInIframe: false },
+				(result) => {
+					if (result.status !== Office.AsyncResultStatus.Succeeded) {
+						showError('Login-Dialog konnte nicht geöffnet werden: ' + result.error.message);
+						return;
+					}
+					const dialog = result.value;
+					dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
+						try {
+							const data = JSON.parse(arg.message);
+							if (data.type === 'mp-auth-complete' && data.token) {
+								sessionStorage.setItem('mp_jwt', data.token);
+								setStatus('Angemeldet — lade Briefing…');
+								loadBriefing();
+							}
+						} catch (_) { /* ignore malformed message */ }
+						dialog.close();
+					});
+					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
+						// User closed the dialog or it was destroyed by Office.
+					});
+				},
+			);
 		} catch (err) {
 			handleError(err);
 		}
