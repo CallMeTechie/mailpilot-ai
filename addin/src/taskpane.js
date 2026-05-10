@@ -124,7 +124,8 @@ function initBriefing() {
 			// Office Dialog API: initial URL must be inside the add-in's AppDomain,
 			// so we go through a wrapper on our own host that immediately redirects
 			// to Microsoft. After OAuth, the user lands on /addin/auth-complete.html
-			// (also our origin) which sends the token via Office.context.ui.messageParent().
+			// which writes the token to localStorage directly (Path 1) — same
+			// origin guarantees visibility here.
 			const wrapper = `${window.location.origin}/addin/auth-redirect.html?ms=${encodeURIComponent(auth_url)}`;
 			Office.context.ui.displayDialogAsync(
 				wrapper,
@@ -135,23 +136,42 @@ function initBriefing() {
 						return;
 					}
 					const dialog = result.value;
+
+					// Active polling — Office Dialog events are unreliable on
+					// personal Outlook accounts; the dialog often refuses to
+					// close itself and DialogEventReceived never fires. Poll
+					// localStorage directly; the moment the token shows up,
+					// reload the briefing and force-close the dialog.
+					const startedAt = Date.now();
+					const pollInterval = setInterval(() => {
+						const token = localStorage.getItem('mp_jwt');
+						if (token) {
+							clearInterval(pollInterval);
+							setStatus('Angemeldet — lade Briefing…');
+							loadBriefing();
+							try { dialog.close(); } catch (e) { /* ignore */ }
+							return;
+						}
+						// Cap at 5 minutes — prevents a forgotten interval if
+						// the user abandons the login flow.
+						if (Date.now() - startedAt > 5 * 60 * 1000) {
+							clearInterval(pollInterval);
+						}
+					}, 500);
+
 					dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
 						try {
 							const data = JSON.parse(arg.message);
 							if (data.type === 'mp-auth-complete' && data.token) {
 								localStorage.setItem('mp_jwt', data.token);
-								setStatus('Angemeldet — lade Briefing…');
-								loadBriefing();
+								// pollInterval picks this up on the next tick
+								// and handles dialog.close() + loadBriefing().
 							}
 						} catch (_) { /* ignore malformed message */ }
-						dialog.close();
 					});
+
 					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
-						// Dialog closed (manually, by Office, or after messageParent).
-						// As a safety net, check whether auth-complete.html wrote
-						// the token directly into localStorage (Path 1) and load
-						// the briefing if so. messageParent path already calls
-						// loadBriefing(); this is a no-op in that case.
+						clearInterval(pollInterval);
 						consumeHandoff();
 						if (localStorage.getItem('mp_jwt')) {
 							setStatus('Angemeldet — lade Briefing…');
