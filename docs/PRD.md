@@ -6,8 +6,8 @@ Knowledge workers receive 80–200 mails/day. Most are noise (newsletters, CC in
 
 ## 2. Target users
 
-- **Primary:** Marc (self-hosted, heavy PHP/dev workflow, many project mails)
-- **Secondary:** S-TechSMD team members
+- **Primary:** CallMeTechie (self-hosted, heavy PHP/dev workflow, many project mails)
+- **Secondary:** CallMeTechie.de team members
 - **Tertiary:** SMB teams who install MailPilot on their own infra (white-label potential)
 
 ## 3. Core user stories
@@ -87,7 +87,7 @@ Three tabs:
 2. **Inbox** — triaged list with score badges, search/filter
 3. **Settings** — VIP, redaction, language, prompt tuning
 
-Design: S-TechSMD light mode. Inter 14px body, Inter 18/22 headings. Slate-50 bg, white cards with 1px slate-200 border, 8px radius, subtle shadow. No glassmorphism.
+Design: CallMeTechie.de light mode. Inter 14px body, Inter 18/22 headings. Slate-50 bg, white cards with 1px slate-200 border, 8px radius, subtle shadow. No glassmorphism.
 
 ## 10. Roadmap after MVP
 

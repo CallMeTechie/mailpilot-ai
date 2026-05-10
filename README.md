@@ -144,4 +144,4 @@ Office Add-ins erfordern HTTPS — für lokal entweder self-signed Cert oder
 
 ## Lizenz
 
-Proprietär — S-TechSMD. Nutzung durch Marc und lizenzierte Teammitglieder.
+Proprietär — CallMeTechie.de. Nutzung durch CallMeTechie und lizenzierte Teammitglieder.

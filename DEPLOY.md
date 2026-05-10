@@ -93,7 +93,7 @@ Alle Checks müssen grün sein. Falls Claude-Check fehlschlägt → API-Key prü
 
 ## Phase 7 — Add-in sideloaden (deine Outlook Installation)
 
-### Variante A: Einzelner User (Marc)
+### Variante A: Einzelner User (CallMeTechie)
 
 1. Outlook Desktop öffnen → Datei → Add-Ins verwalten → öffnet Browser
 2. Meine Add-Ins → Benutzerdefiniertes Add-In → **Aus Datei**

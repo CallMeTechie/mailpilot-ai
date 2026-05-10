@@ -1,7 +1,7 @@
 # CLAUDE.md — MailPilot AI
 
 **Project:** MailPilot AI — Outlook Add-in for AI-powered inbox triage
-**Owner:** Marc (S-TechSMD)
+**Owner:** CallMeTechie (CallMeTechie.de)
 **Stack:** Office.js Add-in + PHP 8.4 Backend + MariaDB + Redis + Claude API
 **Status:** MVP scaffolding
 
@@ -56,7 +56,7 @@ Reduce email overload by classifying every incoming mail for relevance, generati
 - **Commits:** Conventional Commits (feat:, fix:, chore:, docs:, refactor:)
 - **i18n:** DE primary, EN secondary. All user-facing strings through `L::t('key')`.
 - **Security-first layout:** `/public` is the only web root. Everything else above it.
-- **UI:** Light-mode primary. S-TechSMD design system (Inter font, Slate-50 base, JetBrains Mono for code). Dark mode only as opt-in secondary.
+- **UI:** Light-mode primary. CallMeTechie.de design system (Inter font, Slate-50 base, JetBrains Mono for code). Dark mode only as opt-in secondary.
 - **Dates:** Always store UTC in DB, format to user TZ on output.
 
 ## 4. Directory layout
