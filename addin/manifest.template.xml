@@ -121,7 +121,8 @@
 		-->
 		<VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
 			<Requirements>
-				<bt:Sets DefaultMinVersion="1.5">
+				<!-- Must be >= the outer V1.0 Requirements (1.10). SupportsPinning needs ≥ 1.5. -->
+				<bt:Sets DefaultMinVersion="1.10">
 					<bt:Set Name="Mailbox" />
 				</bt:Sets>
 			</Requirements>
