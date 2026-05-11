@@ -12,6 +12,35 @@ const state = {
 	currentMailId: null,
 	currentMailData: null,
 	briefingLoaded: false,
+	filterLabel: null,
+};
+
+// Label-specific hint copy for the filter view.
+const LABEL_META = {
+	direct: {
+		title: 'Direkt',
+		hint:  'Mails, in denen du persönlich angesprochen wirst — meist heute lesen.',
+	},
+	action: {
+		title: 'Aktion erforderlich',
+		hint:  'Diese Mails erwarten eine Antwort oder Entscheidung von dir.',
+	},
+	cc: {
+		title: 'CC',
+		hint:  'Du bist nur informativ im Verteiler — meist überfliegbar.',
+	},
+	newsletter: {
+		title: 'Newsletter',
+		hint:  'Abonnierter Marketing-Content. Newsletter abbestellen via Outlook-Header.',
+	},
+	auto: {
+		title: 'Auto',
+		hint:  'Maschinell generierte Mails (CI, Monitoring, Rechnungen). Auf Fehler-Alerts achten.',
+	},
+	noise: {
+		title: 'Noise',
+		hint:  'Wahrscheinlich irrelevant oder Spam — manuell prüfen, bevor du löschst.',
+	},
 };
 
 // ============================================================
@@ -32,6 +61,7 @@ Office.onReady((info) => {
 	initBriefing();
 	initCurrentMail();
 	initSettings();
+	startAutoRefresh();
 
 	// Path 1: postMessage (works when window.opener survived).
 	window.addEventListener('message', (event) => {
@@ -118,6 +148,16 @@ function initBriefing() {
 		}
 	});
 
+	// Counter cards: click → open filtered list for that label
+	document.querySelectorAll('.mp-counter[data-label]').forEach((card) => {
+		card.addEventListener('click', () => {
+			openFilteredList(card.dataset.label);
+		});
+	});
+
+	// Back button from the filter view
+	document.getElementById('btn-back-summary').addEventListener('click', closeFilteredList);
+
 	document.getElementById('btn-connect').addEventListener('click', async () => {
 		try {
 			const { auth_url } = await api.auth.oauthStart();
@@ -202,6 +242,97 @@ async function loadBriefing() {
 	} finally {
 		toggle('briefing-loader', false);
 	}
+}
+
+// ============================================================
+// Auto-refresh — quietly reload briefing every 60 s while the user
+// is sitting on the briefing summary view. Pauses during filter view
+// and when the document is hidden, so we don't burn API calls.
+// ============================================================
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+	if (autoRefreshTimer !== null) return;
+	autoRefreshTimer = setInterval(() => {
+		if (document.hidden) return;
+		if (state.filterLabel !== null) return;
+		const activeTab = document.querySelector('.mp-tab.is-active')?.dataset.tab;
+		if (activeTab !== 'briefing') return;
+		if (!localStorage.getItem('mp_jwt')) return;
+		loadBriefing();
+	}, 60 * 1000);
+}
+
+// ============================================================
+// Filter view: click on a counter card → list of mails in that label
+// ============================================================
+async function openFilteredList(label) {
+	const meta = LABEL_META[label];
+	if (!meta) return;
+
+	state.filterLabel = label;
+	document.getElementById('briefing-summary').dataset.hidden = 'true';
+	document.getElementById('briefing-filtered').dataset.hidden = 'false';
+	document.getElementById('filter-title').textContent = meta.title;
+	document.getElementById('filter-hint').textContent  = meta.hint;
+	const listEl = document.getElementById('filter-mail-list');
+	listEl.replaceChildren();
+	document.getElementById('filter-empty').dataset.hidden = 'true';
+	document.getElementById('filter-bulk-actions').replaceChildren();
+
+	const sinceUtc = new Date(Date.now() - 7 * 86400 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+	try {
+		const res = await api.mails.list(`?label=${encodeURIComponent(label)}&since=${encodeURIComponent(sinceUtc)}&limit=50`);
+		const items = res.items ?? [];
+		if (items.length === 0) {
+			document.getElementById('filter-empty').dataset.hidden = 'false';
+			return;
+		}
+		items.forEach((m) => {
+			listEl.appendChild(buildMailListItem(m, label));
+		});
+	} catch (err) {
+		handleError(err);
+	}
+}
+
+function buildMailListItem(m, fallbackLabel) {
+	const score = m.score ?? {};
+	const li = document.createElement('li');
+	li.className = 'mp-mail-item';
+
+	const top = document.createElement('div');
+	top.className = 'mp-mail-top';
+	const badge = document.createElement('span');
+	badge.className = 'mp-badge';
+	badge.dataset.label = score.label ?? fallbackLabel ?? 'auto';
+	badge.textContent = labelText(score.label ?? fallbackLabel);
+	const prio = document.createElement('span');
+	prio.className = 'mp-priority';
+	prio.textContent = `Priorität ${score.priority ?? '—'}`;
+	top.append(badge, prio);
+
+	const from = document.createElement('div');
+	from.className = 'mp-mail-from';
+	from.textContent = m.from_name || m.from_email || '—';
+
+	const subj = document.createElement('div');
+	subj.className = 'mp-mail-subject';
+	subj.textContent = m.subject ?? '—';
+
+	const summary = document.createElement('div');
+	summary.className = 'mp-mail-summary';
+	summary.textContent = score.summary ?? '';
+
+	li.append(top, from, subj, summary);
+	li.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.id));
+	return li;
+}
+
+function closeFilteredList() {
+	state.filterLabel = null;
+	document.getElementById('briefing-filtered').dataset.hidden = 'true';
+	document.getElementById('briefing-summary').dataset.hidden = 'false';
 }
 
 function renderBriefing(data) {
@@ -479,11 +610,25 @@ function showError(msg) {
 
 function handleError(err) {
 	console.error(err);
-	if (err instanceof ApiError) {
-		showError(err.message);
-	} else {
-		showError('Unerwarteter Fehler');
-	}
+	const msg = err instanceof ApiError ? err.message : 'Unerwarteter Fehler';
+	showToast(msg, 'error', 6000);
+}
+
+// ============================================================
+// Toast notifications — non-blocking, layered, auto-dismiss.
+// Replaces status-text overwrites for transient messages.
+// ============================================================
+function showToast(message, kind = 'info', durationMs = 4000) {
+	const stack = document.getElementById('mp-toast-stack');
+	if (!stack) return;
+	const toast = document.createElement('div');
+	toast.className = `mp-toast mp-toast-${kind}`;
+	toast.textContent = String(message ?? '');
+	stack.appendChild(toast);
+	setTimeout(() => {
+		toast.classList.add('is-leaving');
+		toast.addEventListener('animationend', () => toast.remove(), { once: true });
+	}, durationMs);
 }
 
 function escape(s) {

@@ -31,53 +31,68 @@
 			</div>
 
 			<div id="briefing-content" data-hidden="true">
-				<div class="mp-headline">
-					<h1 id="briefing-title">Heute</h1>
-					<p id="briefing-subtitle" class="mp-muted"></p>
+				<!-- Summary view: counters + top-priority list -->
+				<div id="briefing-summary">
+					<div class="mp-headline">
+						<h1 id="briefing-title">Letzte 7 Tage</h1>
+						<p id="briefing-subtitle" class="mp-muted"></p>
+					</div>
+
+					<div class="mp-counters">
+						<button type="button" class="mp-counter" data-label="direct" aria-label="Direkte Mails anzeigen">
+							<div class="mp-counter-dot" style="background:#ef4444"></div>
+							<span class="mp-counter-value" id="c-direct">0</span>
+							<span class="mp-counter-label">Direkt</span>
+						</button>
+						<button type="button" class="mp-counter" data-label="action" aria-label="Aktions-Mails anzeigen">
+							<div class="mp-counter-dot" style="background:#f97316"></div>
+							<span class="mp-counter-value" id="c-action">0</span>
+							<span class="mp-counter-label">Aktion</span>
+						</button>
+						<button type="button" class="mp-counter" data-label="cc" aria-label="CC-Mails anzeigen">
+							<div class="mp-counter-dot" style="background:#3b82f6"></div>
+							<span class="mp-counter-value" id="c-cc">0</span>
+							<span class="mp-counter-label">CC</span>
+						</button>
+						<button type="button" class="mp-counter" data-label="newsletter" aria-label="Newsletter anzeigen">
+							<div class="mp-counter-dot" style="background:#94a3b8"></div>
+							<span class="mp-counter-value" id="c-newsletter">0</span>
+							<span class="mp-counter-label">Newsletter</span>
+						</button>
+						<button type="button" class="mp-counter" data-label="auto" aria-label="Auto-Mails anzeigen">
+							<div class="mp-counter-dot" style="background:#64748b"></div>
+							<span class="mp-counter-value" id="c-auto">0</span>
+							<span class="mp-counter-label">Auto</span>
+						</button>
+						<button type="button" class="mp-counter" data-label="noise" aria-label="Noise-Mails anzeigen">
+							<div class="mp-counter-dot" style="background:#cbd5e1"></div>
+							<span class="mp-counter-value" id="c-noise">0</span>
+							<span class="mp-counter-label">Noise</span>
+						</button>
+					</div>
+
+					<div class="mp-section">
+						<h2>Top-Priorität</h2>
+						<ul class="mp-mail-list" id="top-priority-list"></ul>
+					</div>
+
+					<button class="mp-btn mp-btn-secondary" id="btn-sync">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+						Jetzt aktualisieren
+					</button>
 				</div>
 
-				<div class="mp-counters">
-					<div class="mp-counter" data-label="direct">
-						<div class="mp-counter-dot" style="background:#ef4444"></div>
-						<span class="mp-counter-value" id="c-direct">0</span>
-						<span class="mp-counter-label">Direkt</span>
+				<!-- Filter view: shown when a counter card is clicked -->
+				<div id="briefing-filtered" data-hidden="true">
+					<button class="mp-btn mp-btn-ghost" id="btn-back-summary">← Briefing</button>
+					<div class="mp-headline">
+						<h1 id="filter-title">—</h1>
+						<p class="mp-muted" id="filter-hint"></p>
 					</div>
-					<div class="mp-counter" data-label="action">
-						<div class="mp-counter-dot" style="background:#f97316"></div>
-						<span class="mp-counter-value" id="c-action">0</span>
-						<span class="mp-counter-label">Aktion</span>
-					</div>
-					<div class="mp-counter" data-label="cc">
-						<div class="mp-counter-dot" style="background:#3b82f6"></div>
-						<span class="mp-counter-value" id="c-cc">0</span>
-						<span class="mp-counter-label">CC</span>
-					</div>
-					<div class="mp-counter" data-label="newsletter">
-						<div class="mp-counter-dot" style="background:#94a3b8"></div>
-						<span class="mp-counter-value" id="c-newsletter">0</span>
-						<span class="mp-counter-label">Newsletter</span>
-					</div>
-					<div class="mp-counter" data-label="auto">
-						<div class="mp-counter-dot" style="background:#64748b"></div>
-						<span class="mp-counter-value" id="c-auto">0</span>
-						<span class="mp-counter-label">Auto</span>
-					</div>
-					<div class="mp-counter" data-label="noise">
-						<div class="mp-counter-dot" style="background:#cbd5e1"></div>
-						<span class="mp-counter-value" id="c-noise">0</span>
-						<span class="mp-counter-label">Noise</span>
-					</div>
+					<div class="mp-actions" id="filter-bulk-actions"></div>
+					<ul class="mp-mail-list" id="filter-mail-list"></ul>
+					<p class="mp-muted" id="filter-empty" data-hidden="true">Keine Mails dieser Kategorie in den letzten 7 Tagen.</p>
 				</div>
-
-				<div class="mp-section">
-					<h2>Top-Priorität</h2>
-					<ul class="mp-mail-list" id="top-priority-list"></ul>
-				</div>
-
-				<button class="mp-btn mp-btn-secondary" id="btn-sync">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
-					Jetzt aktualisieren
-				</button>
 			</div>
 
 			<div class="mp-empty" data-hidden="true" id="briefing-empty">
@@ -186,6 +201,9 @@
 	<footer class="mp-footer">
 		<span id="status-text" class="mp-muted">Bereit</span>
 	</footer>
+
+	<!-- Toast stack: transient notifications that do not overwrite each other -->
+	<div id="mp-toast-stack" class="mp-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
 	<script type="module" src="taskpane.js"></script>
 </body>
