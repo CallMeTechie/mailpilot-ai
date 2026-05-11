@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MailPilot\Controllers;
 
+use MailPilot\Graph\GraphClient;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Request;
 use MailPilot\Http\Response;
@@ -11,6 +12,7 @@ use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
 use MailPilot\Services\ReplyDraftService;
+use MailPilot\Services\TokenService;
 
 final class MailController extends BaseController
 {
@@ -99,6 +101,105 @@ final class MailController extends BaseController
 			->scoreBatch($ctx['tenant_id'], $profile, [$mail]);
 
 		Response::json(['ok' => true]);
+	}
+
+	/**
+	 * Bulk action on all mails matching a label within a time window.
+	 *
+	 * Action (route param):
+	 *   mark-read  → PATCH isRead:true via Graph
+	 *   archive    → POST /move destinationId=archive via Graph
+	 *   delete     → DELETE via Graph (moves to Deleted Items) + soft-delete in DB
+	 *   hide       → soft-delete in our DB only, Outlook untouched
+	 *
+	 * Body: { label: <enum>, since?: 'YYYY-MM-DD HH:MM:SS.000', limit?: 50 }
+	 */
+	public function bulkAction(array $params, array $body): void
+	{
+		$ctx    = $this->requireAuth();
+		$action = (string)($params['action'] ?? '');
+		$valid  = ['mark-read', 'archive', 'delete', 'hide'];
+		if (!in_array($action, $valid, true)) {
+			throw HttpException::badRequest('VALIDATION', 'Ungültige Aktion');
+		}
+
+		$label = isset($body['label']) ? (string)$body['label'] : null;
+		if ($label === null || $label === '') {
+			throw HttpException::badRequest('VALIDATION', 'label fehlt');
+		}
+		$sinceUtc = isset($body['since']) ? (string)$body['since']
+			: gmdate('Y-m-d H:i:s.000', time() - 7 * 86400);
+		$limit = max(1, min(200, (int)($body['limit'] ?? 50)));
+
+		$pdo = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare('SELECT m.id, m.ms_message_id, m.mailbox_id
+			FROM mails m
+			JOIN mail_scores s ON s.mail_id = m.id
+			WHERE m.tenant_id = :t
+			  AND m.deleted_at IS NULL
+			  AND s.label = :l
+			  AND m.received_at >= :since
+			ORDER BY m.received_at DESC
+			LIMIT ' . $limit);
+		$stmt->execute([':t' => $ctx['tenant_id'], ':l' => $label, ':since' => $sinceUtc]);
+		$mails = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+		if ($mails === []) {
+			Response::json(['processed' => 0, 'failed' => []]);
+			return;
+		}
+
+		// "hide" is DB-only: mark rows deleted, Outlook untouched.
+		if ($action === 'hide') {
+			$ids = array_column($mails, 'id');
+			$placeholders = implode(',', array_fill(0, count($ids), '?'));
+			$update = $pdo->prepare("UPDATE mails SET deleted_at = UTC_TIMESTAMP(3)
+				WHERE tenant_id = ? AND id IN ($placeholders)");
+			$update->execute(array_merge([$ctx['tenant_id']], $ids));
+			Response::json(['processed' => count($ids), 'failed' => []]);
+			return;
+		}
+
+		// Graph-backed actions — fresh access token per mailbox.
+		$mailboxes = $this->kernel->get(MailboxRepository::class)
+			->findByUser($ctx['tenant_id'], $ctx['user_id']);
+		$tokenByMb = [];
+		$tokenService = $this->kernel->get(TokenService::class);
+		foreach ($mailboxes as $mb) {
+			try {
+				$tokenByMb[(string)$mb['id']] = $tokenService->ensureFreshAccessToken($mb);
+			} catch (\Throwable) {
+				// Refresh failed → its mails will end up in `failed`.
+			}
+		}
+
+		$graph     = $this->kernel->get(GraphClient::class);
+		$processed = 0;
+		$failed    = [];
+
+		foreach ($mails as $mail) {
+			$token = $tokenByMb[(string)$mail['mailbox_id']] ?? null;
+			if ($token === null) {
+				$failed[] = $mail['id'];
+				continue;
+			}
+			try {
+				if ($action === 'mark-read') {
+					$graph->markAsRead($token, (string)$mail['ms_message_id']);
+				} elseif ($action === 'archive') {
+					$graph->moveToFolder($token, (string)$mail['ms_message_id'], 'archive');
+				} elseif ($action === 'delete') {
+					$graph->deleteMessage($token, (string)$mail['ms_message_id']);
+					$pdo->prepare('UPDATE mails SET deleted_at = UTC_TIMESTAMP(3) WHERE id = :id')
+						->execute([':id' => $mail['id']]);
+				}
+				$processed++;
+			} catch (\Throwable) {
+				$failed[] = $mail['id'];
+			}
+		}
+
+		Response::json(['processed' => $processed, 'failed' => $failed]);
 	}
 
 	/**

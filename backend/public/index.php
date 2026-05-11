@@ -28,6 +28,7 @@ $router->post('/api/v1/auth/refresh',            'AuthController@refresh');
 $router->get ('/api/v1/briefing/today',          'BriefingController@today');
 
 $router->get ('/api/v1/mails',                   'MailController@list');
+$router->post('/api/v1/mails/bulk/{action}',     'MailController@bulkAction');
 $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');

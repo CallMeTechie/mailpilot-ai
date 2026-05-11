@@ -15,31 +15,47 @@ const state = {
 	filterLabel: null,
 };
 
-// Label-specific hint copy for the filter view.
+// Available bulk actions. `confirm` requires a user confirm() before running.
+const BULK_ACTIONS = {
+	'mark-read': { label: 'Alle als gelesen markieren', confirm: false, kind: 'secondary' },
+	'archive':   { label: 'Alle archivieren',           confirm: true,  kind: 'secondary' },
+	'delete':    { label: 'Alle löschen (Papierkorb)',  confirm: true,  kind: 'danger'    },
+	'hide':      { label: 'Aus MailPilot ausblenden',   confirm: false, kind: 'ghost'     },
+};
+
+// Label-specific hint copy + which bulk actions to show in the filter view.
+// Direct/Action mails are intentionally action-free here — too important for
+// bulk operations; user opens them individually.
 const LABEL_META = {
 	direct: {
 		title: 'Direkt',
 		hint:  'Mails, in denen du persönlich angesprochen wirst — meist heute lesen.',
+		actions: [],
 	},
 	action: {
 		title: 'Aktion erforderlich',
 		hint:  'Diese Mails erwarten eine Antwort oder Entscheidung von dir.',
+		actions: [],
 	},
 	cc: {
 		title: 'CC',
 		hint:  'Du bist nur informativ im Verteiler — meist überfliegbar.',
+		actions: ['mark-read'],
 	},
 	newsletter: {
 		title: 'Newsletter',
-		hint:  'Abonnierter Marketing-Content. Newsletter abbestellen via Outlook-Header.',
+		hint:  'Abonnierter Marketing-Content.',
+		actions: ['mark-read', 'archive', 'hide'],
 	},
 	auto: {
 		title: 'Auto',
 		hint:  'Maschinell generierte Mails (CI, Monitoring, Rechnungen). Auf Fehler-Alerts achten.',
+		actions: ['mark-read', 'archive', 'hide'],
 	},
 	noise: {
 		title: 'Noise',
-		hint:  'Wahrscheinlich irrelevant oder Spam — manuell prüfen, bevor du löschst.',
+		hint:  'Wahrscheinlich irrelevant oder Spam.',
+		actions: ['delete', 'hide'],
 	},
 };
 
@@ -343,9 +359,29 @@ async function openFilteredList(label) {
 	const listEl = document.getElementById('filter-mail-list');
 	listEl.replaceChildren();
 	document.getElementById('filter-empty').dataset.hidden = 'true';
-	document.getElementById('filter-bulk-actions').replaceChildren();
 
-	const sinceUtc = new Date(Date.now() - 7 * 86400 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+	// Render bulk-action buttons for this label.
+	const bulkContainer = document.getElementById('filter-bulk-actions');
+	bulkContainer.replaceChildren();
+	(meta.actions ?? []).forEach((action) => {
+		const spec = BULK_ACTIONS[action];
+		if (!spec) return;
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = `mp-btn mp-btn-${spec.kind}`;
+		btn.textContent = spec.label;
+		btn.addEventListener('click', () => runBulkAction(action, label));
+		bulkContainer.appendChild(btn);
+	});
+
+	await reloadFilterList(label);
+}
+
+async function reloadFilterList(label) {
+	const listEl = document.getElementById('filter-mail-list');
+	listEl.replaceChildren();
+	document.getElementById('filter-empty').dataset.hidden = 'true';
+	const sinceUtc = filterSinceUtc();
 	try {
 		const res = await api.mails.list(`?label=${encodeURIComponent(label)}&since=${encodeURIComponent(sinceUtc)}&limit=50`);
 		const items = res.items ?? [];
@@ -353,11 +389,39 @@ async function openFilteredList(label) {
 			document.getElementById('filter-empty').dataset.hidden = 'false';
 			return;
 		}
-		items.forEach((m) => {
-			listEl.appendChild(buildMailListItem(m, label));
-		});
+		items.forEach((m) => listEl.appendChild(buildMailListItem(m, label)));
 	} catch (err) {
 		handleError(err);
+	}
+}
+
+function filterSinceUtc() {
+	return new Date(Date.now() - 7 * 86400 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+}
+
+async function runBulkAction(action, label) {
+	const spec = BULK_ACTIONS[action];
+	if (!spec) return;
+	if (spec.confirm && !window.confirm(`${spec.label} — wirklich für alle gefilterten Mails ausführen?`)) {
+		return;
+	}
+	const sinceUtc = filterSinceUtc();
+	setStatus(`${spec.label}…`);
+	try {
+		const res = await api.mails.bulkAction(action, label, sinceUtc);
+		const failed = res?.failed?.length ?? 0;
+		const ok = res?.processed ?? 0;
+		if (failed > 0) {
+			showToast(`${ok} verarbeitet, ${failed} fehlgeschlagen`, 'error', 5000);
+		} else {
+			showToast(`${ok} Mails verarbeitet`, 'success', 3000);
+		}
+		await reloadFilterList(label);
+		state.briefingLoaded = false;
+	} catch (err) {
+		handleError(err);
+	} finally {
+		setStatus('Bereit');
 	}
 }
 

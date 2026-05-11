@@ -84,6 +84,9 @@ export const api = {
 		summarize:     (id)    => request('POST', `/mails/${id}/summarize`),
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
+		bulkAction:    (action, label, since) => request('POST',
+			`/mails/bulk/${encodeURIComponent(action)}`,
+			{ label, since: since ?? null }),
 	},
 	sync: {
 		trigger:       ()      => request('POST', '/sync'),

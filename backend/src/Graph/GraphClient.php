@@ -125,6 +125,24 @@ final class GraphClient
 		$this->patch($accessToken, $url, ['categories' => array_values($categories)]);
 	}
 
+	public function markAsRead(string $accessToken, string $messageId): void
+	{
+		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId);
+		$this->patch($accessToken, $url, ['isRead' => true]);
+	}
+
+	public function moveToFolder(string $accessToken, string $messageId, string $folderId): void
+	{
+		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId) . '/move';
+		$this->postJson($accessToken, $url, ['destinationId' => $folderId]);
+	}
+
+	public function deleteMessage(string $accessToken, string $messageId): void
+	{
+		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId);
+		$this->del($accessToken, $url);
+	}
+
 	public function getMe(string $accessToken): array
 	{
 		return $this->get($accessToken, self::GRAPH_BASE . '/me');
@@ -205,6 +223,48 @@ final class GraphClient
 
 		if ($status < 200 || $status >= 300) {
 			throw new RuntimeException("Graph PATCH failed: {$status}");
+		}
+	}
+
+	private function postJson(string $accessToken, string $url, array $payload): void
+	{
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_POST           => true,
+			CURLOPT_POSTFIELDS     => json_encode($payload, JSON_THROW_ON_ERROR),
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => 15,
+			CURLOPT_HTTPHEADER     => [
+				'Authorization: Bearer ' . $accessToken,
+				'Content-Type: application/json',
+			],
+		]);
+		curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		curl_close($ch);
+
+		if ($status < 200 || $status >= 300) {
+			throw new RuntimeException("Graph POST failed: {$status}");
+		}
+	}
+
+	private function del(string $accessToken, string $url): void
+	{
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_CUSTOMREQUEST  => 'DELETE',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => 15,
+			CURLOPT_HTTPHEADER     => [
+				'Authorization: Bearer ' . $accessToken,
+			],
+		]);
+		curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		curl_close($ch);
+
+		if ($status < 200 || $status >= 300) {
+			throw new RuntimeException("Graph DELETE failed: {$status}");
 		}
 	}
 }
