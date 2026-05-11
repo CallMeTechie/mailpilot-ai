@@ -204,6 +204,15 @@ input:focus, textarea:focus {
 	cursor: not-allowed;
 	opacity: 0.5;
 }
+.mp-icon-btn-primary {
+	background: var(--mp-primary, #2563eb);
+	border-color: var(--mp-primary, #2563eb);
+	color: #fff;
+}
+.mp-icon-btn-primary:hover {
+	background: var(--mp-primary-hover, #1d4ed8);
+	border-color: var(--mp-primary-hover, #1d4ed8);
+}
 .mp-icon-btn-danger { color: #dc2626; }
 .mp-icon-btn-danger:hover {
 	background: #fef2f2;
