@@ -169,43 +169,54 @@ function initBriefing() {
 				return;
 			}
 
-			// Plain browser popup — opens directly to the Microsoft authorize
-			// URL. window.open returns a Window we control, so popup.close()
-			// always succeeds. The taskpane polls /auth/oauth/exchange for
-			// the JWT independently, so the popup is purely a UI vessel.
+			// Office Dialog API — required from inside Office add-in iframes
+			// (window.open is blocked by the sandboxed iframe context).
+			// Initial URL must live inside the add-in's AppDomain, so we go
+			// through the wrapper page which window.location.replace()s to
+			// the Microsoft authorize URL.
 			//
-			// Why not Office.context.ui.displayDialogAsync any more: combined
-			// with pinning and multi-page OAuth navigation the dialog lost
-			// Office context, so messageParent() / dialog.close() became
-			// silent no-ops and the window stayed open until manual close.
-			const popup = window.open(
-				auth_url,
-				'mp-auth',
-				'width=420,height=620,resizable=yes,scrollbars=yes',
-			);
-			if (!popup) {
-				showError('Pop-up blockiert — bitte für diese Seite erlauben.');
-				return;
-			}
-
-			const startedAt = Date.now();
-			const pollInterval = setInterval(async () => {
-				if (Date.now() - startedAt > 5 * 60 * 1000) {
-					clearInterval(pollInterval);
-					return;
-				}
-				try {
-					const res = await api.auth.exchange(state);
-					if (res && res.token) {
-						clearInterval(pollInterval);
-						localStorage.setItem('mp_jwt', res.token);
-						setStatus('Angemeldet — lade Briefing…');
-						try { popup.close(); } catch (e) { /* ignore */ }
-						loadBriefing();
+			// The taskpane polls /auth/oauth/exchange independently — the
+			// JWT handoff does not depend on the dialog closing. Even if the
+			// dialog stays open after success (pinning-related Office bug),
+			// the briefing loads inside the taskpane.
+			const wrapper = `${window.location.origin}/addin/auth-redirect.html?ms=${encodeURIComponent(auth_url)}`;
+			Office.context.ui.displayDialogAsync(
+				wrapper,
+				{ width: 30, height: 50, displayInIframe: false },
+				(result) => {
+					if (result.status !== Office.AsyncResultStatus.Succeeded) {
+						showError('Login-Dialog konnte nicht geöffnet werden: ' + result.error.message);
+						return;
 					}
-					// 204 → request() returns null; loop continues.
-				} catch (_) { /* transient — retry */ }
-			}, 1000);
+					const dialog = result.value;
+
+					const startedAt = Date.now();
+					const pollInterval = setInterval(async () => {
+						if (Date.now() - startedAt > 5 * 60 * 1000) {
+							clearInterval(pollInterval);
+							return;
+						}
+						try {
+							const res = await api.auth.exchange(state);
+							if (res && res.token) {
+								clearInterval(pollInterval);
+								localStorage.setItem('mp_jwt', res.token);
+								setStatus('Angemeldet — lade Briefing…');
+								try { dialog.close(); } catch (e) { /* ignore */ }
+								loadBriefing();
+							}
+							// 204 → request() returns null; loop continues.
+						} catch (_) { /* transient — retry */ }
+					}, 1000);
+
+					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
+						clearInterval(pollInterval);
+						if (localStorage.getItem('mp_jwt') && !state.briefingLoaded) {
+							loadBriefing();
+						}
+					});
+				},
+			);
 		} catch (err) {
 			handleError(err);
 		}
