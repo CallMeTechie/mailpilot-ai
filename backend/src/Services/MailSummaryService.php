@@ -34,7 +34,10 @@ final class MailSummaryService
 		}
 
 		$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');
-		$body = $this->redactor->redact($body);
+		// Strip stray non-UTF-8 bytes before they reach the JSON encoder
+		// inside AnthropicClient — otherwise the encoder returns false and
+		// the API request goes out with an empty body.
+		$body = \MailPilot\Util\Utf8::sanitize($this->redactor->redact($body));
 
 		$system = <<<TXT
 Du fasst eine E-Mail für {$userEmail} zusammen. Deine Zusammenfassung ersetzt
@@ -52,12 +55,12 @@ TXT;
 			. "Subject: {$mail['subject']}\n"
 			. "---\n" . $body;
 
+		// Claude 4.x rejects "temperature" with HTTP 400.
 		$resp = $this->claude->messages([
-			'model'       => $this->model,
-			'max_tokens'  => 400,
-			'temperature' => 0.2,
-			'system'      => $system,
-			'messages'    => [['role' => 'user', 'content' => $user]],
+			'model'      => $this->model,
+			'max_tokens' => 400,
+			'system'     => $system,
+			'messages'   => [['role' => 'user', 'content' => $user]],
 		]);
 
 		$text = ClaudeClient::extractText($resp);

@@ -28,7 +28,13 @@ final class ReplyDraftService
 			throw new \RuntimeException('mail_not_found');
 		}
 
-		$body = $this->redactor->redact((string)($mail['body_text'] ?? ''));
+		// Sanitise before inlining into the prompt — invalid UTF-8 inside
+		// $body propagates to AnthropicClient → json_encode → false →
+		// empty HTTP payload → Claude returns nothing → draft = "" and the
+		// add-in then renders the literal string "undefined".
+		$body = \MailPilot\Util\Utf8::sanitize(
+			$this->redactor->redact((string)($mail['body_text'] ?? '')),
+		);
 
 		$system = <<<TXT
 Du entwirfst eine Antwort auf eine E-Mail. Der Nutzer reviewt und sendet selbst.
@@ -49,12 +55,13 @@ TXT;
 		$user = "ORIGINAL_MAIL:\nFrom: {$mail['from_name']} <{$mail['from_email']}>\n"
 			. "Subject: {$mail['subject']}\n---\n{$body}{$instr}\n\nEntwirf die Antwort.";
 
+		// Claude 4.x rejects "temperature" — let the model default. The
+		// system prompt already pins the response style.
 		$resp = $this->claude->messages([
-			'model'       => $this->model,
-			'max_tokens'  => 800,
-			'temperature' => 0.4,
-			'system'      => $system,
-			'messages'    => [['role' => 'user', 'content' => $user]],
+			'model'      => $this->model,
+			'max_tokens' => 800,
+			'system'     => $system,
+			'messages'   => [['role' => 'user', 'content' => $user]],
 		]);
 
 		$draft = ClaudeClient::extractText($resp);

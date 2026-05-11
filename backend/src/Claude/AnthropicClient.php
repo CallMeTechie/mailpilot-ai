@@ -68,9 +68,15 @@ final class AnthropicClient implements ClaudeProvider
 				continue;
 			}
 
+			$snippet = is_string($response) ? substr($response, 0, 400) : '';
+			$this->logger->error('claude.anthropic.error', [
+				'status'   => $status,
+				'curl_err' => $err,
+				'body'     => $snippet,
+			]);
 			throw new RuntimeException(sprintf(
-				'Anthropic API failed: status=%d attempt=%d curlErr=%s',
-				$status, $attempt, $err ?: 'none',
+				'Anthropic API failed: status=%d attempt=%d curlErr=%s body=%s',
+				$status, $attempt, $err ?: 'none', $snippet,
 			));
 		}
 	}

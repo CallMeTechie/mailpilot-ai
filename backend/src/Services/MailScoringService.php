@@ -133,12 +133,22 @@ final class MailScoringService
 		$system = $this->buildSystemPrompt();
 		$user   = $this->buildUserPrompt($userProfile, $redacted);
 
+		// Output sizes scale linearly with batch — empirically ~140 tokens
+		// per mail for the JSON result line. Add 400 tokens of slack for
+		// the opening/closing JSON scaffold so the response never hits the
+		// hard cap mid-object (which would yield unparseable JSON and lose
+		// the whole batch).
+		$maxTokens = max(2000, count($mails) * 160 + 400);
+
+		// temperature was 0.1 — Claude 4.x rejects the parameter as
+		// deprecated and returns HTTP 400. Default sampling is fine for
+		// scoring; the system prompt is strict enough to suppress
+		// variance.
 		$response = $this->claude->messages([
-			'model'       => $this->model,
-			'max_tokens'  => 2000,
-			'temperature' => 0.1,
-			'system'      => $system,
-			'messages'    => [['role' => 'user', 'content' => $user]],
+			'model'      => $this->model,
+			'max_tokens' => $maxTokens,
+			'system'     => $system,
+			'messages'   => [['role' => 'user', 'content' => $user]],
 		]);
 
 		$text = ClaudeClient::extractText($response);
@@ -192,7 +202,14 @@ TXT;
 	{
 		$vip = implode(', ', $userProfile['vip_senders'] ?? []);
 		$kw  = implode(', ', $userProfile['project_keywords'] ?? []);
-		$mailsJson = json_encode($mails, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		// Repository layer already sanitises, but defend against any stray
+		// non-UTF-8 byte from cached rows or hand-imported data — without
+		// JSON_INVALID_UTF8_SUBSTITUTE, json_encode returns false for the
+		// whole batch and Claude gets an empty mail list.
+		$mailsJson = json_encode(
+			$mails,
+			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
+		);
 
 		return <<<TXT
 USER_PROFILE:

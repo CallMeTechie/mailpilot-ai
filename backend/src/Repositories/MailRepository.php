@@ -92,6 +92,11 @@ final class MailRepository
 			if (strlen($bodyText) > self::MAX_BODY_BYTES) {
 				$bodyText = substr($bodyText, 0, self::MAX_BODY_BYTES);
 			}
+			// Graph occasionally returns bodies with stray non-UTF-8 bytes
+			// (Windows-1252 punctuation, embedded PDF fragments). Storing
+			// raw is fine; passing to json_encode later kills the whole
+			// batch with JSON_ERROR_UTF8. Strip them at the boundary.
+			$bodyText = \MailPilot\Util\Utf8::sanitize($bodyText);
 		}
 
 		$receivedAt = isset($msg['receivedDateTime'])
@@ -121,12 +126,12 @@ final class MailRepository
 			':msid' => (string)($msg['id'] ?? ''),
 			':cid'  => (string)($msg['conversationId'] ?? ''),
 			':imid' => (string)($msg['internetMessageId'] ?? ''),
-			':fe'   => $fromEmail,
-			':fn'   => $fromName,
-			':toj'  => json_encode($to, JSON_UNESCAPED_UNICODE),
-			':ccj'  => json_encode($cc, JSON_UNESCAPED_UNICODE),
-			':sub'  => substr((string)($msg['subject'] ?? ''), 0, 500),
-			':prev' => substr((string)($msg['bodyPreview'] ?? ''), 0, 500),
+			':fe'   => \MailPilot\Util\Utf8::sanitize($fromEmail),
+			':fn'   => \MailPilot\Util\Utf8::sanitize($fromName),
+			':toj'  => json_encode($to, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+			':ccj'  => json_encode($cc, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+			':sub'  => \MailPilot\Util\Utf8::sanitize(substr((string)($msg['subject'] ?? ''), 0, 500)),
+			':prev' => \MailPilot\Util\Utf8::sanitize(substr((string)($msg['bodyPreview'] ?? ''), 0, 500)),
 			':body' => $bodyText,
 			':att'  => (int)(bool)($msg['hasAttachments'] ?? false),
 			':rep'  => str_starts_with((string)($msg['subject'] ?? ''), 'Re:') ? 1 : 0,
