@@ -16,12 +16,41 @@ const state = {
 };
 
 // Available bulk actions. `confirm` requires a user confirm() before running.
+// `icon` is an inline SVG (feather-style stroke) shown on the icon button.
 const BULK_ACTIONS = {
-	'mark-read': { label: 'Alle als gelesen markieren', confirm: false, kind: 'secondary' },
-	'archive':   { label: 'Alle archivieren',           confirm: true,  kind: 'secondary' },
-	'delete':    { label: 'Alle löschen (Papierkorb)',  confirm: true,  kind: 'danger'    },
-	'hide':      { label: 'Aus MailPilot ausblenden',   confirm: false, kind: 'ghost'     },
+	'mark-read': {
+		label: 'Alle als gelesen markieren',
+		icon:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8 6 8-6"/><rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="9 13 11 15 15 11"/></svg>',
+		confirm: false,
+		kind: 'secondary',
+	},
+	'archive': {
+		label: 'Alle archivieren',
+		icon:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v11h16V9"/><path d="M10 13h4"/></svg>',
+		confirm: true,
+		kind: 'secondary',
+	},
+	'delete': {
+		label: 'Alle löschen (Papierkorb)',
+		icon:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>',
+		confirm: true,
+		kind: 'danger',
+	},
+	'hide': {
+		label: 'Aus MailPilot ausblenden',
+		icon:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7c2 0 3.6.6 5 1.5"/><path d="M22 12s-4 7-10 7c-2 0-3.6-.6-5-1.5"/><path d="M3 3l18 18"/></svg>',
+		confirm: false,
+		kind: 'ghost',
+	},
 };
+
+function buildIconElement(svgString) {
+	// SVG content is static (no user data) — but we still parse via
+	// DOMParser to avoid touching innerHTML.
+	const parser = new DOMParser();
+	const doc = parser.parseFromString(svgString, 'image/svg+xml');
+	return document.importNode(doc.documentElement, true);
+}
 
 // Label-specific hint copy + which bulk actions to show in the filter view.
 // Direct/Action mails are intentionally action-free here — too important for
@@ -360,7 +389,7 @@ async function openFilteredList(label) {
 	listEl.replaceChildren();
 	document.getElementById('filter-empty').dataset.hidden = 'true';
 
-	// Render bulk-action buttons for this label.
+	// Render bulk-action icon buttons for this label.
 	const bulkContainer = document.getElementById('filter-bulk-actions');
 	bulkContainer.replaceChildren();
 	(meta.actions ?? []).forEach((action) => {
@@ -368,8 +397,11 @@ async function openFilteredList(label) {
 		if (!spec) return;
 		const btn = document.createElement('button');
 		btn.type = 'button';
-		btn.className = `mp-btn mp-btn-${spec.kind}`;
-		btn.textContent = spec.label;
+		btn.className = `mp-icon-btn mp-icon-btn-${spec.kind}`;
+		btn.setAttribute('aria-label', spec.label);
+		btn.title = spec.label;
+		btn.dataset.action = action;
+		btn.appendChild(buildIconElement(spec.icon));
 		btn.addEventListener('click', () => runBulkAction(action, label));
 		bulkContainer.appendChild(btn);
 	});
@@ -405,10 +437,29 @@ async function runBulkAction(action, label) {
 	if (spec.confirm && !window.confirm(`${spec.label} — wirklich für alle gefilterten Mails ausführen?`)) {
 		return;
 	}
-	const sinceUtc = filterSinceUtc();
+
+	// Lock all bulk buttons + show progress immediately so the user sees
+	// that the click registered. Per-Mail Graph calls take ~200 ms each;
+	// a batch of 30+ mails can run several seconds.
+	const bulkButtons = document.querySelectorAll('#filter-bulk-actions .mp-icon-btn');
+	bulkButtons.forEach((b) => {
+		b.disabled = true;
+		b.classList.add('is-running');
+	});
+	const visibleCount = document.getElementById('filter-mail-list').children.length;
+	const startToastId = showToast(
+		visibleCount > 0
+			? `${spec.label} — ${visibleCount} Mails werden verarbeitet…`
+			: `${spec.label}…`,
+		'info',
+		20000,
+	);
 	setStatus(`${spec.label}…`);
+
+	const sinceUtc = filterSinceUtc();
 	try {
 		const res = await api.mails.bulkAction(action, label, sinceUtc);
+		dismissToast(startToastId);
 		const failed = res?.failed?.length ?? 0;
 		const ok = res?.processed ?? 0;
 		if (failed > 0) {
@@ -419,8 +470,13 @@ async function runBulkAction(action, label) {
 		await reloadFilterList(label);
 		state.briefingLoaded = false;
 	} catch (err) {
+		dismissToast(startToastId);
 		handleError(err);
 	} finally {
+		bulkButtons.forEach((b) => {
+			b.disabled = false;
+			b.classList.remove('is-running');
+		});
 		setStatus('Bereit');
 	}
 }
@@ -747,17 +803,26 @@ function handleError(err) {
 // Toast notifications — non-blocking, layered, auto-dismiss.
 // Replaces status-text overwrites for transient messages.
 // ============================================================
+let toastSeq = 0;
 function showToast(message, kind = 'info', durationMs = 4000) {
 	const stack = document.getElementById('mp-toast-stack');
-	if (!stack) return;
+	if (!stack) return null;
+	const id = `mp-toast-${++toastSeq}`;
 	const toast = document.createElement('div');
+	toast.id = id;
 	toast.className = `mp-toast mp-toast-${kind}`;
 	toast.textContent = String(message ?? '');
 	stack.appendChild(toast);
-	setTimeout(() => {
-		toast.classList.add('is-leaving');
-		toast.addEventListener('animationend', () => toast.remove(), { once: true });
-	}, durationMs);
+	setTimeout(() => dismissToast(id), durationMs);
+	return id;
+}
+
+function dismissToast(id) {
+	if (!id) return;
+	const toast = document.getElementById(id);
+	if (!toast || toast.classList.contains('is-leaving')) return;
+	toast.classList.add('is-leaving');
+	toast.addEventListener('animationend', () => toast.remove(), { once: true });
 }
 
 function escape(s) {
