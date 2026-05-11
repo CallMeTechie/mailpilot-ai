@@ -198,8 +198,12 @@ function initBriefing() {
 								clearInterval(pollInterval);
 								localStorage.setItem('mp_jwt', res.token);
 								setStatus('Angemeldet — lade Briefing…');
-								loadBriefing();
+								// Close dialog first; defer briefing load until Office
+								// has settled the dialog teardown. With pinning enabled
+								// the dialog/parent state machine is touchier, so we
+								// don't race a fetch against the close transition.
 								try { dialog.close(); } catch (e) { /* ignore */ }
+								setTimeout(() => loadBriefing(), 150);
 							}
 							// 204 → request() returns null; loop continues.
 						} catch (_) { /* transient — retry */ }
@@ -207,6 +211,12 @@ function initBriefing() {
 
 					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
 						clearInterval(pollInterval);
+						// Belt-and-suspenders: if the dialog closed (user-driven or
+						// Office-driven) and we have a token, kick the briefing
+						// load in case the polling success path raced.
+						if (localStorage.getItem('mp_jwt') && !state.briefingLoaded) {
+							loadBriefing();
+						}
 					});
 				},
 			);
@@ -228,6 +238,7 @@ async function loadBriefing() {
 		renderBriefing(data);
 		toggle('briefing-content', true);
 		state.briefingLoaded = true;
+		setStatus('Bereit');
 	} catch (err) {
 		if (err instanceof ApiError && err.code === 'MAILBOX_NOT_CONNECTED') {
 			toggle('briefing-empty', true);
