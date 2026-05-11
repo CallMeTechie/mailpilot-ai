@@ -45,11 +45,12 @@ const BULK_ACTIONS = {
 };
 
 function buildIconElement(svgString) {
-	// SVG content is static (no user data) — but we still parse via
-	// DOMParser to avoid touching innerHTML.
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(svgString, 'image/svg+xml');
-	return document.importNode(doc.documentElement, true);
+	// SVG content is static (defined in BULK_ACTIONS, not user input).
+	// DOMParser('image/svg+xml') is flaky in some Office WebView2
+	// contexts — <template> parsing is reliable across hosts.
+	const tpl = document.createElement('template');
+	tpl.innerHTML = svgString.trim();
+	return tpl.content.firstElementChild;
 }
 
 // Label-specific hint copy + which bulk actions to show in the filter view.
