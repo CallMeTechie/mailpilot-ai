@@ -138,12 +138,22 @@ function initTabs() {
 // ============================================================
 function initBriefing() {
 	document.getElementById('btn-sync').addEventListener('click', async () => {
-		setStatus('Synchronisiere…');
+		setStatus('Sync gestartet…');
+		toggle('sync-progress', true);
+		setSyncProgress(0, 0);
 		try {
-			await api.sync.trigger();
-			await loadBriefing();
-			setStatus('Aktualisiert');
+			const res = await api.sync.trigger();
+			const jobId = Array.isArray(res?.job_ids) ? res.job_ids[0] : null;
+			if (!jobId) {
+				// No mailbox or no job created — just refresh briefing.
+				toggle('sync-progress', false);
+				await loadBriefing();
+				setStatus('Bereit');
+				return;
+			}
+			pollSyncStatus(jobId);
 		} catch (err) {
+			toggle('sync-progress', false);
 			handleError(err);
 		}
 	});
@@ -250,6 +260,53 @@ async function loadBriefing() {
 	} finally {
 		toggle('briefing-loader', false);
 	}
+}
+
+// ============================================================
+// Sync progress — runs while a sync job is in flight. Polls
+// /api/v1/sync/status/<id> every 2s, updates the bar, and reloads
+// the briefing when the worker finishes.
+// ============================================================
+function setSyncProgress(processed, total) {
+	const fill = document.getElementById('sync-progress-fill');
+	const text = document.getElementById('sync-progress-text');
+	if (!fill || !text) return;
+	const p = Math.max(0, Number(processed) || 0);
+	const t = Math.max(0, Number(total) || 0);
+	const pct = t > 0 ? Math.min(100, (p / t) * 100) : 0;
+	fill.style.width = pct.toFixed(1) + '%';
+	text.textContent = t > 0 ? `${p} / ${t}` : 'wird vorbereitet…';
+}
+
+function pollSyncStatus(jobId) {
+	const startedAt = Date.now();
+	const POLL_MS = 2000;
+	const MAX_MS = 10 * 60 * 1000;   // 10 minutes hard cap
+
+	const timer = setInterval(async () => {
+		if (Date.now() - startedAt > MAX_MS) {
+			clearInterval(timer);
+			toggle('sync-progress', false);
+			showToast('Sync läuft länger als 10 min — bitte später erneut prüfen.', 'info', 4000);
+			return;
+		}
+		try {
+			const status = await api.sync.status(jobId);
+			setSyncProgress(status.processed, status.total);
+			if (status.status === 'done') {
+				clearInterval(timer);
+				toggle('sync-progress', false);
+				showToast('Sync abgeschlossen', 'success', 2000);
+				await loadBriefing();
+				setStatus('Bereit');
+			} else if (status.status === 'error') {
+				clearInterval(timer);
+				toggle('sync-progress', false);
+				showToast('Sync fehlgeschlagen: ' + (status.error_text || 'unbekannt'), 'error', 6000);
+				setStatus('Sync-Fehler');
+			}
+		} catch (_) { /* transient — retry */ }
+	}, POLL_MS);
 }
 
 // ============================================================

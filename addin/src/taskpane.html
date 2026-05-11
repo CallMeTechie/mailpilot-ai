@@ -38,6 +38,15 @@
 						<p id="briefing-subtitle" class="mp-muted"></p>
 					</div>
 
+					<!-- Sync progress (shown while a sync job is running) -->
+					<div id="sync-progress" class="mp-sync-progress" data-hidden="true" role="status" aria-live="polite">
+						<div class="mp-sync-progress-row">
+							<span class="mp-sync-progress-label">Synchronisiere…</span>
+							<span class="mp-sync-progress-text" id="sync-progress-text">wird vorbereitet…</span>
+						</div>
+						<div class="mp-progress-bar"><div class="mp-progress-fill" id="sync-progress-fill" style="width: 0%"></div></div>
+					</div>
+
 					<div class="mp-counters">
 						<button type="button" class="mp-counter" data-label="direct" aria-label="Direkte Mails anzeigen">
 							<div class="mp-counter-dot" style="background:#ef4444"></div>
