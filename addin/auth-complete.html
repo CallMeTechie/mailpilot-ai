@@ -10,6 +10,7 @@
 	<main class="mp-main" style="text-align:center; padding:60px 20px;">
 		<h1>✓ Angemeldet</h1>
 		<p class="mp-muted" id="status">Anmeldung wird verarbeitet…</p>
+		<button id="btn-close" type="button" class="mp-btn mp-btn-primary" style="margin-top:20px; display:none;">Fenster schließen</button>
 	</main>
 
 	<script>
@@ -18,46 +19,46 @@
 		const params = new URLSearchParams(fragment);
 		const token = params.get('token');
 
+		function tryCloseDialog() {
+			// Path A — Office Dialog API messageParent (auto-closes the dialog).
+			try {
+				if (typeof Office !== 'undefined' && Office.context && Office.context.ui && typeof Office.context.ui.messageParent === 'function') {
+					Office.context.ui.messageParent(JSON.stringify({ type: 'mp-auth-complete', token: token }));
+					return;
+				}
+			} catch (e) { /* ignore */ }
+			// Path B — window.close(). Browsers allow this only on user-gesture
+			// or for script-opened windows. With pinned Office dialogs Path A
+			// is unreliable, so the visible click button gives the user an out.
+			try { window.close(); } catch (e) { /* ignore */ }
+		}
+
 		if (token) {
 			document.getElementById('status').textContent = 'Du kannst dieses Fenster schließen. MailPilot ist jetzt aktiv.';
 
-			// Try every handoff path simultaneously — whichever one the host
-			// actually delivers wins; the others become no-ops because the
-			// taskpane only acts on the first valid token it sees.
-
-			// Path 1 — direct localStorage in same origin: the taskpane reads
-			// it on Office.onReady AND on DialogEventReceived, so even
-			// storage-partitioned dialogs that share the underlying origin
-			// can pick this up after the dialog closes.
+			// Storage handoff — taskpane reads these even if auto-close fails.
 			try { localStorage.setItem('mp_jwt', token); } catch (e) { /* ignore */ }
-
-			// Path 2 — handoff slot, fires the `storage` event in other tabs
-			// of the same origin (works when dialog runs as a real popup).
 			try {
 				localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
 			} catch (e) { /* ignore */ }
 
-			// Path 3 — Office Dialog API messageParent (cleanest when the
-			// dialog runs inside Office's managed iframe).
-			try {
-				if (typeof Office !== 'undefined' && Office.context && Office.context.ui && typeof Office.context.ui.messageParent === 'function') {
-					Office.onReady(function () {
-						try {
-							Office.context.ui.messageParent(JSON.stringify({ type: 'mp-auth-complete', token: token }));
-						} catch (e) { /* ignore */ }
-					});
-				}
-			} catch (e) { /* ignore */ }
-
-			// Path 4 — postMessage to window.opener (legacy popup flow,
-			// often killed by Cross-Origin-Opener-Policy but free to try).
 			if (window.opener && !window.opener.closed) {
 				try {
 					window.opener.postMessage({ type: 'mp-auth-complete', token: token }, window.location.origin);
 				} catch (e) { /* ignore */ }
 			}
 
-			setTimeout(function () { try { window.close(); } catch (e) { /* ignore */ } }, 1500);
+			// Show the manual close button as an escape hatch.
+			const closeBtn = document.getElementById('btn-close');
+			closeBtn.style.display = 'inline-block';
+			closeBtn.addEventListener('click', tryCloseDialog);
+
+			// Auto-close: try Office.onReady's tryClose, plus delayed retries.
+			if (typeof Office !== 'undefined' && typeof Office.onReady === 'function') {
+				Office.onReady(function () { tryCloseDialog(); });
+			}
+			setTimeout(tryCloseDialog, 800);
+			setTimeout(tryCloseDialog, 2000);
 		} else {
 			document.getElementById('status').textContent = 'Anmeldung fehlgeschlagen.';
 		}
