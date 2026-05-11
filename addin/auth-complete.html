@@ -9,56 +9,32 @@
 <body>
 	<main class="mp-main" style="text-align:center; padding:60px 20px;">
 		<h1>✓ Angemeldet</h1>
-		<p class="mp-muted" id="status">Anmeldung wird verarbeitet…</p>
-		<button id="btn-close" type="button" class="mp-btn mp-btn-primary" style="margin-top:20px; display:none;">Fenster schließen</button>
+		<p class="mp-muted" id="status">Fenster wird automatisch geschlossen…</p>
 	</main>
 
 	<script>
-		// Token arrives in URL fragment — never logged, never sent to server
+		// Token arrives in URL fragment — never logged, never sent to server.
 		const fragment = window.location.hash.substring(1);
 		const params = new URLSearchParams(fragment);
 		const token = params.get('token');
 
-		function tryCloseDialog() {
-			// Path A — Office Dialog API messageParent (auto-closes the dialog).
-			try {
-				if (typeof Office !== 'undefined' && Office.context && Office.context.ui && typeof Office.context.ui.messageParent === 'function') {
-					Office.context.ui.messageParent(JSON.stringify({ type: 'mp-auth-complete', token: token }));
-					return;
-				}
-			} catch (e) { /* ignore */ }
-			// Path B — window.close(). Browsers allow this only on user-gesture
-			// or for script-opened windows. With pinned Office dialogs Path A
-			// is unreliable, so the visible click button gives the user an out.
-			try { window.close(); } catch (e) { /* ignore */ }
-		}
-
 		if (token) {
-			document.getElementById('status').textContent = 'Du kannst dieses Fenster schließen. MailPilot ist jetzt aktiv.';
-
-			// Storage handoff — taskpane reads these even if auto-close fails.
+			// Backup-Pfade für den Token-Handoff, falls die taskpane via
+			// localStorage-Storage-Event statt /auth/oauth/exchange handelt.
 			try { localStorage.setItem('mp_jwt', token); } catch (e) { /* ignore */ }
 			try {
 				localStorage.setItem('mp_jwt_handoff', JSON.stringify({ token: token, ts: Date.now() }));
 			} catch (e) { /* ignore */ }
-
 			if (window.opener && !window.opener.closed) {
 				try {
 					window.opener.postMessage({ type: 'mp-auth-complete', token: token }, window.location.origin);
 				} catch (e) { /* ignore */ }
 			}
 
-			// Show the manual close button as an escape hatch.
-			const closeBtn = document.getElementById('btn-close');
-			closeBtn.style.display = 'inline-block';
-			closeBtn.addEventListener('click', tryCloseDialog);
-
-			// Auto-close: try Office.onReady's tryClose, plus delayed retries.
-			if (typeof Office !== 'undefined' && typeof Office.onReady === 'function') {
-				Office.onReady(function () { tryCloseDialog(); });
-			}
-			setTimeout(tryCloseDialog, 800);
-			setTimeout(tryCloseDialog, 2000);
+			// Browser allows window.close() on script-opened popups (we were
+			// opened via window.open in the taskpane). Brief delay so the
+			// user sees the success message; then close.
+			setTimeout(function () { try { window.close(); } catch (e) { /* ignore */ } }, 500);
 		} else {
 			document.getElementById('status').textContent = 'Anmeldung fehlgeschlagen.';
 		}
