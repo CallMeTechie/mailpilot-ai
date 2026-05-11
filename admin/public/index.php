@@ -29,6 +29,13 @@ $kernel = new AdminKernel($config);
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+// The app lives under /admin, but bare-root requests (bookmarked domain,
+// reverse-proxy forwards) must not 404 — bounce them to /admin.
+if ($path === '/' || $path === '/index.php') {
+	header('Location: /admin');
+	exit;
+}
+
 // Public routes
 $publicRoutes = ['/admin/login', '/admin/logout'];
 
