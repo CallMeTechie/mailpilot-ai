@@ -192,7 +192,10 @@ async function loadBriefing() {
 		if (err instanceof ApiError && err.code === 'MAILBOX_NOT_CONNECTED') {
 			toggle('briefing-empty', true);
 		} else if (err instanceof ApiError && err.status === 401) {
+			// api.js already cleared the dead token. Show the login button
+			// and a discreet status hint so the user knows why.
 			toggle('briefing-empty', true);
+			setStatus('Bitte erneut anmelden');
 		} else {
 			handleError(err);
 		}
@@ -313,6 +316,14 @@ async function loadCurrentMailScore(msMessageId, attempt = 0) {
 		setTimeout(() => loadCurrentMailScore(msMessageId, attempt + 1), POLL_INTERVAL_MS);
 	} catch (err) {
 		toggle('current-loader', false);
+		if (err instanceof ApiError && err.status === 401) {
+			// Token was cleared by api.js — bounce to the briefing tab so the
+			// user finds the login button.
+			toggle('current-header', false);
+			toggle('current-empty', true);
+			document.querySelector('.mp-tab[data-tab="briefing"]')?.click();
+			return;
+		}
 		handleError(err);
 	}
 }

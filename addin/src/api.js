@@ -52,6 +52,13 @@ async function request(method, path, body = null) {
 	const data = await res.json().catch(() => ({}));
 
 	if (!res.ok) {
+		// Poisoned-token safety net: any 401 means the cached JWT is no
+		// longer valid (expired, signed with a rotated secret, revoked).
+		// Drop it so the next request triggers the login flow cleanly
+		// instead of looping through 401s with the same dead token.
+		if (res.status === 401) {
+			clearToken();
+		}
 		const err = data.error ?? {};
 		throw new ApiError(
 			err.message ?? `HTTP ${res.status}`,
