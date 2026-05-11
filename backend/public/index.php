@@ -22,6 +22,7 @@ $router->get ('/api/v1/health',                  'HealthController@health');
 
 $router->post('/api/v1/auth/oauth/start',        'AuthController@oauthStart');
 $router->get ('/api/v1/auth/oauth/callback',     'AuthController@oauthCallback');
+$router->get ('/api/v1/auth/oauth/exchange',     'AuthController@oauthExchange');
 $router->post('/api/v1/auth/refresh',            'AuthController@refresh');
 
 $router->get ('/api/v1/briefing/today',          'BriefingController@today');

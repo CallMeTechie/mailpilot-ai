@@ -66,6 +66,7 @@ async function request(method, path, body = null) {
 export const api = {
 	auth: {
 		oauthStart:    ()      => request('POST', '/auth/oauth/start'),
+		exchange:      (state) => request('GET',  `/auth/oauth/exchange?state=${encodeURIComponent(state)}`),
 		refresh:       (t)     => request('POST', '/auth/refresh', { token: t }),
 	},
 	briefing: {

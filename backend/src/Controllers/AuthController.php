@@ -99,9 +99,54 @@ final class AuthController extends BaseController
 
 		$jwt = $this->kernel->get(JwtService::class)->issue($tenantId, $userId, $email);
 
+		// Park JWT under the oauth_states row keyed by `state` so the taskpane
+		// can fetch it via /auth/oauth/exchange. 5-minute TTL is enough — the
+		// taskpane polls every second after dialog open.
+		$pdo->prepare('UPDATE oauth_states
+			SET jwt = :j, jwt_expires_at = (UTC_TIMESTAMP(3) + INTERVAL 5 MINUTE)
+			WHERE state = :s')
+			->execute([':j' => $jwt['token'], ':s' => $state]);
+
 		$base = (string)$this->kernel->config['app']['base_url'];
+		// The fragment-token form is kept for clients that *can* read it
+		// (older browsers, dev-mode without storage partitioning). New flow
+		// works through /auth/oauth/exchange — the dialog page just needs
+		// to render the success state and close itself.
 		header('Location: ' . $base . '/addin/auth-complete.html#token=' . urlencode($jwt['token']));
 		http_response_code(302);
+	}
+
+	/**
+	 * Exchange the OAuth `state` (still in oauth_states) for the JWT the
+	 * callback just parked there. Single-use: row is deleted after the token
+	 * leaves the building.
+	 */
+	public function oauthExchange(array $params, array $body): void
+	{
+		$state = $_GET['state'] ?? null;
+		if (!is_string($state) || $state === '') {
+			throw HttpException::badRequest('VALIDATION', 'state fehlt');
+		}
+
+		$pdo  = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare('SELECT jwt, jwt_expires_at FROM oauth_states
+			WHERE state = :s
+			  AND jwt IS NOT NULL
+			  AND jwt_expires_at >= UTC_TIMESTAMP(3)');
+		$stmt->execute([':s' => $state]);
+		$row = $stmt->fetch();
+
+		if ($row === false) {
+			// Not ready yet (or never will be). Taskpane polls again.
+			http_response_code(204);
+			return;
+		}
+
+		// Single-use: invalidate immediately.
+		$pdo->prepare('DELETE FROM oauth_states WHERE state = :s')
+			->execute([':s' => $state]);
+
+		Response::json(['token' => (string)$row['jwt']]);
 	}
 
 	/**

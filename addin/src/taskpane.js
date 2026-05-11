@@ -121,11 +121,14 @@ function initBriefing() {
 	document.getElementById('btn-connect').addEventListener('click', async () => {
 		try {
 			const { auth_url } = await api.auth.oauthStart();
-			// Office Dialog API: initial URL must be inside the add-in's AppDomain,
-			// so we go through a wrapper on our own host that immediately redirects
-			// to Microsoft. After OAuth, the user lands on /addin/auth-complete.html
-			// which writes the token to localStorage directly (Path 1) — same
-			// origin guarantees visibility here.
+			// Pull the state UUID out of the Microsoft authorize URL —
+			// backend uses it as the handoff key for /auth/oauth/exchange.
+			const state = new URL(auth_url).searchParams.get('state');
+			if (!state) {
+				showError('OAuth-State fehlt — Login abgebrochen.');
+				return;
+			}
+
 			const wrapper = `${window.location.origin}/addin/auth-redirect.html?ms=${encodeURIComponent(auth_url)}`;
 			Office.context.ui.displayDialogAsync(
 				wrapper,
@@ -137,46 +140,33 @@ function initBriefing() {
 					}
 					const dialog = result.value;
 
-					// Active polling — Office Dialog events are unreliable on
-					// personal Outlook accounts; the dialog often refuses to
-					// close itself and DialogEventReceived never fires. Poll
-					// localStorage directly; the moment the token shows up,
-					// reload the briefing and force-close the dialog.
+					// Backend-mediated handoff — immune to browser storage
+					// partitioning (the dialog window and the taskpane iframe
+					// live in different top-level contexts on Outlook). The
+					// backend parks the JWT under the same state UUID Microsoft
+					// echoes back on the OAuth callback; the taskpane polls
+					// the exchange endpoint until the token is available.
 					const startedAt = Date.now();
-					const pollInterval = setInterval(() => {
-						const token = localStorage.getItem('mp_jwt');
-						if (token) {
-							clearInterval(pollInterval);
-							setStatus('Angemeldet — lade Briefing…');
-							loadBriefing();
-							try { dialog.close(); } catch (e) { /* ignore */ }
-							return;
-						}
-						// Cap at 5 minutes — prevents a forgotten interval if
-						// the user abandons the login flow.
+					const pollInterval = setInterval(async () => {
 						if (Date.now() - startedAt > 5 * 60 * 1000) {
 							clearInterval(pollInterval);
+							return;
 						}
-					}, 500);
-
-					dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
 						try {
-							const data = JSON.parse(arg.message);
-							if (data.type === 'mp-auth-complete' && data.token) {
-								localStorage.setItem('mp_jwt', data.token);
-								// pollInterval picks this up on the next tick
-								// and handles dialog.close() + loadBriefing().
+							const res = await api.auth.exchange(state);
+							if (res && res.token) {
+								clearInterval(pollInterval);
+								localStorage.setItem('mp_jwt', res.token);
+								setStatus('Angemeldet — lade Briefing…');
+								loadBriefing();
+								try { dialog.close(); } catch (e) { /* ignore */ }
 							}
-						} catch (_) { /* ignore malformed message */ }
-					});
+							// 204 → request() returns null; loop continues.
+						} catch (_) { /* transient — retry */ }
+					}, 1000);
 
 					dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
 						clearInterval(pollInterval);
-						consumeHandoff();
-						if (localStorage.getItem('mp_jwt')) {
-							setStatus('Angemeldet — lade Briefing…');
-							loadBriefing();
-						}
 					});
 				},
 			);
