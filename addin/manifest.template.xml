@@ -112,5 +112,67 @@
 				<bt:String id="Open.Tooltip" DefaultValue="MailPilot AI analysiert diese Mail und zeigt Relevanz, Zusammenfassung und Antwort-Vorschlag." />
 			</bt:LongStrings>
 		</Resources>
+
+		<!--
+			Nested V1.1 — clients that understand the V1.1 schema (Outlook 2016+
+			and Outlook on the web) use this block in preference to the outer
+			V1.0. Same content plus <SupportsPinning>true</…>, which enables the
+			pin icon in the taskpane header.
+		-->
+		<VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+			<Requirements>
+				<bt:Sets DefaultMinVersion="1.5">
+					<bt:Set Name="Mailbox" />
+				</bt:Sets>
+			</Requirements>
+			<Hosts>
+				<Host xsi:type="MailHost">
+					<DesktopFormFactor>
+						<ExtensionPoint xsi:type="MessageReadCommandSurface">
+							<OfficeTab id="TabDefault">
+								<Group id="mpGroup">
+									<Label resid="Group.Label" />
+									<Control xsi:type="Button" id="mpOpen">
+										<Label resid="Open.Label" />
+										<Supertip>
+											<Title resid="Open.Label" />
+											<Description resid="Open.Tooltip" />
+										</Supertip>
+										<Icon>
+											<bt:Image size="16" resid="Icon.16" />
+											<bt:Image size="32" resid="Icon.32" />
+											<bt:Image size="80" resid="Icon.80" />
+										</Icon>
+										<Action xsi:type="ShowTaskpane">
+											<SourceLocation resid="Taskpane.Url" />
+											<SupportsPinning>true</SupportsPinning>
+										</Action>
+									</Control>
+								</Group>
+							</OfficeTab>
+						</ExtensionPoint>
+					</DesktopFormFactor>
+				</Host>
+			</Hosts>
+
+			<Resources>
+				<bt:Images>
+					<bt:Image id="Icon.16" DefaultValue="__ADDIN_BASE_URL__/assets/icon-16.png" />
+					<bt:Image id="Icon.32" DefaultValue="__ADDIN_BASE_URL__/assets/icon-32.png" />
+					<bt:Image id="Icon.80" DefaultValue="__ADDIN_BASE_URL__/assets/icon-80.png" />
+				</bt:Images>
+				<bt:Urls>
+					<bt:Url id="Taskpane.Url" DefaultValue="__ADDIN_BASE_URL__/addin/taskpane.html" />
+					<bt:Url id="Commands.Url" DefaultValue="__ADDIN_BASE_URL__/addin/commands.html" />
+				</bt:Urls>
+				<bt:ShortStrings>
+					<bt:String id="Group.Label" DefaultValue="MailPilot" />
+					<bt:String id="Open.Label" DefaultValue="Triage öffnen" />
+				</bt:ShortStrings>
+				<bt:LongStrings>
+					<bt:String id="Open.Tooltip" DefaultValue="MailPilot AI analysiert diese Mail und zeigt Relevanz, Zusammenfassung und Antwort-Vorschlag." />
+				</bt:LongStrings>
+			</Resources>
+		</VersionOverrides>
 	</VersionOverrides>
 </OfficeApp>
