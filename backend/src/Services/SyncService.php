@@ -35,6 +35,7 @@ final class SyncService
 		private readonly ScoreRepository $scores,
 		private readonly MailScoringService $scoring,
 		private readonly TokenService $tokens,
+		private readonly AutoSortService $autoSort,
 		private readonly \Psr\Log\LoggerInterface $logger,
 	) {
 	}
@@ -66,6 +67,26 @@ final class SyncService
 		$scored   = $this->scoring->scoreBatch($tenantId, $userProfile, $unscored);
 
 		$this->pushCategories($accessToken, $scored);
+
+		// Per-user auto-sort. Worker-side scoring carries the user_id
+		// via $userProfile['user_id']; if it's missing (legacy callers)
+		// we skip moves entirely.
+		$autosortUserId = (string)($userProfile['user_id'] ?? '');
+		$moved = 0;
+		if ($autosortUserId !== '') {
+			foreach ($scored as $scoreRow) {
+				$mail = $this->mails->findById($tenantId, (string)$scoreRow['mail_id']);
+				if ($mail === null) continue;
+				$result = $this->autoSort->applyToScoredMail(
+					$accessToken,
+					$tenantId,
+					$autosortUserId,
+					$mail,
+					$scoreRow,
+				);
+				if (!empty($result['moved'])) $moved++;
+			}
+		}
 
 		$this->mailboxes->updateDeltaAndSyncAt($mailboxId, $deltaResult['delta']);
 

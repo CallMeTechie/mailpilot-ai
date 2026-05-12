@@ -20,6 +20,7 @@ use MailPilot\Repositories\SummaryRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
+use MailPilot\Services\AutoSortService;
 use MailPilot\Services\BudgetService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\MailScoringService;
@@ -106,6 +107,11 @@ class Kernel
 				$this->get(PricingRepository::class),
 				$this->get(Logger::class),
 			),
+			AutoSortService::class    => new AutoSortService(
+				$this->get(GraphClient::class),
+				$this->get(AutoSortRepository::class),
+				$this->get(Logger::class),
+			),
 			RedactionService::class   => new RedactionService(),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],
@@ -154,6 +160,7 @@ class Kernel
 				$this->get(ScoreRepository::class),
 				$this->get(MailScoringService::class),
 				$this->get(TokenService::class),
+				$this->get(AutoSortService::class),
 				$this->get(Logger::class),
 			),
 			default => throw new \RuntimeException("No factory for service: {$id}"),

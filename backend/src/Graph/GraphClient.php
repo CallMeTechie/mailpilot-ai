@@ -170,6 +170,53 @@ final class GraphClient
 		$this->del($accessToken, $url);
 	}
 
+	/**
+	 * Find a direct-child folder by display name, or null if missing.
+	 * parentId null searches the user's root mail folders; otherwise
+	 * inside the given parent.
+	 */
+	public function findChildFolderByName(string $accessToken, string $displayName, ?string $parentId = null): ?string
+	{
+		$base = $parentId === null
+			? self::GRAPH_BASE . '/me/mailFolders'
+			: self::GRAPH_BASE . '/me/mailFolders/' . rawurlencode($parentId) . '/childFolders';
+		$escaped = str_replace("'", "''", $displayName);
+		$url = $base . '?$select=id,displayName&$filter=' . rawurlencode("displayName eq '{$escaped}'") . '&$top=1';
+		$resp = $this->get($accessToken, $url);
+		return isset($resp['value'][0]['id']) ? (string)$resp['value'][0]['id'] : null;
+	}
+
+	public function createChildFolder(string $accessToken, string $displayName, ?string $parentId = null): string
+	{
+		$url = $parentId === null
+			? self::GRAPH_BASE . '/me/mailFolders'
+			: self::GRAPH_BASE . '/me/mailFolders/' . rawurlencode($parentId) . '/childFolders';
+		$resp = $this->postJson($accessToken, $url, ['displayName' => $displayName]);
+		if (!isset($resp['id'])) {
+			throw new \RuntimeException('Graph createFolder returned no id');
+		}
+		return (string)$resp['id'];
+	}
+
+	/**
+	 * Resolve a "/"-separated folder path like "MailPilot/Newsletter"
+	 * to a leaf folder id, creating any missing segments along the
+	 * way. Idempotent.
+	 */
+	public function ensureFolderPath(string $accessToken, string $path): string
+	{
+		$segments = array_values(array_filter(array_map('trim', explode('/', $path)), static fn(string $s): bool => $s !== ''));
+		if ($segments === []) {
+			throw new \InvalidArgumentException('empty folder path');
+		}
+		$parentId = null;
+		foreach ($segments as $name) {
+			$found = $this->findChildFolderByName($accessToken, $name, $parentId);
+			$parentId = $found ?? $this->createChildFolder($accessToken, $name, $parentId);
+		}
+		return (string)$parentId;
+	}
+
 	public function getMe(string $accessToken): array
 	{
 		return $this->get($accessToken, self::GRAPH_BASE . '/me');
