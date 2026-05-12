@@ -76,7 +76,10 @@ final class MailController extends BaseController
 	public function ensureScored(array $params, array $body): void
 	{
 		$ctx  = $this->requireAuth();
-		$msId = (string)($params['ms_message_id'] ?? '');
+		// Router doesn't decode path parameters — the encoded "=" at the
+		// end of every Graph REST id arrives as "%3D" and never matches
+		// the un-encoded ms_message_id stored in mails.
+		$msId = rawurldecode((string)($params['ms_message_id'] ?? ''));
 		if ($msId === '') {
 			throw HttpException::badRequest('VALIDATION', 'ms_message_id fehlt');
 		}
@@ -103,8 +106,15 @@ final class MailController extends BaseController
 			if ($graphMsg === null || $mbHit === null) {
 				throw HttpException::notFound('NOT_FOUND', 'Mail in Microsoft 365 nicht gefunden');
 			}
-			$mailId = $mailRepo->upsertFromGraph($ctx['tenant_id'], (string)$mbHit['id'], $graphMsg);
-			$mail = $mailRepo->findById($ctx['tenant_id'], $mailId);
+			$mailRepo->upsertFromGraph($ctx['tenant_id'], (string)$mbHit['id'], $graphMsg);
+			// upsertFromGraph mints a fresh UUID for the INSERT and
+			// returns it — but ON DUPLICATE KEY UPDATE keeps the
+			// existing row's id, so the returned UUID won't match.
+			// Look the row back up by its stable Graph id instead.
+			$mail = $mailRepo->findByMsMessageId($ctx['tenant_id'], $msId);
+			if ($mail === null) {
+				throw HttpException::notFound('NOT_FOUND', 'Mail konnte nach Import nicht geladen werden');
+			}
 		}
 
 		$pdo = $this->kernel->get(\PDO::class);
