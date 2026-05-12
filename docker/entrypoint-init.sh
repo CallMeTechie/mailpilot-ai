@@ -8,6 +8,17 @@
 # When RUN_INIT_TASKS=0 (worker, admin), only runs exec "$@".
 set -e
 
+# Monolog points at config/../../var/log/app.log which resolves to
+# /var/log/app.log — root-owned in the base image, so the first
+# php-fpm worker (www-data) cannot create the file and every logger
+# call throws "Permission denied" while masking the real error.
+# Pre-create the file with the right owner so every fresh container
+# has a writable log destination. Idempotent.
+mkdir -p /var/log
+: > /var/log/app.log 2>/dev/null || true
+chown www-data:www-data /var/log/app.log 2>/dev/null || true
+chmod 0664 /var/log/app.log 2>/dev/null || true
+
 if [ "${RUN_INIT_TASKS:-0}" = "1" ]; then
 	if [ -z "${DB_ROOT_PASS:-}" ]; then
 		echo "[entrypoint-init] ERROR: RUN_INIT_TASKS=1 but DB_ROOT_PASS is empty" >&2
