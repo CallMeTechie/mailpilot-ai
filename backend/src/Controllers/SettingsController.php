@@ -5,6 +5,7 @@ namespace MailPilot\Controllers;
 
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
+use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
@@ -84,5 +85,47 @@ final class SettingsController extends BaseController
 		$desc = isset($body['description']) ? (string)$body['description'] : null;
 		$id = $this->kernel->get(RedactionRepository::class)->add($ctx['tenant_id'], $ctx['user_id'], $pattern, $desc);
 		Response::json(['id' => $id, 'pattern' => $pattern, 'description' => $desc], 201);
+	}
+
+	public function listAutoSort(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$rules = $this->kernel->get(AutoSortRepository::class)
+			->listForUser($ctx['tenant_id'], $ctx['user_id']);
+		Response::json(['rules' => $rules]);
+	}
+
+	/**
+	 * Body: {"rules": [{"label": "newsletter", "enabled": true, "folder_name": "MailPilot/Newsletter"}, …]}
+	 * Accepts any subset; missing labels stay as-is.
+	 */
+	public function updateAutoSort(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$rules = $body['rules'] ?? null;
+		if (!is_array($rules)) {
+			throw HttpException::badRequest('VALIDATION', 'rules array fehlt');
+		}
+		$repo = $this->kernel->get(AutoSortRepository::class);
+		$count = 0;
+		foreach ($rules as $r) {
+			if (!is_array($r) || !isset($r['label'])) continue;
+			$label = (string)$r['label'];
+			if (!in_array($label, AutoSortRepository::LABELS, true)) {
+				throw HttpException::badRequest('VALIDATION', "Unbekanntes Label: {$label}");
+			}
+			$repo->upsert(
+				$ctx['tenant_id'],
+				$ctx['user_id'],
+				$label,
+				(bool)($r['enabled'] ?? false),
+				(string)($r['folder_name'] ?? ''),
+			);
+			$count++;
+		}
+		Response::json([
+			'updated' => $count,
+			'rules'   => $repo->listForUser($ctx['tenant_id'], $ctx['user_id']),
+		]);
 	}
 }

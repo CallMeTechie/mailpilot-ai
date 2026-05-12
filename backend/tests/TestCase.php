@@ -58,7 +58,9 @@ abstract class TestCase extends BaseTestCase
 			// 0005_token_budgets_and_usage — keep system_settings and
 			// model_pricing untouched (they hold seeded defaults the
 			// BudgetService relies on); only the per-call ledgers reset.
-			'api_usage','usage_daily'];
+			'api_usage','usage_daily',
+			// 0006_auto_sort_rules — per-user, no seeded defaults; safe to truncate
+			'auto_sort_rules'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

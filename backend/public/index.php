@@ -44,6 +44,8 @@ $router->post('/api/v1/settings/vip',            'SettingsController@addVip');
 $router->delete('/api/v1/settings/vip/{id}',     'SettingsController@deleteVip');
 $router->get ('/api/v1/settings/redaction',      'SettingsController@listRedaction');
 $router->post('/api/v1/settings/redaction',      'SettingsController@addRedaction');
+$router->get ('/api/v1/settings/auto-sort',      'SettingsController@listAutoSort');
+$router->patch('/api/v1/settings/auto-sort',     'SettingsController@updateAutoSort');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

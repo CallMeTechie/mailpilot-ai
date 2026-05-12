@@ -7,6 +7,7 @@ use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Claude\ProviderFactory;
 use MailPilot\Graph\GraphClient;
+use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
@@ -95,6 +96,7 @@ class Kernel
 				$this->get(PDO::class),
 				(int)$this->config['limits']['cache_ttl_days'],
 			),
+			AutoSortRepository::class => new AutoSortRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
 			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
