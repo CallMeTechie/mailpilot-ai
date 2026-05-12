@@ -62,7 +62,9 @@ abstract class TestCase extends BaseTestCase
 			// 0006_auto_sort_rules — per-user, no seeded defaults; safe to truncate
 			'auto_sort_rules',
 			// 0007_mail_score_corrections — per-mail corrections
-			'mail_score_corrections'];
+			'mail_score_corrections',
+			// 0009_sub_labels — per-user free-form sub labels
+			'user_sublabels'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

@@ -8,6 +8,7 @@ use MailPilot\Http\Response;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\RedactionRepository;
+use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
 use MailPilot\Services\AutoSortService;
@@ -226,5 +227,71 @@ final class SettingsController extends BaseController
 			'errors'    => $errors,
 			'has_more'  => $hasMore,
 		]);
+	}
+
+	public function listSubLabels(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$items = $this->kernel->get(SubLabelRepository::class)
+			->listForUser($ctx['tenant_id'], $ctx['user_id']);
+		Response::json(['items' => $items]);
+	}
+
+	public function addSubLabel(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$parent = (string)($body['parent'] ?? '');
+		$name   = (string)($body['name']   ?? '');
+		if ($name === '' || $parent === '') {
+			throw HttpException::badRequest('VALIDATION', 'parent + name required');
+		}
+		try {
+			$id = $this->kernel->get(SubLabelRepository::class)->create(
+				$ctx['tenant_id'],
+				$ctx['user_id'],
+				$parent,
+				$name,
+				isset($body['description']) ? (string)$body['description'] : null,
+				isset($body['color']) ? (string)$body['color'] : null,
+			);
+		} catch (\InvalidArgumentException $e) {
+			throw HttpException::badRequest('VALIDATION', $e->getMessage());
+		}
+		Response::json(['id' => $id, 'parent' => $parent, 'name' => $name], 201);
+	}
+
+	public function updateSubLabel(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$id   = (string)($params['id'] ?? '');
+		$name = (string)($body['name'] ?? '');
+		try {
+			$ok = $this->kernel->get(SubLabelRepository::class)->update(
+				$ctx['tenant_id'],
+				$ctx['user_id'],
+				$id,
+				$name,
+				isset($body['description']) ? (string)$body['description'] : null,
+				isset($body['color']) ? (string)$body['color'] : null,
+			);
+		} catch (\InvalidArgumentException $e) {
+			throw HttpException::badRequest('VALIDATION', $e->getMessage());
+		}
+		if (!$ok) {
+			throw HttpException::notFound('NOT_FOUND', 'Sub-Label nicht gefunden');
+		}
+		Response::json(['ok' => true]);
+	}
+
+	public function deleteSubLabel(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$id  = (string)($params['id'] ?? '');
+		$ok  = $this->kernel->get(SubLabelRepository::class)
+			->delete($ctx['tenant_id'], $ctx['user_id'], $id);
+		if (!$ok) {
+			throw HttpException::notFound('NOT_FOUND', 'Sub-Label nicht gefunden');
+		}
+		Response::json(['ok' => true]);
 	}
 }

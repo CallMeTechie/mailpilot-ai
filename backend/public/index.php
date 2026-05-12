@@ -48,6 +48,10 @@ $router->post('/api/v1/settings/redaction',      'SettingsController@addRedactio
 $router->get ('/api/v1/settings/auto-sort',      'SettingsController@listAutoSort');
 $router->patch('/api/v1/settings/auto-sort',     'SettingsController@updateAutoSort');
 $router->post('/api/v1/settings/auto-sort/apply-now', 'SettingsController@applyAutoSortNow');
+$router->get   ('/api/v1/settings/sub-labels',       'SettingsController@listSubLabels');
+$router->post  ('/api/v1/settings/sub-labels',       'SettingsController@addSubLabel');
+$router->patch ('/api/v1/settings/sub-labels/{id}',  'SettingsController@updateSubLabel');
+$router->delete('/api/v1/settings/sub-labels/{id}',  'SettingsController@deleteSubLabel');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

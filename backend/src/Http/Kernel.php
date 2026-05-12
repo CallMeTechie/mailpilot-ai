@@ -17,6 +17,7 @@ use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\SummaryRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Repositories\UserRepository;
@@ -100,6 +101,7 @@ class Kernel
 			),
 			AutoSortRepository::class => new AutoSortRepository($this->get(PDO::class)),
 			CorrectionRepository::class => new CorrectionRepository($this->get(PDO::class)),
+			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
 			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
