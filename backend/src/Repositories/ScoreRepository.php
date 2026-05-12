@@ -80,7 +80,7 @@ final class ScoreRepository
 	 */
 	public function topPrioritySince(string $tenantId, string $mailboxId, string $sinceUtc, int $limit = 10): array
 	{
-		$sql = 'SELECT m.id AS mail_id, m.from_email, m.from_name, m.subject, m.received_at,
+		$sql = 'SELECT m.id AS mail_id, m.ms_message_id, m.from_email, m.from_name, m.subject, m.received_at,
 					   s.label, s.priority, s.action_required, s.summary
 				FROM mail_scores s
 				INNER JOIN mails m ON m.id = s.mail_id

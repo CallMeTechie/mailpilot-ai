@@ -48,13 +48,16 @@ final class MailScoringService
 		$toClaude = [];
 
 		foreach ($mails as $mail) {
-			// --- Step 1: pre-filter ---
-			if ($this->isObviousNewsletter($mail, $userProfile)) {
-				$scored[] = $this->buildPresetScore($tenantId, $mail, 'newsletter', 1, 'Automatischer Newsletter');
-				continue;
-			}
+			// Pre-filter previously short-circuited every mail with a
+			// List-Unsubscribe header to a hard-coded "Automatischer
+			// Newsletter" preset. That header is mandatory under DSGVO
+			// even for transactional senders (law firms, banks,
+			// DocuSign, government portals), so the heuristic mislabelled
+			// important mails as marketing and never asked Claude.
+			// Now every mail runs through the cache → Claude path; the
+			// budget gate provides the cost cap instead.
 
-			// --- Step 2: cache lookup ---
+			// --- Cache lookup ---
 			$hash = $this->contentHash($mail);
 			$cached = $this->cache->get($tenantId, $hash, self::PROMPT_VERSION);
 			if ($cached !== null) {

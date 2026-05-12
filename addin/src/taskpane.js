@@ -550,7 +550,10 @@ function renderBriefing(data) {
 			<div class="mp-mail-subject">${escape(m.subject)}</div>
 			<div class="mp-mail-summary">${escape(m.summary ?? '')}</div>
 		`;
-		li.addEventListener('click', () => openMailInOutlook(m.mail_id));
+		// Outlook needs the Graph REST id (AQMk…), not our internal UUID.
+		// topPrioritySince now ships ms_message_id; mail_id is kept as
+		// fallback only for older payloads.
+		li.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
 		list.appendChild(li);
 	});
 }
@@ -601,6 +604,8 @@ async function loadCurrentMailScore(msMessageId) {
 	// no delta-cursor roulette, no 60-second timeout window.
 	toggle('current-loader', true);
 	toggle('current-content', false);
+	// New mail in focus → forget any previous detailed summary.
+	delete document.getElementById('current-summary').dataset.detailed;
 
 	try {
 		const res = await api.mails.ensureScored(msMessageId);
@@ -692,7 +697,11 @@ function renderCurrentMail(row) {
 	badge.dataset.label = score.label ?? 'auto';
 	toggle('current-badge', true);
 	document.getElementById('current-priority').textContent = `Priorität ${score.priority ?? '—'}`;
-	document.getElementById('current-summary').textContent = score.summary ?? '—';
+	// Don't clobber an already-fetched detailed summary on re-render.
+	const summaryEl = document.getElementById('current-summary');
+	if (summaryEl.dataset.detailed !== '1') {
+		summaryEl.textContent = score.summary ?? '—';
+	}
 
 	if (score.action_required) {
 		toggle('current-action-section', true);
@@ -708,7 +717,15 @@ async function summarizeCurrent() {
 	setStatus('Zusammenfassung wird erstellt…');
 	try {
 		const res = await api.mails.summarize(state.currentMailData.id);
-		document.getElementById('current-summary').textContent = res.summary;
+		const text = res?.summary;
+		if (!text) {
+			showToast('Backend lieferte keine Zusammenfassung.', 'error', 6000);
+			setStatus('Bereit');
+			return;
+		}
+		const el = document.getElementById('current-summary');
+		el.textContent = text;
+		el.dataset.detailed = '1';  // mark so the score-summary doesn't overwrite it later
 		setStatus('Zusammenfassung fertig');
 	} catch (err) {
 		handleError(err);

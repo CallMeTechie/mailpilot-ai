@@ -47,13 +47,16 @@ final class MailRepository
 
 	public function findUnscoredForMailbox(string $tenantId, string $mailboxId, int $limit = 200): array
 	{
+		// Pick mails with no score at all, or with a deprecated preset-
+		// only score that bypassed Claude. Latter need to be re-classified
+		// by the model after the pre-filter was removed.
 		$sql = 'SELECT m.*
 				FROM mails m
 				LEFT JOIN mail_scores s ON s.mail_id = m.id
 				WHERE m.tenant_id = :t
 				  AND m.mailbox_id = :mb
 				  AND m.deleted_at IS NULL
-				  AND s.id IS NULL
+				  AND (s.id IS NULL OR s.model = "preset_deprecated")
 				ORDER BY m.received_at DESC
 				LIMIT :limit';
 		$stmt = $this->db->prepare($sql);
