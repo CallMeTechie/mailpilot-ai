@@ -88,6 +88,13 @@ final class SyncService
 			}
 		}
 
+		// Backfill: retroactively move scored-but-not-yet-moved mails
+		// that match a now-enabled rule. Cheap when nothing matches
+		// (auto_sorted_at index → empty result), idempotent on rerun.
+		if ($autosortUserId !== '') {
+			$this->autoSort->backfillForMailbox($accessToken, $tenantId, $autosortUserId, $mailboxId, 50);
+		}
+
 		$this->mailboxes->updateDeltaAndSyncAt($mailboxId, $deltaResult['delta']);
 
 		$this->logger->info('sync.done', [

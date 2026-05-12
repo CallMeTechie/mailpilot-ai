@@ -5,6 +5,7 @@ namespace MailPilot\Services;
 
 use MailPilot\Graph\GraphClient;
 use MailPilot\Repositories\AutoSortRepository;
+use PDO;
 
 /**
  * Routes a freshly-scored mail into the user-configured Outlook
@@ -25,6 +26,7 @@ final class AutoSortService
 	public function __construct(
 		private readonly GraphClient $graph,
 		private readonly AutoSortRepository $rules,
+		private readonly PDO $db,
 		private readonly \Psr\Log\LoggerInterface $logger,
 	) {
 	}
@@ -66,6 +68,11 @@ final class AutoSortService
 				$this->rules->rememberFolderId($tenantId, $userId, $label, $folderId);
 			}
 			$this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
+			// Mark so the background backfill query doesn't try to
+			// move it again on the next sweep.
+			$this->db->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3)
+				WHERE mail_id = :m AND tenant_id = :t')
+				->execute([':m' => $mail['id'], ':t' => $tenantId]);
 			$this->logger->info('autosort.moved', [
 				'user'   => $userId,
 				'label'  => $label,
@@ -87,5 +94,53 @@ final class AutoSortService
 			}
 			return ['moved' => false, 'reason' => 'graph_error'];
 		}
+	}
+
+	/**
+	 * Back-fill pass: find scored mails that match an enabled rule
+	 * but have not been moved yet (auto_sorted_at IS NULL), filtered
+	 * by the same direct/action≥4 safety. Returns counters.
+	 *
+	 * Worker calls this in the background sweep so newly-enabled
+	 * rules retroactively touch the existing inbox, no manual
+	 * "Regeln jetzt anwenden" click required.
+	 *
+	 * @return array{processed:int, moved:int, errors:int}
+	 */
+	public function backfillForMailbox(string $accessToken, string $tenantId, string $userId, string $mailboxId, int $limit = 50): array
+	{
+		$stmt = $this->db->prepare('SELECT m.id, m.ms_message_id, m.mailbox_id,
+				s.label AS score_label, s.priority AS score_priority, s.action_required AS score_ar
+			FROM mails m
+			INNER JOIN mail_scores s        ON s.mail_id   = m.id
+			INNER JOIN auto_sort_rules r    ON r.tenant_id = m.tenant_id
+				AND r.user_id = :u
+				AND r.label   = s.label
+				AND r.enabled = 1
+			WHERE m.tenant_id    = :t
+			  AND m.mailbox_id   = :mb
+			  AND m.deleted_at IS NULL
+			  AND s.auto_sorted_at IS NULL
+			  AND NOT (s.label IN ("direct","action") AND s.priority >= 4)
+			ORDER BY m.received_at DESC
+			LIMIT :lim');
+		$stmt->bindValue(':t',  $tenantId);
+		$stmt->bindValue(':u',  $userId);
+		$stmt->bindValue(':mb', $mailboxId);
+		$stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+		$stmt->execute();
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		$moved = 0; $errors = 0;
+		foreach ($rows as $row) {
+			$res = $this->applyToScoredMail($accessToken, $tenantId, $userId, $row, [
+				'label'           => $row['score_label'],
+				'priority'        => $row['score_priority'],
+				'action_required' => $row['score_ar'],
+			]);
+			if (!empty($res['moved']))                          $moved++;
+			elseif (($res['reason'] ?? '') === 'graph_error')   $errors++;
+		}
+		return ['processed' => count($rows), 'moved' => $moved, 'errors' => $errors];
 	}
 }

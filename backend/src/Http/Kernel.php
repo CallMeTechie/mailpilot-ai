@@ -112,6 +112,7 @@ class Kernel
 			AutoSortService::class    => new AutoSortService(
 				$this->get(GraphClient::class),
 				$this->get(AutoSortRepository::class),
+				$this->get(PDO::class),
 				$this->get(Logger::class),
 			),
 			RedactionService::class   => new RedactionService(),
