@@ -22,6 +22,7 @@
 		<li class="<?= str_contains($path, '/admin/cache') ? 'active' : '' ?>"><a href="/admin/cache">Cache</a></li>
 		<li class="<?= str_contains($path, '/admin/usage') ? 'active' : '' ?>"><a href="/admin/usage">Token-Nutzung</a></li>
 		<li class="<?= str_contains($path, '/admin/settings/budgets') ? 'active' : '' ?>"><a href="/admin/settings/budgets">Budgets</a></li>
+		<li class="<?= str_contains($path, '/admin/sync-jobs') ? 'active' : '' ?>"><a href="/admin/sync-jobs">Sync-Jobs</a></li>
 		<li class="<?= str_contains($path, '/admin/audit') ? 'active' : '' ?>"><a href="/admin/audit">Audit Log</a></li>
 	</ul>
 	<div class="sidebar-foot">

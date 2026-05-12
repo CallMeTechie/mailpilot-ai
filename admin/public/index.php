@@ -19,6 +19,7 @@ use MailPilot\Admin\Controllers\UserController;
 use MailPilot\Admin\Controllers\PromptController;
 use MailPilot\Admin\Controllers\AuditController;
 use MailPilot\Admin\Controllers\CacheController;
+use MailPilot\Admin\Controllers\SyncJobsController;
 use MailPilot\Admin\Kernel as AdminKernel;
 
 session_start();
@@ -69,6 +70,7 @@ $routes = [
 	['POST', '#^/admin/prompts/(?P<id>[^/]+)/activate$#', PromptController::class, 'activate'],
 
 	['GET',  '#^/admin/audit$#',               AuditController::class,     'list'],
+	['GET',  '#^/admin/sync-jobs$#',           SyncJobsController::class,  'list'],
 	['GET',  '#^/admin/cache$#',               CacheController::class,     'list'],
 	['POST', '#^/admin/cache/purge$#',         CacheController::class,     'purge'],
 

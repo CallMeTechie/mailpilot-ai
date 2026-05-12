@@ -3,7 +3,7 @@
 
 <?php if ($errorJobs > 0): ?>
 <div class="flash flash-error">
-	⚠ <?= $errorJobs ?> Sync-Jobs mit Fehlern in den letzten 24h — <a href="/admin/audit?event=sync">im Audit Log prüfen</a>
+	⚠ <?= $errorJobs ?> Sync-Jobs mit Fehlern in den letzten 24h — <a href="/admin/sync-jobs?status=error">Details anzeigen</a>
 </div>
 <?php endif; ?>
 

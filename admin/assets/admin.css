@@ -234,3 +234,7 @@ dd { margin: 0; }
 	background: var(--surface); font-size: 12px; font-family: inherit;
 	font-variant-numeric: tabular-nums;
 }
+
+.pill-info { background: #dbeafe; color: #1e40af; }
+.pill-ok   { background: var(--success-bg); color: var(--success); }
+.error-text { font-size: 11px; cursor: help; word-break: break-word; }
