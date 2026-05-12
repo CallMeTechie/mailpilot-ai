@@ -137,11 +137,14 @@ final class MailController extends BaseController
 		$stmt->execute([':id' => $mail['id']]);
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 
-		// First-time score on this mail → run it through AutoSort right
-		// now so the user-visible effect is immediate ("I clicked it →
-		// it's in the right folder") instead of waiting for the next
-		// 5-minute background sweep.
-		if ($wasJustScored && ($r['label'] ?? null) !== null) {
+		// Click-time AutoSort: run regardless of whether this is the
+		// first score or a stale score we just retrieved. The
+		// applyToScoredMail call is cheap when there's nothing to do
+		// (rule disabled, high-priority direct/action, already moved
+		// via auto_sorted_at), and when there IS work to do this is
+		// the difference between "moves in the next 5 minutes" and
+		// "moves now".
+		if (($r['label'] ?? null) !== null) {
 			$mb = null;
 			foreach ($mailboxes as $cand) {
 				if ((string)$cand['id'] === (string)$r['mailbox_id']) { $mb = $cand; break; }

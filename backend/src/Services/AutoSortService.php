@@ -61,6 +61,17 @@ final class AutoSortService
 			return ['moved' => false, 'reason' => 'missing_message_id'];
 		}
 
+		// If we already moved this mail once, skip — avoids hammering
+		// Graph with redundant move requests when ensureScored is
+		// called on a mail the background sweep handled minutes ago.
+		$stmt = $this->db->prepare('SELECT auto_sorted_at FROM mail_scores
+			WHERE mail_id = :m AND tenant_id = :t LIMIT 1');
+		$stmt->execute([':m' => $mail['id'], ':t' => $tenantId]);
+		$existing = $stmt->fetch(PDO::FETCH_ASSOC);
+		if ($existing && $existing['auto_sorted_at'] !== null) {
+			return ['moved' => false, 'reason' => 'already_sorted'];
+		}
+
 		try {
 			$folderId = $rule['folder_id'];
 			if ($folderId === null || $folderId === '') {
