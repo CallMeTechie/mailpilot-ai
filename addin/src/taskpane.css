@@ -92,14 +92,11 @@ input:focus, textarea:focus {
 .mp-header {
 	background: var(--mp-surface);
 	border-bottom: 1px solid var(--mp-border);
-	padding: var(--mp-sp-3) var(--mp-sp-4);
+	padding: var(--mp-sp-2) var(--mp-sp-3);
 	position: sticky; top: 0; z-index: 10;
-}
-
-.mp-brand {
-	display: flex; align-items: center; gap: var(--mp-sp-2);
-	font-weight: 600; font-size: 15px;
-	margin-bottom: var(--mp-sp-3);
+	display: flex;
+	align-items: center;
+	gap: var(--mp-sp-2);
 }
 
 .mp-tabs {
@@ -107,7 +104,23 @@ input:focus, textarea:focus {
 	background: var(--mp-bg);
 	padding: 4px;
 	border-radius: var(--mp-radius);
+	flex: 1;
+	min-width: 0;
 }
+
+.mp-header-icon {
+	flex-shrink: 0;
+	width: 30px; height: 30px;
+	display: inline-flex; align-items: center; justify-content: center;
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--mp-radius-sm);
+	color: var(--mp-text-muted);
+	cursor: pointer;
+	transition: background 120ms ease, color 120ms ease;
+}
+.mp-header-icon:hover { background: var(--mp-surface-hover); color: var(--mp-text); }
+.mp-header-icon.is-spinning svg { animation: mp-spin 800ms linear infinite; }
 .mp-tab {
 	flex: 1;
 	padding: 6px var(--mp-sp-3);

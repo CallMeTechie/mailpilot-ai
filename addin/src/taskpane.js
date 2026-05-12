@@ -230,22 +230,26 @@ function initTabs() {
 // ============================================================
 function initBriefing() {
 	document.getElementById('btn-sync').addEventListener('click', async () => {
+		const btn = document.getElementById('btn-sync');
+		btn.classList.add('is-spinning');
 		setStatus('Sync gestartet…');
 		toggle('sync-progress', true);
 		setSyncProgress(0, 0);
+		const stop = () => btn.classList.remove('is-spinning');
 		try {
 			const res = await api.sync.trigger();
 			const jobId = Array.isArray(res?.job_ids) ? res.job_ids[0] : null;
 			if (!jobId) {
-				// No mailbox or no job created — just refresh briefing.
 				toggle('sync-progress', false);
 				await loadBriefing();
 				setStatus('Bereit');
+				stop();
 				return;
 			}
-			pollSyncStatus(jobId);
+			pollSyncStatus(jobId, stop);
 		} catch (err) {
 			toggle('sync-progress', false);
+			stop();
 			handleError(err);
 		}
 	});
@@ -370,16 +374,18 @@ function setSyncProgress(processed, total) {
 	text.textContent = t > 0 ? `${p} / ${t}` : 'wird vorbereitet…';
 }
 
-function pollSyncStatus(jobId) {
+function pollSyncStatus(jobId, onDone) {
 	const startedAt = Date.now();
 	const POLL_MS = 2000;
-	const MAX_MS = 10 * 60 * 1000;   // 10 minutes hard cap
+	const MAX_MS = 10 * 60 * 1000;
+	const finish = () => { if (typeof onDone === 'function') onDone(); };
 
 	const timer = setInterval(async () => {
 		if (Date.now() - startedAt > MAX_MS) {
 			clearInterval(timer);
 			toggle('sync-progress', false);
 			showToast('Sync läuft länger als 10 min — bitte später erneut prüfen.', 'info', 4000);
+			finish();
 			return;
 		}
 		try {
@@ -391,11 +397,13 @@ function pollSyncStatus(jobId) {
 				showToast('Sync abgeschlossen', 'success', 2000);
 				await loadBriefing();
 				setStatus('Bereit');
+				finish();
 			} else if (status.status === 'error') {
 				clearInterval(timer);
 				toggle('sync-progress', false);
 				showToast('Sync fehlgeschlagen: ' + (status.error_text || 'unbekannt'), 'error', 6000);
 				setStatus('Sync-Fehler');
+				finish();
 			}
 		} catch (_) { /* transient — retry */ }
 	}, POLL_MS);
