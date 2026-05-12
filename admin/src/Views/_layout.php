@@ -20,6 +20,8 @@
 		<li class="<?= str_contains($path, '/admin/users') ? 'active' : '' ?>"><a href="/admin/users">Benutzer</a></li>
 		<li class="<?= str_contains($path, '/admin/prompts') ? 'active' : '' ?>"><a href="/admin/prompts">Prompts</a></li>
 		<li class="<?= str_contains($path, '/admin/cache') ? 'active' : '' ?>"><a href="/admin/cache">Cache</a></li>
+		<li class="<?= str_contains($path, '/admin/usage') ? 'active' : '' ?>"><a href="/admin/usage">Token-Nutzung</a></li>
+		<li class="<?= str_contains($path, '/admin/settings/budgets') ? 'active' : '' ?>"><a href="/admin/settings/budgets">Budgets</a></li>
 		<li class="<?= str_contains($path, '/admin/audit') ? 'active' : '' ?>"><a href="/admin/audit">Audit Log</a></li>
 	</ul>
 	<div class="sidebar-foot">

@@ -154,3 +154,83 @@ dd { margin: 0; }
 
 /* --- Misc --- */
 .muted { color: var(--muted); }
+
+/* --- Budget & Usage dashboard --- */
+.page-head { margin-bottom: 20px; }
+.page-head h1 { margin: 0 0 4px; font-size: 22px; }
+.page-head .muted { font-size: 13px; }
+
+.cards-row {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 14px; margin-bottom: 24px;
+}
+.usage-card {
+	background: var(--surface); border: 1px solid var(--border);
+	border-radius: 10px; padding: 16px 18px;
+}
+.usage-card-title {
+	color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+	margin-bottom: 6px;
+}
+.usage-card-primary { font-size: 26px; font-weight: 600; margin-bottom: 10px; }
+.usage-card-stats {
+	display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12px;
+}
+.usage-card-stats > div { display: flex; justify-content: space-between; }
+.usage-card-stats dt { color: var(--muted); text-transform: none; letter-spacing: 0; font-size: 12px; }
+.usage-card-stats dd { font-variant-numeric: tabular-nums; }
+.usage-card-stats .blocked dt, .usage-card-stats .blocked dd { color: var(--danger); }
+
+.panel {
+	background: var(--surface); border: 1px solid var(--border);
+	border-radius: 10px; padding: 18px; margin-bottom: 18px;
+}
+.panel h2 { margin: 0 0 12px; font-size: 15px; }
+.panel.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .panel.two-col { grid-template-columns: 1fr; } }
+
+.chart-trend {
+	display: flex; align-items: flex-end; gap: 4px; height: 140px;
+	border-bottom: 1px solid var(--border); padding-bottom: 4px;
+}
+.chart-bar { flex: 1; min-width: 12px; display: flex; flex-direction: column; align-items: stretch; }
+.chart-bar-fill { background: var(--primary); border-radius: 2px 2px 0 0; min-height: 1px; margin-top: auto; }
+.chart-bar-label {
+	font-size: 9px; color: var(--muted); text-align: center; margin-top: 4px;
+	font-variant-numeric: tabular-nums;
+}
+
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th, .data-table td {
+	text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+	font-variant-numeric: tabular-nums;
+}
+.data-table th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+.data-table.dense th, .data-table.dense td { padding: 5px 8px; font-size: 12px; }
+.data-table tr.status-blocked { background: var(--danger-bg); }
+.data-table tr.status-error   { background: #fef2f2; }
+
+.pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+.pill-warn  { background: #fef3c7; color: #92400e; }
+.pill-error { background: var(--danger-bg); color: var(--danger); }
+
+.form-grid {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 16px;
+}
+.form-grid label { display: flex; flex-direction: column; gap: 4px; }
+.form-grid label > span { font-size: 12px; color: var(--muted); }
+.form-grid input, .form-grid select {
+	padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+	background: var(--surface); font-size: 14px; font-family: inherit;
+}
+.form-grid input:focus, .form-grid select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.form-grid small { font-size: 11px; color: var(--muted); }
+.form-actions { grid-column: 1 / -1; margin-top: 8px; }
+
+.data-table input[type=text], .data-table input[type=number] {
+	width: 100%; box-sizing: border-box;
+	padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+	background: var(--surface); font-size: 12px; font-family: inherit;
+	font-variant-numeric: tabular-nums;
+}

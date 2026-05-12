@@ -796,6 +796,10 @@ function showError(msg) {
 
 function handleError(err) {
 	console.error(err);
+	if (err instanceof ApiError && err.code === 'BUDGET_EXCEEDED') {
+		showToast(`Tageslimit erreicht – ${err.message}`, 'warn', 8000);
+		return;
+	}
 	const msg = err instanceof ApiError ? err.message : 'Unerwarteter Fehler';
 	showToast(msg, 'error', 6000);
 }

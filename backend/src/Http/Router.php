@@ -104,6 +104,10 @@ final class Router
 			$controller->$methodName($params, $body);
 		} catch (HttpException $e) {
 			Response::error($e->status, $e->errorCode, $e->getMessage());
+		} catch (\MailPilot\Services\BudgetExceededException $e) {
+			// Budget gate refused the call. 429 lets the add-in show
+			// a specific toast instead of a generic error.
+			Response::error(429, 'BUDGET_EXCEEDED', $e->getMessage());
 		} catch (\Throwable $e) {
 			$this->kernel->get(\Monolog\Logger::class)->error('dispatch.error', [
 				'handler' => $handler,

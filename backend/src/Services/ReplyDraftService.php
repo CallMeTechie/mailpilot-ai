@@ -56,6 +56,21 @@ TXT;
 		$user = "ORIGINAL_MAIL:\nFrom: {$mail['from_name']} <{$mail['from_email']}>\n"
 			. "Subject: {$mail['subject']}\n---\n{$body}{$instr}\n\nEntwirf die Antwort.";
 
+		$mailboxId = (string)($mail['mailbox_id'] ?? '') ?: null;
+		$gate = $this->budget->canSpend($tenantId, $userId, 800);
+		if (!$gate['ok']) {
+			$this->budget->recordUsage([
+				'tenant_id' => $tenantId, 'user_id' => $userId,
+				'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
+				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'input_tokens' => 0, 'output_tokens' => 0,
+				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
+				'duration_ms' => 0, 'status' => 'blocked',
+				'error_text' => (string)$gate['reason'],
+			]);
+			throw new BudgetExceededException((string)$gate['scope']);
+		}
+
 		$start = microtime(true);
 		try {
 			// Claude 4.x rejects "temperature" — let the model default.

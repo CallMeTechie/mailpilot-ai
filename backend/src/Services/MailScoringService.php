@@ -145,6 +145,16 @@ final class MailScoringService
 		$userId    = (string)($userProfile['user_id'] ?? '') ?: null;
 		$mailboxId = (string)($mails[0]['mailbox_id'] ?? '') ?: null;
 
+		// Pre-flight: refuse if we'd blow the daily budget. estimate =
+		// the same maxTokens we'd pass to Anthropic (worst-case spend).
+		if ($tenantId !== '') {
+			$gate = $this->budget->canSpend($tenantId, $userId, $maxTokens);
+			if (!$gate['ok']) {
+				$this->recordCall($tenantId, $userId, $mailboxId, null, [], 0, 'blocked', $gate['reason']);
+				throw new BudgetExceededException((string)$gate['scope']);
+			}
+		}
+
 		$start = microtime(true);
 		try {
 			// temperature was 0.1 — Claude 4.x rejects the parameter as

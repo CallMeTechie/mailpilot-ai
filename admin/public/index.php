@@ -11,8 +11,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../backend/vendor/autoload.php';
 
 use MailPilot\Admin\Controllers\AuthController;
+use MailPilot\Admin\Controllers\BudgetController;
 use MailPilot\Admin\Controllers\DashboardController;
 use MailPilot\Admin\Controllers\TenantController;
+use MailPilot\Admin\Controllers\UsageController;
 use MailPilot\Admin\Controllers\UserController;
 use MailPilot\Admin\Controllers\PromptController;
 use MailPilot\Admin\Controllers\AuditController;
@@ -69,6 +71,12 @@ $routes = [
 	['GET',  '#^/admin/audit$#',               AuditController::class,     'list'],
 	['GET',  '#^/admin/cache$#',               CacheController::class,     'list'],
 	['POST', '#^/admin/cache/purge$#',         CacheController::class,     'purge'],
+
+	['GET',  '#^/admin/usage$#',                          UsageController::class,  'index'],
+	['GET',  '#^/admin/settings/budgets$#',               BudgetController::class, 'show'],
+	['POST', '#^/admin/settings/budgets$#',               BudgetController::class, 'saveBudgets'],
+	['POST', '#^/admin/settings/budgets/pricing$#',       BudgetController::class, 'savePricing'],
+	['POST', '#^/admin/settings/budgets/prompt-tokens$#', BudgetController::class, 'savePromptTokens'],
 ];
 
 foreach ($routes as [$m, $pattern, $class, $action]) {

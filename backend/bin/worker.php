@@ -24,6 +24,7 @@ require_once __DIR__ . '/wait_for_db.php';
 use MailPilot\Http\Kernel;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\SyncService;
 
@@ -75,10 +76,13 @@ while (true) {
 
 			$purgedBlacklist = $kernel->get(JwtService::class)->purgeExpiredBlacklist();
 
+			$purgedUsage = $kernel->get(UsageRepository::class)->purgeOlderThan(30);
+
 			$log->info('worker.housekeeping', [
 				'bodies'        => $purgedBodies,
 				'oauth_states'  => $purgedStates,
 				'jwt_blacklist' => $purgedBlacklist,
+				'api_usage'     => $purgedUsage,
 			]);
 			$lastHousekeepingDay = $today;
 		}
