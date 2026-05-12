@@ -35,6 +35,16 @@ final class MailRepository
 	/**
 	 * @return list<array<string, mixed>>
 	 */
+	public function findByMsMessageId(string $tenantId, string $msMessageId): ?array
+	{
+		$stmt = $this->db->prepare('SELECT * FROM mails
+			WHERE tenant_id = :t AND ms_message_id = :m AND deleted_at IS NULL
+			LIMIT 1');
+		$stmt->execute([':t' => $tenantId, ':m' => $msMessageId]);
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+		return $row === false ? null : $row;
+	}
+
 	public function findUnscoredForMailbox(string $tenantId, string $mailboxId, int $limit = 200): array
 	{
 		$sql = 'SELECT m.*

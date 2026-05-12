@@ -64,6 +64,83 @@ final class MailController extends BaseController
 		Response::json(['items' => $items, 'next_cursor' => null]);
 	}
 
+	/**
+	 * Guarantee that a mail (identified by its Graph REST id) is present
+	 * in our DB and has a score. Synchronous: one Graph GET if missing,
+	 * one Claude call if unscored — no polling, no delta-cursor roulette.
+	 *
+	 * Used by the add-in's "Diese Mail" tab to replace the old 60-second
+	 * mails.list / sync.status polling loop. Returns the same shape as
+	 * one row of MailController::list so the renderer is unchanged.
+	 */
+	public function ensureScored(array $params, array $body): void
+	{
+		$ctx  = $this->requireAuth();
+		$msId = (string)($params['ms_message_id'] ?? '');
+		if ($msId === '') {
+			throw HttpException::badRequest('VALIDATION', 'ms_message_id fehlt');
+		}
+
+		$mailRepo = $this->kernel->get(MailRepository::class);
+		$mailboxes = $this->kernel->get(MailboxRepository::class)
+			->findByUser($ctx['tenant_id'], $ctx['user_id']);
+		if ($mailboxes === []) {
+			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
+		}
+
+		$mail = $mailRepo->findByMsMessageId($ctx['tenant_id'], $msId);
+
+		if ($mail === null) {
+			$graph  = $this->kernel->get(GraphClient::class);
+			$tokens = $this->kernel->get(TokenService::class);
+			$graphMsg = null;
+			$mbHit = null;
+			foreach ($mailboxes as $mb) {
+				$token = $tokens->ensureFreshAccessToken($mb);
+				$graphMsg = $graph->fetchMessage($token, $msId);
+				if ($graphMsg !== null) { $mbHit = $mb; break; }
+			}
+			if ($graphMsg === null || $mbHit === null) {
+				throw HttpException::notFound('NOT_FOUND', 'Mail in Microsoft 365 nicht gefunden');
+			}
+			$mailId = $mailRepo->upsertFromGraph($ctx['tenant_id'], (string)$mbHit['id'], $graphMsg);
+			$mail = $mailRepo->findById($ctx['tenant_id'], $mailId);
+		}
+
+		$pdo = $this->kernel->get(\PDO::class);
+		$scoreStmt = $pdo->prepare('SELECT 1 FROM mail_scores WHERE mail_id = :id LIMIT 1');
+		$scoreStmt->execute([':id' => $mail['id']]);
+		if ($scoreStmt->fetchColumn() === false) {
+			$userRow = $this->fetchUser($ctx['user_id']);
+			$profile = $this->buildUserProfile($ctx, $userRow);
+			$this->kernel->get(MailScoringService::class)
+				->scoreBatch($ctx['tenant_id'], $profile, [$mail]);
+		}
+
+		$stmt = $pdo->prepare('SELECT m.id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
+				s.label, s.action_required, s.priority, s.summary, s.scored_at
+			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
+			WHERE m.id = :id LIMIT 1');
+		$stmt->execute([':id' => $mail['id']]);
+		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+		Response::json(['mail' => [
+			'id'             => $r['id']            ?? null,
+			'ms_message_id'  => $r['ms_message_id'] ?? null,
+			'from_email'     => $r['from_email']    ?? null,
+			'from_name'      => $r['from_name']     ?? null,
+			'subject'        => $r['subject']       ?? null,
+			'received_at'    => $r['received_at']   ?? null,
+			'score'          => ($r['label'] ?? null) === null ? null : [
+				'label'           => $r['label'],
+				'action_required' => (bool)$r['action_required'],
+				'priority'        => (int)$r['priority'],
+				'summary'         => $r['summary'],
+				'scored_at'       => $r['scored_at'],
+			],
+		]]);
+	}
+
 	public function summarize(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();

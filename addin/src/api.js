@@ -81,6 +81,7 @@ export const api = {
 	},
 	mails: {
 		list:          (q='')  => request('GET',  `/mails${q}`),
+		ensureScored:  (msId)  => request('POST', `/mails/by-graph-id/${encodeURIComponent(msId)}/ensure-scored`),
 		summarize:     (id)    => request('POST', `/mails/${id}/summarize`),
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),

@@ -596,94 +596,40 @@ function onItemChanged() {
 }
 
 async function loadCurrentMailScore(msMessageId) {
-	const MAX_POLL_ATTEMPTS = 20;   // 20 × 3s = 60s budget for first-sync
-	const POLL_INTERVAL_MS  = 3000;
-	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
+	// Single synchronous call: backend fetches the mail directly from
+	// Graph if missing, scores it inline, returns the row. No polling,
+	// no delta-cursor roulette, no 60-second timeout window.
 	toggle('current-loader', true);
 	toggle('current-content', false);
 
-	// 1. Cheap optimistic check — mail might already be scored.
 	try {
-		const initial = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
-		if (initial.items?.[0]) {
-			renderCurrentMail(initial.items[0]);
+		const res = await api.mails.ensureScored(msMessageId);
+		// User moved on while we were waiting → skip render.
+		if (state.currentMailId !== msMessageId) return;
+
+		if (res?.mail) {
+			renderCurrentMail(res.mail);
 			toggle('current-loader', false);
 			toggle('current-content', true);
-			return;
+		} else {
+			toggle('current-loader', false);
+			showToast('Mail konnte nicht analysiert werden.', 'error', 7000);
 		}
 	} catch (err) {
-		return handleCurrentMailError(err);
-	}
-
-	// 2. Kick the worker. Remember the job ids so we can read job state
-	// during polling — without this the add-in is blind to budget blocks
-	// and worker failures and just times out generically after 60 s.
-	let jobIds = [];
-	try {
-		const res = await api.sync.trigger();
-		jobIds = Array.isArray(res?.job_ids) ? res.job_ids : [];
-	} catch (err) {
+		toggle('current-loader', false);
+		if (err instanceof ApiError && err.code === 'BUDGET_EXCEEDED') {
+			showToast('Tageslimit erreicht — heute keine neuen Analysen mehr.', 'warn', 9000);
+			return;
+		}
 		if (err instanceof ApiError && err.status === 401) {
 			return bounceToLogin();
 		}
-		// Otherwise tolerate — sync may already be running.
-	}
-
-	// 3. Poll mail row + sync job state in lockstep.
-	for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-		await sleep(POLL_INTERVAL_MS);
-
-		if (state.currentMailId !== msMessageId) return;
-
-		// 3a) Mail row appeared → done.
-		try {
-			const result = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
-			if (result.items?.[0]) {
-				renderCurrentMail(result.items[0]);
-				toggle('current-loader', false);
-				toggle('current-content', true);
-				return;
-			}
-		} catch (err) {
-			return handleCurrentMailError(err);
+		if (err instanceof ApiError && err.code === 'NOT_FOUND') {
+			showToast('Mail in Microsoft 365 nicht gefunden — eventuell gelöscht?', 'info', 7000);
+			return;
 		}
-
-		// 3b) Inspect job status — surface budget blocks and worker errors
-		// instead of silently waiting them out.
-		for (const jobId of jobIds) {
-			let job = null;
-			try { job = await api.sync.status(jobId); } catch (_) { continue; }
-			if (!job) continue;
-
-			if (job.status === 'error') {
-				toggle('current-loader', false);
-				const text = String(job.error_text ?? '');
-				if (text.startsWith('BUDGET_EXCEEDED') || text.includes('Tageslimit')) {
-					showToast('Tageslimit erreicht — heute keine neuen Analysen mehr.', 'warn', 9000);
-				} else {
-					showToast(`Analyse fehlgeschlagen: ${text || 'unbekannt'}`, 'error', 8000);
-				}
-				return;
-			}
-
-			// Worker finished but the mail never made it into our DB:
-			// Microsoft Graph's delta did not return it (subfolder routing,
-			// stale delta-cursor, …). No point waiting further.
-			if (job.status === 'done' && attempt >= 3) {
-				toggle('current-loader', false);
-				showToast('Mail wurde nicht synchronisiert — bitte Briefing aktualisieren.', 'info', 7000);
-				return;
-			}
-		}
+		handleError(err);
 	}
-
-	// 4. Soft fallback. Either the worker is genuinely slow or no jobs
-	// were enqueued (we tolerated the trigger error). Offer a retry
-	// instead of the old "dauert länger" dead-end.
-	toggle('current-loader', false);
-	showToast('Analyse hat zu lange gedauert. Erneut versuchen?', 'info', 9000);
-	setStatus('Analyse abgebrochen');
 }
 
 function renderFooterStats(data) {

@@ -119,6 +119,30 @@ final class GraphClient
 		return ['messages' => $messages, 'delta' => $nextDelta];
 	}
 
+	/**
+	 * Direct single-message fetch. Used by the ensure-scored endpoint
+	 * when delta doesn't return a mail the user has open in Outlook
+	 * (subfolder routing, stale cursor, focused-vs-other split, …).
+	 *
+	 * Returns null on HTTP 404 — caller decides whether to bubble up.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	public function fetchMessage(string $accessToken, string $messageId): ?array
+	{
+		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId)
+			. '?$select=id,conversationId,internetMessageId,from,toRecipients,ccRecipients,'
+			. 'subject,bodyPreview,body,hasAttachments,receivedDateTime,internetMessageHeaders,categories';
+		try {
+			return $this->get($accessToken, $url);
+		} catch (\RuntimeException $e) {
+			if (str_contains($e->getMessage(), 'HTTP 404')) {
+				return null;
+			}
+			throw $e;
+		}
+	}
+
 	public function setCategories(string $accessToken, string $messageId, array $categories): void
 	{
 		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId);
