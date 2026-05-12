@@ -54,7 +54,11 @@ abstract class TestCase extends BaseTestCase
 		$tables = ['tenants','users','tenant_user','mailboxes','mails','mail_scores',
 			'mail_summaries','reply_drafts','claude_cache','vip_senders',
 			'redaction_rules','project_keywords','prompt_versions','audit_log',
-			'sync_jobs','oauth_states'];
+			'sync_jobs','oauth_states',
+			// 0005_token_budgets_and_usage — keep system_settings and
+			// model_pricing untouched (they hold seeded defaults the
+			// BudgetService relies on); only the per-call ledgers reset.
+			'api_usage','usage_daily'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

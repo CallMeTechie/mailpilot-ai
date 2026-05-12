@@ -5,7 +5,11 @@ namespace MailPilot\Tests\Integration;
 
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\ScoreRepository;
+use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\UsageRepository;
+use MailPilot\Services\BudgetService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Tests\Fixtures\FakeClaudeClient;
@@ -24,12 +28,19 @@ final class MailScoringServiceTest extends TestCase
 	private function makeService(FakeClaudeClient $claude): MailScoringService
 	{
 		$pdo = $this->pdo();
+		$budget = new BudgetService(
+			new SettingsRepository($pdo),
+			new UsageRepository($pdo),
+			new PricingRepository($pdo),
+			$this->logger(),
+		);
 		return new MailScoringService(
 			$claude,
 			new MailRepository($pdo),
 			new ScoreRepository($pdo),
 			new CacheRepository($pdo, 30),
 			new RedactionService(),
+			$budget,
 			'claude-haiku-4-5-20251001',
 			20,
 			2048,
@@ -37,29 +48,48 @@ final class MailScoringServiceTest extends TestCase
 		);
 	}
 
-	public function testNewsletterIsPreFilteredWithoutCallingClaude(): void
+	/**
+	 * The List-Unsubscribe pre-filter used to short-circuit every mail
+	 * with that header to a hard-coded "newsletter" preset without ever
+	 * calling Claude. That heuristic was removed (List-Unsubscribe is
+	 * mandatory for nearly every transactional sender under DSGVO, so
+	 * it consistently mislabelled important mail). This test pins the
+	 * new behaviour: such mails do reach Claude and can be classified
+	 * to any label Claude returns.
+	 */
+	public function testListUnsubscribeMailReachesClaude(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
-		$mailId = $this->insertMail($tenantId, $mailboxId, [
+		$this->insertMail($tenantId, $mailboxId, [
 			'list_unsubscribe' => 1,
-			'from_email'       => 'marketing@newsletter.com',
-			'subject'          => 'Sommer-Sale 50% Rabatt',
+			'from_email'       => 'lawyer@example.com',
+			'subject'          => 'Wichtige Mandatsinformation',
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
 		$claude = new FakeClaudeClient();
+		$claude->scriptJson([
+			'results' => [[
+				'id' => $mails[0]['id'],
+				'label' => 'direct',
+				'action_required' => true,
+				'priority' => 5,
+				'summary' => 'Anwalt schickt Mandatsinformation',
+				'reasoning' => 'transactional sender',
+			]],
+		]);
 		$service = $this->makeService($claude);
 
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
 		$this->assertCount(1, $scores);
-		$this->assertSame('newsletter', $scores[0]['label']);
-		$this->assertSame(0, $claude->callCount(), 'Newsletter must not hit Claude');
+		$this->assertSame(1, $claude->callCount(), 'List-Unsubscribe must NOT bypass Claude any more');
+		$this->assertSame('direct', $scores[0]['label']);
 	}
 
-	public function testVipSenderBypassesNewsletterPreFilter(): void
+	public function testVipSenderClassifiedByClaude(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
