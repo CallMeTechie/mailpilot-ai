@@ -136,7 +136,10 @@ final class GraphClient
 		try {
 			return $this->get($accessToken, $url);
 		} catch (\RuntimeException $e) {
-			if (str_contains($e->getMessage(), 'HTTP 404')) {
+			// GraphClient::get throws "Graph GET failed: <status>" — match
+			// on the 404 suffix so we return null instead of bubbling a
+			// 500 up to the caller.
+			if (preg_match('/\b404\b/', $e->getMessage())) {
 				return null;
 			}
 			throw $e;
