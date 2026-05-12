@@ -101,6 +101,8 @@ export const api = {
 		deleteVip:     (id)    => request('DELETE', `/settings/vip/${id}`),
 		listRedaction: ()      => request('GET',  '/settings/redaction'),
 		addRedaction:  (p, d)  => request('POST', '/settings/redaction', { pattern: p, description: d }),
+		listAutoSort:  ()      => request('GET',  '/settings/auto-sort'),
+		updateAutoSort:(rules) => request('PATCH','/settings/auto-sort', { rules }),
 	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),

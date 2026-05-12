@@ -209,6 +209,21 @@
 				<ul class="mp-list" id="red-list"></ul>
 			</div>
 
+			<div class="mp-section">
+				<h2>Auto-Sort</h2>
+				<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
+				<table class="mp-autosort-table" id="autosort-table">
+					<thead>
+						<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
+					</thead>
+					<tbody id="autosort-rows"><!-- gefüllt durch initSettings() --></tbody>
+				</table>
+				<div class="mp-actions">
+					<button class="mp-btn mp-btn-primary" id="btn-save-autosort">Speichern</button>
+				</div>
+				<p class="mp-muted" id="autosort-status"></p>
+			</div>
+
 			<div class="mp-section mp-danger">
 				<h2>Daten</h2>
 				<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>

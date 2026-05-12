@@ -748,6 +748,37 @@ function renderCurrentMail(row) {
 	} else {
 		toggle('current-action-section', false);
 	}
+
+	// Office InfoBar above the mail when this is a high-priority direct/
+	// action mail. Visible even when the add-in pane is closed, and
+	// MailPilot is the only one that can attach it. Key is unique per
+	// add-in so it replaces (not stacks) on every re-render.
+	maybeShowOutlookNotification(score);
+}
+
+function maybeShowOutlookNotification(score) {
+	const item = Office.context.mailbox.item;
+	const messages = item?.notificationMessages;
+	if (!messages) return;
+	const KEY = 'mp-priority';
+	const isHigh = (score.label === 'direct' || score.label === 'action')
+		&& (score.action_required === true || score.action_required === 1)
+		&& (score.priority ?? 0) >= 4;
+	if (!isHigh) {
+		try { messages.removeAsync(KEY, () => {}); } catch (_) {}
+		return;
+	}
+	const text = score.label === 'action'
+		? `Wichtige Antwort/Aktion erforderlich (Priorität ${score.priority}).`
+		: `Wichtige direkte Mail (Priorität ${score.priority}).`;
+	try {
+		messages.replaceAsync(KEY, {
+			type:    Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
+			message: text.slice(0, 150),
+			icon:    'icon-16',
+			persistent: true,
+		}, () => {});
+	} catch (_) {}
 }
 
 async function summarizeCurrent() {
@@ -851,6 +882,8 @@ function initSettings() {
 		} catch (err) { handleError(err); }
 	});
 
+	document.getElementById('btn-save-autosort')?.addEventListener('click', saveAutoSort);
+
 	document.getElementById('btn-export').addEventListener('click', async () => {
 		try {
 			const data = await api.me.export();
@@ -876,13 +909,61 @@ function initSettings() {
 
 async function loadSettings() {
 	try {
-		const [vip, red] = await Promise.all([
+		const [vip, red, autosort] = await Promise.all([
 			api.settings.listVip(),
 			api.settings.listRedaction(),
+			api.settings.listAutoSort(),
 		]);
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
 		renderList('red-list', red.items ?? [], (r) => `<code>${escape(r.pattern)}</code> — ${escape(r.description ?? '')}`, 'deleteRedaction');
+		renderAutoSortRules(autosort.rules ?? []);
 	} catch (err) {
+		handleError(err);
+	}
+}
+
+function renderAutoSortRules(rules) {
+	const tbody = document.getElementById('autosort-rows');
+	if (!tbody) return;
+	tbody.innerHTML = '';
+	rules.forEach((r) => {
+		const tr = document.createElement('tr');
+		tr.dataset.label = r.label;
+		const isProtectedLabel = r.label === 'direct' || r.label === 'action';
+		const hint = isProtectedLabel ? ' <small class="mp-muted">(nur Prio &lt; 4)</small>' : '';
+		tr.innerHTML = `
+			<td><span class="mp-badge" data-label="${escape(r.label)}">${labelText(r.label)}</span>${hint}</td>
+			<td><label class="mp-switch"><input type="checkbox" class="autosort-enabled" ${r.enabled ? 'checked' : ''}><span></span></label></td>
+			<td><input type="text" class="autosort-folder" value="${escape(r.folder_name ?? '')}" placeholder="MailPilot/${labelText(r.label)}"></td>
+		`;
+		if (r.last_error) {
+			const errCell = document.createElement('td');
+			errCell.className = 'mp-error-hint';
+			errCell.title = r.last_error;
+			errCell.textContent = '⚠';
+			tr.appendChild(errCell);
+		}
+		tbody.appendChild(tr);
+	});
+}
+
+async function saveAutoSort() {
+	const tbody = document.getElementById('autosort-rows');
+	if (!tbody) return;
+	const rules = Array.from(tbody.querySelectorAll('tr')).map((tr) => ({
+		label:       tr.dataset.label,
+		enabled:     tr.querySelector('.autosort-enabled').checked,
+		folder_name: tr.querySelector('.autosort-folder').value.trim(),
+	}));
+	const status = document.getElementById('autosort-status');
+	status.textContent = 'Speichere…';
+	try {
+		const res = await api.settings.updateAutoSort(rules);
+		renderAutoSortRules(res.rules ?? []);
+		status.textContent = `${res.updated ?? 0} Regeln gespeichert.`;
+		showToast('Auto-Sort gespeichert', 'success', 3000);
+	} catch (err) {
+		status.textContent = '';
 		handleError(err);
 	}
 }
