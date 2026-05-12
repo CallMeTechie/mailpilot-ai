@@ -137,7 +137,15 @@ input:focus, textarea:focus {
 	border-top: 1px solid var(--mp-border);
 	padding: var(--mp-sp-2) var(--mp-sp-4);
 	font-size: 12px;
+	display: flex; align-items: center; gap: var(--mp-sp-3);
 }
+.mp-footer #status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-footer-stat { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--mp-muted, #64748b); }
+.mp-footer-stat[data-hidden="true"] { display: none; }
+.mp-budget-warn  { color: #b45309; }
+.mp-budget-crit  { color: #b91c1c; font-weight: 500; }
+.mp-worker-ok    { color: #15803d; }
+.mp-worker-stale { color: #b91c1c; font-weight: 500; }
 
 /* --- Sections --- */
 .mp-section { margin-bottom: var(--mp-sp-6); }

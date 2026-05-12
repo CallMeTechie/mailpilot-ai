@@ -35,6 +35,12 @@ $pdo    = $kernel->get(\PDO::class);
 
 $log->info('worker.start');
 
+// Heartbeat marker so the add-in (and admin dashboard) can tell whether
+// the worker is alive. INSERT IGNORE on first start, UPDATE every tick.
+$pdo->prepare('INSERT IGNORE INTO system_settings (`key`, `value`, `type`, description)
+	VALUES ("worker.last_seen", :v, "string", "Worker heartbeat (UTC ISO-8601)")')
+	->execute([':v' => gmdate('Y-m-d\TH:i:s\Z')]);
+
 $redis = null;
 try {
 	$redis = new \Redis();
@@ -45,8 +51,12 @@ try {
 
 $lastHousekeepingDay = null;
 
+$heartbeat = $pdo->prepare('UPDATE system_settings SET `value` = :v WHERE `key` = "worker.last_seen"');
+
 while (true) {
 	try {
+		$heartbeat->execute([':v' => gmdate('Y-m-d\TH:i:s\Z')]);
+
 		$jobHint = null;
 		if ($redis !== null) {
 			$popped = $redis->brPop(['mailpilot:sync'], 2);
@@ -188,6 +198,14 @@ function runSyncJob(Kernel $kernel, \Monolog\Logger $log, \PDO $pdo, array $job)
 			]);
 
 		$log->info('worker.job_done', $job + $result);
+	} catch (\MailPilot\Services\BudgetExceededException $e) {
+		// Tag the error_text so the add-in can distinguish a hard budget
+		// stop from a generic worker crash and show the right toast.
+		$log->info('worker.job_blocked', ['job' => $job['job_id'], 'scope' => $e->scope]);
+		$pdo->prepare('UPDATE sync_jobs
+			SET status = "error", finished_at = UTC_TIMESTAMP(3), error_text = :err
+			WHERE id = :id')
+			->execute([':id' => $job['job_id'], ':err' => 'BUDGET_EXCEEDED: ' . $e->getMessage()]);
 	} catch (\Throwable $e) {
 		$log->error('worker.job_error', ['job' => $job['job_id'], 'err' => $e->getMessage()]);
 		$pdo->prepare('UPDATE sync_jobs

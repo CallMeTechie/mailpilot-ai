@@ -530,6 +530,8 @@ function renderBriefing(data) {
 	document.getElementById('c-auto').textContent       = c.auto ?? 0;
 	document.getElementById('c-noise').textContent      = c.noise ?? 0;
 
+	renderFooterStats(data);
+
 	const total = Object.values(c).reduce((a, b) => a + b, 0);
 	document.getElementById('briefing-subtitle').textContent =
 		`${total} neue Mails · ${c.direct ?? 0} direkt · ${c.action ?? 0} mit Aktion`;
@@ -593,56 +595,147 @@ function onItemChanged() {
 	loadCurrentMailScore(msMessageId);
 }
 
-async function loadCurrentMailScore(msMessageId, attempt = 0) {
+async function loadCurrentMailScore(msMessageId) {
 	const MAX_POLL_ATTEMPTS = 20;   // 20 × 3s = 60s budget for first-sync
 	const POLL_INTERVAL_MS  = 3000;
+	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-	// Loader stays visible for the entire polling window; only hidden
-	// when the score arrives or the budget is exhausted.
 	toggle('current-loader', true);
 	toggle('current-content', false);
 
+	// 1. Cheap optimistic check — mail might already be scored.
 	try {
-		const result = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
-		const row = result.items?.[0];
-
-		if (row) {
-			renderCurrentMail(row);
+		const initial = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
+		if (initial.items?.[0]) {
+			renderCurrentMail(initial.items[0]);
 			toggle('current-loader', false);
 			toggle('current-content', true);
 			return;
 		}
-
-		// Not yet scored.
-		if (attempt === 0) {
-			// Kick the worker on the first miss; subsequent polls just wait for it.
-			try { await api.sync.trigger(); } catch (_) { /* tolerate already-running */ }
-		}
-
-		if (attempt + 1 >= MAX_POLL_ATTEMPTS) {
-			toggle('current-loader', false);
-			setStatus('Sync dauert länger als erwartet — bitte „Aktualisieren" im Briefing-Tab probieren.');
-			return;
-		}
-
-		// Bail out if the user moved to another mail in the meantime.
-		if (state.currentMailId !== msMessageId) {
-			return;
-		}
-
-		setTimeout(() => loadCurrentMailScore(msMessageId, attempt + 1), POLL_INTERVAL_MS);
 	} catch (err) {
-		toggle('current-loader', false);
-		if (err instanceof ApiError && err.status === 401) {
-			// Token was cleared by api.js — bounce to the briefing tab so the
-			// user finds the login button.
-			toggle('current-header', false);
-			toggle('current-empty', true);
-			document.querySelector('.mp-tab[data-tab="briefing"]')?.click();
-			return;
-		}
-		handleError(err);
+		return handleCurrentMailError(err);
 	}
+
+	// 2. Kick the worker. Remember the job ids so we can read job state
+	// during polling — without this the add-in is blind to budget blocks
+	// and worker failures and just times out generically after 60 s.
+	let jobIds = [];
+	try {
+		const res = await api.sync.trigger();
+		jobIds = Array.isArray(res?.job_ids) ? res.job_ids : [];
+	} catch (err) {
+		if (err instanceof ApiError && err.status === 401) {
+			return bounceToLogin();
+		}
+		// Otherwise tolerate — sync may already be running.
+	}
+
+	// 3. Poll mail row + sync job state in lockstep.
+	for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+		await sleep(POLL_INTERVAL_MS);
+
+		if (state.currentMailId !== msMessageId) return;
+
+		// 3a) Mail row appeared → done.
+		try {
+			const result = await api.mails.list(`?ms_message_id=${encodeURIComponent(msMessageId)}&limit=1`);
+			if (result.items?.[0]) {
+				renderCurrentMail(result.items[0]);
+				toggle('current-loader', false);
+				toggle('current-content', true);
+				return;
+			}
+		} catch (err) {
+			return handleCurrentMailError(err);
+		}
+
+		// 3b) Inspect job status — surface budget blocks and worker errors
+		// instead of silently waiting them out.
+		for (const jobId of jobIds) {
+			let job = null;
+			try { job = await api.sync.status(jobId); } catch (_) { continue; }
+			if (!job) continue;
+
+			if (job.status === 'error') {
+				toggle('current-loader', false);
+				const text = String(job.error_text ?? '');
+				if (text.startsWith('BUDGET_EXCEEDED') || text.includes('Tageslimit')) {
+					showToast('Tageslimit erreicht — heute keine neuen Analysen mehr.', 'warn', 9000);
+				} else {
+					showToast(`Analyse fehlgeschlagen: ${text || 'unbekannt'}`, 'error', 8000);
+				}
+				return;
+			}
+
+			// Worker finished but the mail never made it into our DB:
+			// Microsoft Graph's delta did not return it (subfolder routing,
+			// stale delta-cursor, …). No point waiting further.
+			if (job.status === 'done' && attempt >= 3) {
+				toggle('current-loader', false);
+				showToast('Mail wurde nicht synchronisiert — bitte Briefing aktualisieren.', 'info', 7000);
+				return;
+			}
+		}
+	}
+
+	// 4. Soft fallback. Either the worker is genuinely slow or no jobs
+	// were enqueued (we tolerated the trigger error). Offer a retry
+	// instead of the old "dauert länger" dead-end.
+	toggle('current-loader', false);
+	showToast('Analyse hat zu lange gedauert. Erneut versuchen?', 'info', 9000);
+	setStatus('Analyse abgebrochen');
+}
+
+function renderFooterStats(data) {
+	const budget = data.budget;
+	const budgetEl = document.getElementById('mp-budget');
+	if (budgetEl && budget && budget.user_limit > 0) {
+		const used  = compactNumber(budget.user_used);
+		const limit = compactNumber(budget.user_limit);
+		const pct   = budget.percent;
+		budgetEl.textContent = `${used} / ${limit} Tokens (${pct}%)`;
+		budgetEl.classList.remove('mp-budget-warn', 'mp-budget-crit');
+		if (pct >= 100)      budgetEl.classList.add('mp-budget-crit');
+		else if (pct >= 80)  budgetEl.classList.add('mp-budget-warn');
+		toggle('mp-budget', true);
+	}
+
+	const worker = data.worker;
+	const workerEl = document.getElementById('mp-worker');
+	if (workerEl && worker) {
+		workerEl.classList.remove('mp-worker-ok', 'mp-worker-stale');
+		if (worker.healthy) {
+			workerEl.textContent = '● Worker';
+			workerEl.classList.add('mp-worker-ok');
+			workerEl.title = 'Worker aktiv · letzter Heartbeat ' + (worker.last_seen || '?');
+		} else {
+			workerEl.textContent = '● Worker offline';
+			workerEl.classList.add('mp-worker-stale');
+			workerEl.title = 'Worker nicht erreichbar · letzter Heartbeat ' + (worker.last_seen || '?');
+		}
+		toggle('mp-worker', true);
+	}
+}
+
+function compactNumber(n) {
+	n = Number(n) || 0;
+	if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace('.0', '') + 'M';
+	if (n >= 1_000)     return (n / 1_000).toFixed(1).replace('.0', '') + 'k';
+	return String(n);
+}
+
+function handleCurrentMailError(err) {
+	toggle('current-loader', false);
+	if (err instanceof ApiError && err.status === 401) {
+		return bounceToLogin();
+	}
+	handleError(err);
+}
+
+function bounceToLogin() {
+	toggle('current-header', false);
+	toggle('current-empty', true);
+	document.querySelector('.mp-tab[data-tab="briefing"]')?.click();
 }
 
 function renderCurrentMail(row) {

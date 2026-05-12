@@ -7,6 +7,8 @@ use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\ScoreRepository;
+use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\UsageRepository;
 
 final class BriefingController extends BaseController
 {
@@ -45,10 +47,37 @@ final class BriefingController extends BaseController
 		});
 		$top = array_slice($top, 0, 10);
 
+		// Budget + worker info so the add-in footer can show a live
+		// "12k / 100k Tokens" badge and a worker-alive indicator. Both
+		// are cheap reads from settings/usage_daily.
+		$settings = $this->kernel->get(SettingsRepository::class);
+		$usage    = $this->kernel->get(UsageRepository::class);
+
+		$userLimit = $settings->getInt('budget.user.daily_tokens', 0);
+		$userUsed  = $usage->outputTokensToday($ctx['tenant_id'], $ctx['user_id']);
+		$pct       = $userLimit > 0 ? min(100, (int)round(($userUsed / $userLimit) * 100)) : 0;
+
+		$lastSeen   = $settings->getString('worker.last_seen', '');
+		$workerOk   = false;
+		if ($lastSeen !== '') {
+			$age = time() - strtotime($lastSeen);
+			$workerOk = $age >= 0 && $age < 120; // 2-minute grace
+		}
+
 		Response::json([
 			'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
 			'counters'     => $countersTotal,
 			'top_priority' => $top,
+			'budget'       => [
+				'user_used'  => $userUsed,
+				'user_limit' => $userLimit,
+				'percent'    => $pct,
+				'enforcement_mode' => $settings->getString('budget.enforcement_mode', 'enforce'),
+			],
+			'worker'       => [
+				'last_seen' => $lastSeen,
+				'healthy'   => $workerOk,
+			],
 		]);
 	}
 }
