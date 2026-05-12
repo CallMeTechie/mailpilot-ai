@@ -39,6 +39,10 @@ COPY addin/assets/             /app/public/assets/
 # auth-complete.html lives under /addin/ because AuthController redirects
 # to "${base_url}/addin/auth-complete.html#token=…"
 COPY addin/auth-complete.html  /app/public/addin/auth-complete.html
+# auth-redirect.html is the first hop of the Office Dialog OAuth flow.
+# Was hot-patched into running containers in May 2026 but never made
+# it into the image — a fresh pull broke login until this line.
+COPY addin/auth-redirect.html  /app/public/addin/auth-redirect.html
 
 COPY docker/nginx.conf         /etc/nginx/nginx.conf
 COPY docker/supervisord.conf   /etc/supervisord.conf
