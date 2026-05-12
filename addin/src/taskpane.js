@@ -604,8 +604,15 @@ async function loadCurrentMailScore(msMessageId) {
 	// no delta-cursor roulette, no 60-second timeout window.
 	toggle('current-loader', true);
 	toggle('current-content', false);
-	// New mail in focus → forget any previous detailed summary.
+	// New mail in focus → drop everything that referenced the previous
+	// one: the detailed summary flag, the unsent draft (textarea +
+	// visibility), and the action-required banner. renderCurrentMail
+	// will re-derive these for the new mail's score.
 	delete document.getElementById('current-summary').dataset.detailed;
+	toggle('draft-section', false);
+	const draftTextEl = document.getElementById('draft-text');
+	if (draftTextEl) draftTextEl.value = '';
+	toggle('current-action-section', false);
 
 	try {
 		const res = await api.mails.ensureScored(msMessageId);
@@ -759,7 +766,21 @@ async function rescoreCurrent() {
 
 function useDraft() {
 	const text = document.getElementById('draft-text').value;
-	Office.context.mailbox.item.displayReplyForm(text);
+	if (!text) return;
+	// Outlook renders reply bodies as HTML; a plain string drops every
+	// line break because HTML collapses consecutive whitespace. Convert
+	// blank-line-separated blocks to <p>, single newlines to <br>, and
+	// escape special characters so user-typed "<" doesn't break the
+	// composed message.
+	const esc = (s) => s
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+	const html = text
+		.split(/\r?\n\s*\r?\n/)
+		.map((p) => '<p>' + esc(p).replace(/\r?\n/g, '<br>') + '</p>')
+		.join('');
+	Office.context.mailbox.item.displayReplyForm({ htmlBody: html });
 }
 
 // ============================================================
