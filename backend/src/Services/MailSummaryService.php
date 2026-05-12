@@ -17,11 +17,12 @@ final class MailSummaryService
 		private readonly MailRepository $mails,
 		private readonly SummaryRepository $summaries,
 		private readonly RedactionService $redactor,
+		private readonly BudgetService $budget,
 		private readonly string $model,
 	) {
 	}
 
-	public function summarize(string $tenantId, string $mailId, string $userEmail, string $language): string
+	public function summarize(string $tenantId, string $mailId, string $userEmail, string $language, ?string $userId = null): string
 	{
 		$existing = $this->summaries->findByMailId($tenantId, $mailId);
 		if ($existing !== null) {
@@ -55,12 +56,38 @@ TXT;
 			. "Subject: {$mail['subject']}\n"
 			. "---\n" . $body;
 
-		// Claude 4.x rejects "temperature" with HTTP 400.
-		$resp = $this->claude->messages([
-			'model'      => $this->model,
-			'max_tokens' => 400,
-			'system'     => $system,
-			'messages'   => [['role' => 'user', 'content' => $user]],
+		$start = microtime(true);
+		try {
+			// Claude 4.x rejects "temperature" with HTTP 400.
+			$resp = $this->claude->messages([
+				'model'      => $this->model,
+				'max_tokens' => 400,
+				'system'     => $system,
+				'messages'   => [['role' => 'user', 'content' => $user]],
+			]);
+		} catch (\Throwable $e) {
+			$this->budget->recordUsage([
+				'tenant_id' => $tenantId, 'user_id' => $userId,
+				'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
+				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'input_tokens' => 0, 'output_tokens' => 0,
+				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
+				'duration_ms' => (int)((microtime(true) - $start) * 1000),
+				'status' => 'error', 'error_text' => substr($e->getMessage(), 0, 500),
+			]);
+			throw $e;
+		}
+		$u = $resp['usage'] ?? [];
+		$this->budget->recordUsage([
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+			'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
+			'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
+			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
+			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
+			'cache_creation_tokens' => (int)($u['cache_creation_input_tokens'] ?? 0),
+			'duration_ms' => (int)((microtime(true) - $start) * 1000),
+			'status' => 'success', 'error_text' => null,
 		]);
 
 		$text = ClaudeClient::extractText($resp);

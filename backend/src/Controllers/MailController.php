@@ -74,6 +74,7 @@ final class MailController extends BaseController
 				(string)$params['id'],
 				$ctx['email'],
 				(string)($userRow['language'] ?? 'de'),
+				$ctx['user_id'],
 			);
 		Response::json(['summary' => $summary]);
 	}
@@ -83,7 +84,7 @@ final class MailController extends BaseController
 		$ctx = $this->requireAuth();
 		$instruction = isset($body['instruction']) ? (string)$body['instruction'] : null;
 		$draft = $this->kernel->get(ReplyDraftService::class)
-			->draft($ctx['tenant_id'], (string)$params['id'], $instruction);
+			->draft($ctx['tenant_id'], (string)$params['id'], $instruction, $ctx['user_id']);
 		Response::json(['draft' => $draft]);
 	}
 
@@ -233,6 +234,8 @@ final class MailController extends BaseController
 		$kws = array_column($kwStmt->fetchAll(\PDO::FETCH_ASSOC), 'keyword');
 
 		return [
+			'tenant_id'        => $ctx['tenant_id'],
+			'user_id'          => $ctx['user_id'],
 			'email'            => $ctx['email'],
 			'language'         => (string)($userRow['language'] ?? 'de'),
 			'vip_senders'      => $vips,

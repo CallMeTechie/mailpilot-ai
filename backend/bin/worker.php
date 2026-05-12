@@ -160,6 +160,8 @@ function runSyncJob(Kernel $kernel, \Monolog\Logger $log, \PDO $pdo, array $job)
 		$kwStmt->execute([':u' => $mailbox['user_id']]);
 
 		$profile = [
+			'tenant_id'        => (string)$mailbox['tenant_id'],
+			'user_id'          => (string)$mailbox['user_id'],
 			'email'            => (string)($user['email'] ?? ''),
 			'language'         => (string)($user['language'] ?? 'de'),
 			'vip_senders'      => array_column($vipStmt->fetchAll(\PDO::FETCH_ASSOC), 'email'),

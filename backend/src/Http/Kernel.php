@@ -11,11 +11,15 @@ use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
+use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\ScoreRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\SummaryRepository;
+use MailPilot\Repositories\UsageRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
+use MailPilot\Services\BudgetService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
@@ -91,6 +95,15 @@ class Kernel
 				$this->get(PDO::class),
 				(int)$this->config['limits']['cache_ttl_days'],
 			),
+			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
+			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
+			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
+			BudgetService::class      => new BudgetService(
+				$this->get(SettingsRepository::class),
+				$this->get(UsageRepository::class),
+				$this->get(PricingRepository::class),
+				$this->get(Logger::class),
+			),
 			RedactionService::class   => new RedactionService(),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],
@@ -110,6 +123,7 @@ class Kernel
 				$this->get(ScoreRepository::class),
 				$this->get(CacheRepository::class),
 				$this->get(RedactionService::class),
+				$this->get(BudgetService::class),
 				$this->config['claude']['model_scoring'],
 				(int)$this->config['limits']['scoring_batch_size'],
 				(int)$this->config['limits']['max_body_bytes'],
@@ -120,6 +134,7 @@ class Kernel
 				$this->get(MailRepository::class),
 				$this->get(SummaryRepository::class),
 				$this->get(RedactionService::class),
+				$this->get(BudgetService::class),
 				$this->config['claude']['model_summary'],
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
@@ -127,6 +142,7 @@ class Kernel
 				$this->get(MailRepository::class),
 				$this->get(DraftRepository::class),
 				$this->get(RedactionService::class),
+				$this->get(BudgetService::class),
 				$this->config['claude']['model_reply'],
 			),
 			SyncService::class        => new SyncService(

@@ -29,6 +29,7 @@ final class MailScoringService
 		private readonly ScoreRepository $scores,
 		private readonly CacheRepository $cache,
 		private readonly RedactionService $redactor,
+		private readonly BudgetService $budget,
 		private readonly string $model,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
@@ -140,16 +141,25 @@ final class MailScoringService
 		// the whole batch).
 		$maxTokens = max(2000, count($mails) * 160 + 400);
 
-		// temperature was 0.1 — Claude 4.x rejects the parameter as
-		// deprecated and returns HTTP 400. Default sampling is fine for
-		// scoring; the system prompt is strict enough to suppress
-		// variance.
-		$response = $this->claude->messages([
-			'model'      => $this->model,
-			'max_tokens' => $maxTokens,
-			'system'     => $system,
-			'messages'   => [['role' => 'user', 'content' => $user]],
-		]);
+		$tenantId  = (string)($userProfile['tenant_id'] ?? '');
+		$userId    = (string)($userProfile['user_id'] ?? '') ?: null;
+		$mailboxId = (string)($mails[0]['mailbox_id'] ?? '') ?: null;
+
+		$start = microtime(true);
+		try {
+			// temperature was 0.1 — Claude 4.x rejects the parameter as
+			// deprecated and returns HTTP 400.
+			$response = $this->claude->messages([
+				'model'      => $this->model,
+				'max_tokens' => $maxTokens,
+				'system'     => $system,
+				'messages'   => [['role' => 'user', 'content' => $user]],
+			]);
+		} catch (\Throwable $e) {
+			$this->recordCall($tenantId, $userId, $mailboxId, null, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage());
+			throw $e;
+		}
+		$this->recordCall($tenantId, $userId, $mailboxId, null, $response['usage'] ?? [], (int)((microtime(true) - $start) * 1000), 'success', null);
 
 		$text = ClaudeClient::extractText($response);
 		$text = $this->stripCodeFences($text);
@@ -290,4 +300,34 @@ TXT;
 		return mb_strlen($s) > $max ? mb_substr($s, 0, $max - 1) . '…' : $s;
 	}
 
+	/**
+	 * @param array<string, mixed> $usage anthropic usage block from /v1/messages
+	 */
+	private function recordCall(
+		string $tenantId,
+		?string $userId,
+		?string $mailboxId,
+		?string $mailId,
+		array $usage,
+		int $durationMs,
+		string $status,
+		?string $errorText,
+	): void {
+		if ($tenantId === '') return; // not enough context to attribute the call
+		$this->budget->recordUsage([
+			'tenant_id'              => $tenantId,
+			'user_id'                => $userId,
+			'mailbox_id'             => $mailboxId,
+			'mail_id'                => $mailId,
+			'prompt_version'         => self::PROMPT_VERSION,
+			'model'                  => $this->model,
+			'input_tokens'           => (int)($usage['input_tokens']                 ?? 0),
+			'output_tokens'          => (int)($usage['output_tokens']                ?? 0),
+			'cache_read_tokens'      => (int)($usage['cache_read_input_tokens']      ?? 0),
+			'cache_creation_tokens'  => (int)($usage['cache_creation_input_tokens']  ?? 0),
+			'duration_ms'            => $durationMs,
+			'status'                 => $status,
+			'error_text'             => $errorText !== null ? substr($errorText, 0, 500) : null,
+		]);
+	}
 }

@@ -17,11 +17,12 @@ final class ReplyDraftService
 		private readonly MailRepository $mails,
 		private readonly DraftRepository $drafts,
 		private readonly RedactionService $redactor,
+		private readonly BudgetService $budget,
 		private readonly string $model,
 	) {
 	}
 
-	public function draft(string $tenantId, string $mailId, ?string $instruction = null): string
+	public function draft(string $tenantId, string $mailId, ?string $instruction = null, ?string $userId = null): string
 	{
 		$mail = $this->mails->findById($tenantId, $mailId);
 		if ($mail === null) {
@@ -55,13 +56,38 @@ TXT;
 		$user = "ORIGINAL_MAIL:\nFrom: {$mail['from_name']} <{$mail['from_email']}>\n"
 			. "Subject: {$mail['subject']}\n---\n{$body}{$instr}\n\nEntwirf die Antwort.";
 
-		// Claude 4.x rejects "temperature" — let the model default. The
-		// system prompt already pins the response style.
-		$resp = $this->claude->messages([
-			'model'      => $this->model,
-			'max_tokens' => 800,
-			'system'     => $system,
-			'messages'   => [['role' => 'user', 'content' => $user]],
+		$start = microtime(true);
+		try {
+			// Claude 4.x rejects "temperature" — let the model default.
+			$resp = $this->claude->messages([
+				'model'      => $this->model,
+				'max_tokens' => 800,
+				'system'     => $system,
+				'messages'   => [['role' => 'user', 'content' => $user]],
+			]);
+		} catch (\Throwable $e) {
+			$this->budget->recordUsage([
+				'tenant_id' => $tenantId, 'user_id' => $userId,
+				'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
+				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'input_tokens' => 0, 'output_tokens' => 0,
+				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
+				'duration_ms' => (int)((microtime(true) - $start) * 1000),
+				'status' => 'error', 'error_text' => substr($e->getMessage(), 0, 500),
+			]);
+			throw $e;
+		}
+		$u = $resp['usage'] ?? [];
+		$this->budget->recordUsage([
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+			'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
+			'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
+			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
+			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
+			'cache_creation_tokens' => (int)($u['cache_creation_input_tokens'] ?? 0),
+			'duration_ms' => (int)((microtime(true) - $start) * 1000),
+			'status' => 'success', 'error_text' => null,
 		]);
 
 		$draft = ClaudeClient::extractText($resp);
