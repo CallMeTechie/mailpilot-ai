@@ -15,6 +15,47 @@ const state = {
 	filterLabel: null,
 };
 
+/**
+ * Clear every UI element that referenced the previously-focused mail
+ * — score badges, summary, action banner, drafted reply, plus the
+ * state.currentMailData reference itself so any in-flight handler
+ * (summarizeCurrent / draftCurrent / rescoreCurrent) that fires
+ * between mail-switch and re-render bails out instead of pinning the
+ * old mail's id to the new mail's UI.
+ *
+ * Does NOT touch the header (current-subject / current-from) — the
+ * caller updates those from Office.context.mailbox.item right after.
+ * Does NOT touch toasts — those are global and should outlive a
+ * mail switch.
+ */
+function resetCurrentMailUi() {
+	state.currentMailData = null;
+
+	// Score block
+	toggle('current-content', false);
+	toggle('current-action-section', false);
+	const badge = document.getElementById('current-badge');
+	if (badge) {
+		badge.textContent = '—';
+		badge.dataset.label = '';
+		toggle('current-badge', false);
+	}
+	const prio = document.getElementById('current-priority');
+	if (prio) prio.textContent = '';
+	const action = document.getElementById('current-action');
+	if (action) action.textContent = '';
+	const summary = document.getElementById('current-summary');
+	if (summary) {
+		summary.textContent = '—';
+		delete summary.dataset.detailed;
+	}
+
+	// Draft block
+	toggle('draft-section', false);
+	const draftText = document.getElementById('draft-text');
+	if (draftText) draftText.value = '';
+}
+
 // Available bulk actions. `confirm` requires a user confirm() before running.
 // `icon` is an inline SVG (feather-style stroke) shown on the icon button.
 const BULK_ACTIONS = {
@@ -573,10 +614,9 @@ function onItemChanged() {
 	const item = Office.context.mailbox.item;
 	if (!item || !item.itemId) {
 		state.currentMailId = null;
-		state.currentMailData = null;
+		resetCurrentMailUi();
 		toggle('current-header', false);
 		toggle('current-loader', false);
-		toggle('current-content', false);
 		toggle('current-empty', true);
 		return;
 	}
@@ -602,17 +642,8 @@ async function loadCurrentMailScore(msMessageId) {
 	// Single synchronous call: backend fetches the mail directly from
 	// Graph if missing, scores it inline, returns the row. No polling,
 	// no delta-cursor roulette, no 60-second timeout window.
+	resetCurrentMailUi();
 	toggle('current-loader', true);
-	toggle('current-content', false);
-	// New mail in focus → drop everything that referenced the previous
-	// one: the detailed summary flag, the unsent draft (textarea +
-	// visibility), and the action-required banner. renderCurrentMail
-	// will re-derive these for the new mail's score.
-	delete document.getElementById('current-summary').dataset.detailed;
-	toggle('draft-section', false);
-	const draftTextEl = document.getElementById('draft-text');
-	if (draftTextEl) draftTextEl.value = '';
-	toggle('current-action-section', false);
 
 	try {
 		const res = await api.mails.ensureScored(msMessageId);
@@ -721,9 +752,14 @@ function renderCurrentMail(row) {
 
 async function summarizeCurrent() {
 	if (!state.currentMailData) return;
+	const expectedMailId = state.currentMailId;
+	const mailDbId = state.currentMailData.id;
 	setStatus('Zusammenfassung wird erstellt…');
 	try {
-		const res = await api.mails.summarize(state.currentMailData.id);
+		const res = await api.mails.summarize(mailDbId);
+		// User moved on while Claude was thinking — don't paint a stale
+		// summary onto the new mail's panel.
+		if (state.currentMailId !== expectedMailId) return;
 		const text = res?.summary;
 		if (!text) {
 			showToast('Backend lieferte keine Zusammenfassung.', 'error', 6000);
@@ -732,7 +768,7 @@ async function summarizeCurrent() {
 		}
 		const el = document.getElementById('current-summary');
 		el.textContent = text;
-		el.dataset.detailed = '1';  // mark so the score-summary doesn't overwrite it later
+		el.dataset.detailed = '1';
 		setStatus('Zusammenfassung fertig');
 	} catch (err) {
 		handleError(err);
@@ -741,10 +777,13 @@ async function summarizeCurrent() {
 
 async function draftCurrent() {
 	if (!state.currentMailData) return;
+	const expectedMailId = state.currentMailId;
+	const mailDbId = state.currentMailData.id;
 	setStatus('Antwort wird entworfen…');
 	try {
-		const res = await api.mails.draftReply(state.currentMailData.id);
-		document.getElementById('draft-text').value = res.draft;
+		const res = await api.mails.draftReply(mailDbId);
+		if (state.currentMailId !== expectedMailId) return;
+		document.getElementById('draft-text').value = res.draft ?? '';
 		toggle('draft-section', true);
 		setStatus('Entwurf bereit');
 	} catch (err) {
@@ -754,9 +793,12 @@ async function draftCurrent() {
 
 async function rescoreCurrent() {
 	if (!state.currentMailData) return;
+	const expectedMailId = state.currentMailId;
+	const mailDbId = state.currentMailData.id;
 	setStatus('Neu bewerten…');
 	try {
-		await api.mails.rescore(state.currentMailData.id);
+		await api.mails.rescore(mailDbId);
+		if (state.currentMailId !== expectedMailId) return;
 		await loadCurrentMailScore(state.currentMailId);
 		setStatus('Neu bewertet');
 	} catch (err) {
