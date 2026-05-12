@@ -6,9 +6,12 @@ namespace MailPilot\Controllers;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
+use MailPilot\Services\AutoSortService;
+use MailPilot\Services\TokenService;
 
 final class SettingsController extends BaseController
 {
@@ -126,6 +129,102 @@ final class SettingsController extends BaseController
 		Response::json([
 			'updated' => $count,
 			'rules'   => $repo->listForUser($ctx['tenant_id'], $ctx['user_id']),
+		]);
+	}
+
+	/**
+	 * Apply currently-enabled auto-sort rules to mails that are already in
+	 * the DB (scored from a previous sync but not moved because the rule
+	 * was disabled at the time, or because they predate Phase 3 entirely).
+	 *
+	 * Body: {"limit": 50}  // optional, default 50, max 200
+	 *
+	 * Synchronous and paginated. The add-in calls in a loop until
+	 * has_more = false. Each chunk is one HTTP round-trip + N Graph
+	 * moves so a 30 s page is plenty even on slow links.
+	 */
+	public function applyAutoSortNow(array $params, array $body): void
+	{
+		$ctx   = $this->requireAuth();
+		$limit = max(1, min(200, (int)($body['limit'] ?? 50)));
+
+		$rules = $this->kernel->get(AutoSortRepository::class)
+			->listForUser($ctx['tenant_id'], $ctx['user_id']);
+		$activeLabels = array_values(array_map(
+			static fn(array $r): string => (string)$r['label'],
+			array_filter($rules, static fn(array $r): bool => (bool)$r['enabled']),
+		));
+		if ($activeLabels === []) {
+			Response::json(['processed' => 0, 'moved' => 0, 'protected' => 0, 'errors' => 0, 'has_more' => false]);
+			return;
+		}
+
+		$mailboxes = $this->kernel->get(MailboxRepository::class)
+			->findByUser($ctx['tenant_id'], $ctx['user_id']);
+		if ($mailboxes === []) {
+			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
+		}
+
+		// Candidate mails: scored, label in active set, high-priority direct/action
+		// already filtered out so the count == real workload (UI progress is honest).
+		$pdo = $this->kernel->get(\PDO::class);
+		$place = implode(',', array_fill(0, count($activeLabels), '?'));
+		$sql = "SELECT m.*, s.label AS score_label, s.priority AS score_priority, s.action_required AS score_ar
+			FROM mails m
+			INNER JOIN mail_scores s ON s.mail_id = m.id
+			WHERE m.tenant_id = ?
+			  AND m.deleted_at IS NULL
+			  AND s.label IN ($place)
+			  AND NOT (s.label IN ('direct','action') AND s.priority >= 4)
+			ORDER BY m.received_at DESC
+			LIMIT " . ($limit + 1);
+		$args = array_merge([$ctx['tenant_id']], $activeLabels);
+		$stmt = $pdo->prepare($sql);
+		$stmt->execute($args);
+		$rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+		$hasMore = count($rows) > $limit;
+		$rows    = array_slice($rows, 0, $limit);
+
+		// Per-mailbox token cache so we don't refresh on every iteration.
+		$tokens = $this->kernel->get(TokenService::class);
+		$autoSort = $this->kernel->get(AutoSortService::class);
+		$tokenByMailbox = [];
+
+		$moved = 0; $protected = 0; $errors = 0;
+		foreach ($rows as $row) {
+			$mailboxId = (string)$row['mailbox_id'];
+			if (!isset($tokenByMailbox[$mailboxId])) {
+				$mb = null;
+				foreach ($mailboxes as $cand) {
+					if ((string)$cand['id'] === $mailboxId) { $mb = $cand; break; }
+				}
+				if ($mb === null) { $errors++; continue; }
+				$tokenByMailbox[$mailboxId] = $tokens->ensureFreshAccessToken($mb);
+			}
+			$score = [
+				'label'           => $row['score_label'],
+				'priority'        => $row['score_priority'],
+				'action_required' => $row['score_ar'],
+			];
+			$res = $autoSort->applyToScoredMail(
+				$tokenByMailbox[$mailboxId],
+				$ctx['tenant_id'],
+				$ctx['user_id'],
+				$row,
+				$score,
+			);
+			if (!empty($res['moved']))                          $moved++;
+			elseif (($res['reason'] ?? '') === 'high_priority_protected') $protected++;
+			elseif (($res['reason'] ?? '') === 'graph_error')   $errors++;
+		}
+
+		Response::json([
+			'processed' => count($rows),
+			'moved'     => $moved,
+			'protected' => $protected,
+			'errors'    => $errors,
+			'has_more'  => $hasMore,
 		]);
 	}
 }

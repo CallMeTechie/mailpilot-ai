@@ -46,6 +46,7 @@ $router->get ('/api/v1/settings/redaction',      'SettingsController@listRedacti
 $router->post('/api/v1/settings/redaction',      'SettingsController@addRedaction');
 $router->get ('/api/v1/settings/auto-sort',      'SettingsController@listAutoSort');
 $router->patch('/api/v1/settings/auto-sort',     'SettingsController@updateAutoSort');
+$router->post('/api/v1/settings/auto-sort/apply-now', 'SettingsController@applyAutoSortNow');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

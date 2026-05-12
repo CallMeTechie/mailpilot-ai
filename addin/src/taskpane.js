@@ -883,6 +883,7 @@ function initSettings() {
 	});
 
 	document.getElementById('btn-save-autosort')?.addEventListener('click', saveAutoSort);
+	document.getElementById('btn-apply-autosort-now')?.addEventListener('click', applyAutoSortNow);
 
 	document.getElementById('btn-export').addEventListener('click', async () => {
 		try {
@@ -945,6 +946,41 @@ function renderAutoSortRules(rules) {
 		}
 		tbody.appendChild(tr);
 	});
+}
+
+async function applyAutoSortNow() {
+	const btn = document.getElementById('btn-apply-autosort-now');
+	const status = document.getElementById('autosort-status');
+	if (!btn || btn.disabled) return;
+	if (!confirm('Aktive Regeln auf bestehende Mails anwenden? Das verschiebt rückwirkend alle gescoreten Mails in die konfigurierten Ordner.')) return;
+
+	btn.disabled = true;
+	const totals = { processed: 0, moved: 0, protected: 0, errors: 0 };
+	const toastId = showToast('Wende Regeln an…', 'info', 60000);
+	try {
+		let hasMore = true;
+		let safety = 50; // up to 50 × 50 = 2500 mails worst-case
+		while (hasMore && safety-- > 0) {
+			const res = await api.settings.applyAutoSortNow(50);
+			totals.processed += res.processed ?? 0;
+			totals.moved     += res.moved ?? 0;
+			totals.protected += res.protected ?? 0;
+			totals.errors    += res.errors ?? 0;
+			status.textContent = `${totals.moved} verschoben · ${totals.processed} verarbeitet${res.has_more ? ' · läuft…' : ''}`;
+			hasMore = !!res.has_more;
+		}
+		dismissToast(toastId);
+		const parts = [`${totals.moved} verschoben`];
+		if (totals.protected) parts.push(`${totals.protected} geschützt (Prio≥4)`);
+		if (totals.errors)    parts.push(`${totals.errors} Fehler`);
+		showToast('Regeln angewendet: ' + parts.join(' · '), totals.errors ? 'error' : 'success', 6000);
+		status.textContent = `Fertig: ${parts.join(' · ')}.`;
+	} catch (err) {
+		dismissToast(toastId);
+		handleError(err);
+	} finally {
+		btn.disabled = false;
+	}
 }
 
 async function saveAutoSort() {
