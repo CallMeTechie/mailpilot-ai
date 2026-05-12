@@ -369,9 +369,12 @@ function setSyncProgress(processed, total) {
 	if (!fill || !text) return;
 	const p = Math.max(0, Number(processed) || 0);
 	const t = Math.max(0, Number(total) || 0);
+	// Worker uses (0, 1) as the "fetching delta" sentinel — render that
+	// as the prep label, not a misleading "0 / 1".
+	const isPrep = p === 0 && t <= 1;
 	const pct = t > 0 ? Math.min(100, (p / t) * 100) : 0;
 	fill.style.width = pct.toFixed(1) + '%';
-	text.textContent = t > 0 ? `${p} / ${t}` : 'wird vorbereitet…';
+	text.textContent = isPrep ? 'wird vorbereitet…' : `${p} / ${t}`;
 }
 
 function pollSyncStatus(jobId, onDone) {

@@ -43,7 +43,13 @@ final class MailScoringService
 	 * @param list<array<string, mixed>> $mails   mail rows as DTOs
 	 * @return list<array<string, mixed>>         score rows
 	 */
-	public function scoreBatch(string $tenantId, array $userProfile, array $mails): array
+	/**
+	 * @param callable(int):void|null $onChunkDone  Called after every
+	 *   scoring chunk and after each cache/preset hit with the current
+	 *   number of scored mails. Lets the worker / UI surface real
+	 *   progress instead of jumping to 100 % at the end.
+	 */
+	public function scoreBatch(string $tenantId, array $userProfile, array $mails, ?callable $onChunkDone = null): array
 	{
 		$scored   = [];
 		$toClaude = [];
@@ -64,6 +70,7 @@ final class MailScoringService
 			if ($cached !== null) {
 				$row = $this->buildScoreFromCache($tenantId, $mail, $cached);
 				$scored[] = $row;
+				if ($onChunkDone) { $onChunkDone(count($scored)); }
 				continue;
 			}
 
@@ -85,6 +92,7 @@ final class MailScoringService
 
 				$this->cache->put($tenantId, $item['hash'], self::PROMPT_VERSION, $this->model, $claudeResult);
 			}
+			if ($onChunkDone) { $onChunkDone(count($scored)); }
 		}
 
 		$this->scores->upsertMany($scored);

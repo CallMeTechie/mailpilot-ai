@@ -225,7 +225,21 @@ function runSyncJob(Kernel $kernel, \Monolog\Logger $log, \PDO $pdo, array $job)
 		];
 
 		$sync = $kernel->get(SyncService::class);
-		$result = $sync->run($job['tenant_id'], $job['mailbox_id'], $profile);
+
+		// Live progress: SyncService calls this after every milestone
+		// (delta fetched, each scoring chunk, AutoSort done). UI polls
+		// sync_jobs every 2 s and sees the bar move instead of jumping
+		// from 0 to 100 % at the end.
+		$progressStmt = $pdo->prepare('UPDATE sync_jobs
+			SET processed = :p, total = :t WHERE id = :id');
+		$onProgress = function (int $processed, int $total) use ($progressStmt, $job): void {
+			$progressStmt->execute([
+				':p'  => $processed,
+				':t'  => max(1, $total),
+				':id' => $job['job_id'],
+			]);
+		};
+		$result = $sync->run($job['tenant_id'], $job['mailbox_id'], $profile, $onProgress);
 
 		$pdo->prepare('UPDATE sync_jobs
 			SET status = "done",

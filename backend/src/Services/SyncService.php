@@ -41,9 +41,16 @@ final class SyncService
 	}
 
 	/**
+	 * @param callable(int,int):void|null $onProgress
+	 *   Fired with (processedCount, totalCount) at every meaningful
+	 *   milestone — fetch done, after each scoring chunk, after
+	 *   AutoSort. Worker wires this to UPDATE sync_jobs so the
+	 *   add-in's progress bar actually moves during the run instead
+	 *   of jumping from 0 to 100% at the end.
+	 *
 	 * @return array{processed:int, scored:int}
 	 */
-	public function run(string $tenantId, string $mailboxId, array $userProfile): array
+	public function run(string $tenantId, string $mailboxId, array $userProfile, ?callable $onProgress = null): array
 	{
 		$mailbox = $this->mailboxes->findById($tenantId, $mailboxId);
 		if ($mailbox === null) {
@@ -51,6 +58,11 @@ final class SyncService
 		}
 
 		$accessToken = $this->tokens->ensureFreshAccessToken($mailbox);
+
+		// Pre-fetch: signal "we're alive, fetching delta". Total=1
+		// keeps the bar a tiny sliver instead of 0/0 (which would
+		// render as empty). Real total comes after delta returns.
+		if ($onProgress) { $onProgress(0, 1); }
 
 		$deltaResult = $this->graph->syncInbox($accessToken, $mailbox['delta_token']);
 
@@ -64,7 +76,13 @@ final class SyncService
 		}
 
 		$unscored = $this->mails->findUnscoredForMailbox($tenantId, $mailboxId, 200);
-		$scored   = $this->scoring->scoreBatch($tenantId, $userProfile, $unscored);
+		$total    = count($unscored);
+		if ($onProgress) { $onProgress(0, max(1, $total)); }
+
+		$chunkCb = $onProgress !== null && $total > 0
+			? function (int $done) use ($onProgress, $total): void { $onProgress($done, $total); }
+			: null;
+		$scored = $this->scoring->scoreBatch($tenantId, $userProfile, $unscored, $chunkCb);
 
 		$this->pushCategories($accessToken, $scored);
 
@@ -89,13 +107,15 @@ final class SyncService
 		}
 
 		// Backfill: retroactively move scored-but-not-yet-moved mails
-		// that match a now-enabled rule. Cheap when nothing matches
-		// (auto_sorted_at index → empty result), idempotent on rerun.
+		// that match a now-enabled rule. Cheap when nothing matches.
 		if ($autosortUserId !== '') {
 			$this->autoSort->backfillForMailbox($accessToken, $tenantId, $autosortUserId, $mailboxId, 50);
 		}
 
 		$this->mailboxes->updateDeltaAndSyncAt($mailboxId, $deltaResult['delta']);
+
+		// Final progress beat → 100 % for the UI.
+		if ($onProgress) { $onProgress(max($total, count($scored)), max(1, $total)); }
 
 		$this->logger->info('sync.done', [
 			'mailbox'   => $mailboxId,
