@@ -85,6 +85,7 @@ export const api = {
 		summarize:     (id)    => request('POST', `/mails/${id}/summarize`),
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
+		correctScore:  (id, payload) => request('POST', `/mails/${id}/correct-score`, payload),
 		bulkAction:    (action, label, since) => request('POST',
 			`/mails/bulk/${encodeURIComponent(action)}`,
 			{ label, since: since ?? null }),

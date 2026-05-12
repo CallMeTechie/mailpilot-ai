@@ -60,7 +60,9 @@ abstract class TestCase extends BaseTestCase
 			// BudgetService relies on); only the per-call ledgers reset.
 			'api_usage','usage_daily',
 			// 0006_auto_sort_rules — per-user, no seeded defaults; safe to truncate
-			'auto_sort_rules'];
+			'auto_sort_rules',
+			// 0007_mail_score_corrections — per-mail corrections
+			'mail_score_corrections'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

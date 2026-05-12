@@ -7,6 +7,7 @@ use MailPilot\Graph\GraphClient;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Request;
 use MailPilot\Http\Response;
+use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Services\MailScoringService;
@@ -189,6 +190,75 @@ final class MailController extends BaseController
 			->scoreBatch($ctx['tenant_id'], $profile, [$mail]);
 
 		Response::json(['ok' => true]);
+	}
+
+	/**
+	 * User-driven score correction.
+	 *
+	 * Body: {
+	 *   "label":           "direct"|"action"|"cc"|"newsletter"|"auto"|"noise",
+	 *   "priority":        1..5,
+	 *   "action_required": bool,
+	 *   "reasoning":       string|null   (max 500 chars, optional)
+	 * }
+	 *
+	 * Stores the correction (with the KI's original values for context),
+	 * overwrites mail_scores with the new values, and stamps
+	 * user_corrected_at so future Claude runs don't overwrite the
+	 * human verdict. MailScoringService (Stage 4c) reads recent
+	 * corrections back into the system prompt as few-shot examples.
+	 */
+	public function correctScore(array $params, array $body): void
+	{
+		$ctx    = $this->requireAuth();
+		$mailId = (string)($params['id'] ?? '');
+		if ($mailId === '') {
+			throw HttpException::badRequest('VALIDATION', 'Mail-ID fehlt');
+		}
+
+		$labelsAllowed = ['direct', 'action', 'cc', 'newsletter', 'auto', 'noise'];
+		$label = (string)($body['label'] ?? '');
+		if (!in_array($label, $labelsAllowed, true)) {
+			throw HttpException::badRequest('VALIDATION', 'Ungültiges Label');
+		}
+		$priority = max(1, min(5, (int)($body['priority'] ?? 0)));
+
+		$mail = $this->kernel->get(MailRepository::class)->findById($ctx['tenant_id'], $mailId);
+		if ($mail === null) {
+			throw HttpException::notFound('NOT_FOUND', 'Mail nicht gefunden');
+		}
+
+		// Read current (about-to-be-overwritten) score so we can preserve
+		// the KI's original verdict alongside the correction.
+		$pdo = $this->kernel->get(\PDO::class);
+		$origStmt = $pdo->prepare('SELECT label, priority, action_required
+			FROM mail_scores WHERE mail_id = :id AND tenant_id = :t LIMIT 1');
+		$origStmt->execute([':id' => $mailId, ':t' => $ctx['tenant_id']]);
+		$orig = $origStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+		$this->kernel->get(CorrectionRepository::class)->record(
+			$ctx['tenant_id'],
+			$ctx['user_id'],
+			$mailId,
+			[
+				'label'           => $label,
+				'priority'        => $priority,
+				'action_required' => (bool)($body['action_required'] ?? false),
+				'reasoning'       => isset($body['reasoning']) ? (string)$body['reasoning'] : null,
+			],
+			[
+				'label'           => $orig['label']           ?? null,
+				'priority'        => isset($orig['priority']) ? (int)$orig['priority'] : null,
+				'action_required' => isset($orig['action_required']) ? (bool)$orig['action_required'] : null,
+			],
+		);
+
+		Response::json(['ok' => true, 'score' => [
+			'label'           => $label,
+			'priority'        => $priority,
+			'action_required' => (bool)($body['action_required'] ?? false),
+			'user_corrected'  => true,
+		]]);
 	}
 
 	/**

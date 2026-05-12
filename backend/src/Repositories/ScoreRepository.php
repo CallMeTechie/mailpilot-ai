@@ -20,19 +20,23 @@ final class ScoreRepository
 			return;
 		}
 
+		// IF(user_corrected_at IS NOT NULL, …, …): a user-flagged score
+		// is sticky — Claude can still refresh summary/reasoning, but
+		// label/priority/action_required stay frozen until the user
+		// re-corrects.
 		$sql = 'INSERT INTO mail_scores
 			(id, tenant_id, mail_id, label, action_required, priority, summary, reasoning, prompt_version, model, cached, scored_at)
 			VALUES (:id, :tenant_id, :mail_id, :label, :action_required, :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
-				label = VALUES(label),
-				action_required = VALUES(action_required),
-				priority = VALUES(priority),
-				summary = VALUES(summary),
-				reasoning = VALUES(reasoning),
-				prompt_version = VALUES(prompt_version),
-				model = VALUES(model),
-				cached = VALUES(cached),
-				scored_at = VALUES(scored_at)';
+				label           = IF(user_corrected_at IS NULL, VALUES(label),           label),
+				action_required = IF(user_corrected_at IS NULL, VALUES(action_required), action_required),
+				priority        = IF(user_corrected_at IS NULL, VALUES(priority),        priority),
+				summary         = VALUES(summary),
+				reasoning       = VALUES(reasoning),
+				prompt_version  = VALUES(prompt_version),
+				model           = VALUES(model),
+				cached          = VALUES(cached),
+				scored_at       = VALUES(scored_at)';
 
 		$stmt = $this->db->prepare($sql);
 		foreach ($scores as $s) {

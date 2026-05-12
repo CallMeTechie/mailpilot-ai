@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MailPilot\Tests\Integration;
 
 use MailPilot\Repositories\CacheRepository;
+use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\ScoreRepository;
@@ -41,6 +42,7 @@ final class MailScoringServiceTest extends TestCase
 			new CacheRepository($pdo, 30),
 			new RedactionService(),
 			$budget,
+			new CorrectionRepository($pdo),
 			'claude-haiku-4-5-20251001',
 			20,
 			2048,

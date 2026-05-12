@@ -33,6 +33,7 @@ $router->post('/api/v1/mails/by-graph-id/{ms_message_id}/ensure-scored', 'MailCo
 $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');
+$router->post('/api/v1/mails/{id}/correct-score','MailController@correctScore');
 
 $router->post('/api/v1/sync',                    'SyncController@trigger');
 $router->get ('/api/v1/sync/status/{id}',        'SyncController@status');

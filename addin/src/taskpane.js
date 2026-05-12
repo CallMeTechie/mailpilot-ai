@@ -54,6 +54,11 @@ function resetCurrentMailUi() {
 	toggle('draft-section', false);
 	const draftText = document.getElementById('draft-text');
 	if (draftText) draftText.value = '';
+
+	// Correct block
+	toggle('correct-section', false);
+	const reason = document.getElementById('correct-reasoning');
+	if (reason) reason.value = '';
 }
 
 // Available bulk actions. `confirm` requires a user confirm() before running.
@@ -608,6 +613,54 @@ function initCurrentMail() {
 	document.getElementById('btn-rescore').addEventListener('click',   rescoreCurrent);
 	document.getElementById('btn-use-draft').addEventListener('click', useDraft);
 	document.getElementById('btn-regenerate').addEventListener('click', draftCurrent);
+	document.getElementById('btn-correct')?.addEventListener('click',  openCorrectForm);
+	document.getElementById('btn-save-correction')?.addEventListener('click', saveCorrection);
+	document.getElementById('btn-cancel-correction')?.addEventListener('click', () => toggle('correct-section', false));
+}
+
+function openCorrectForm() {
+	if (!state.currentMailData) return;
+	const score = state.currentMailData.score ?? {};
+	document.getElementById('correct-label').value     = score.label    ?? 'auto';
+	document.getElementById('correct-priority').value  = String(score.priority ?? 3);
+	document.getElementById('correct-action-required').checked = !!score.action_required;
+	document.getElementById('correct-reasoning').value = '';
+	toggle('correct-section', true);
+	document.getElementById('correct-reasoning').focus();
+}
+
+async function saveCorrection() {
+	if (!state.currentMailData) return;
+	const expectedMailId = state.currentMailId;
+	const mailDbId = state.currentMailData.id;
+	const payload = {
+		label:           document.getElementById('correct-label').value,
+		priority:        parseInt(document.getElementById('correct-priority').value, 10),
+		action_required: document.getElementById('correct-action-required').checked,
+		reasoning:       document.getElementById('correct-reasoning').value.trim() || null,
+	};
+	setStatus('Korrektur speichern…');
+	try {
+		const res = await api.mails.correctScore(mailDbId, payload);
+		if (state.currentMailId !== expectedMailId) return;
+		// Apply locally without a round-trip — backend already wrote it.
+		if (state.currentMailData) {
+			state.currentMailData.score = {
+				...(state.currentMailData.score ?? {}),
+				label:           payload.label,
+				priority:        payload.priority,
+				action_required: payload.action_required,
+			};
+			renderCurrentMail(state.currentMailData);
+		}
+		toggle('correct-section', false);
+		showToast('Klassifikation korrigiert — die KI lernt daraus.', 'success', 5000);
+		setStatus('Bereit');
+		// Counter cards may shift — reload briefing on next tab visit.
+		state.briefingLoaded = false;
+	} catch (err) {
+		handleError(err);
+	}
 }
 
 function onItemChanged() {

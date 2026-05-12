@@ -30,6 +30,7 @@ final class MailScoringService
 		private readonly CacheRepository $cache,
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
+		private readonly \MailPilot\Repositories\CorrectionRepository $corrections,
 		private readonly string $model,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
@@ -226,13 +227,37 @@ TXT;
 		$vip = implode(', ', $userProfile['vip_senders'] ?? []);
 		$kw  = implode(', ', $userProfile['project_keywords'] ?? []);
 		// Repository layer already sanitises, but defend against any stray
-		// non-UTF-8 byte from cached rows or hand-imported data — without
-		// JSON_INVALID_UTF8_SUBSTITUTE, json_encode returns false for the
-		// whole batch and Claude gets an empty mail list.
+		// non-UTF-8 byte from cached rows or hand-imported data.
 		$mailsJson = json_encode(
 			$mails,
 			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
 		);
+
+		// Feed the user's recent corrections back as few-shot examples
+		// so Claude learns the per-user calibration. Pulled from the
+		// CorrectionRepository — empty section if the user never
+		// corrected anything.
+		$corrections = '';
+		$tenantId = (string)($userProfile['tenant_id'] ?? '');
+		$userId   = (string)($userProfile['user_id']   ?? '');
+		if ($tenantId !== '' && $userId !== '') {
+			$recent = $this->corrections->recentForUser($tenantId, $userId, 10);
+			if ($recent !== []) {
+				$lines = ['', 'PRIOR_USER_CORRECTIONS (the human overruled the model — apply the same reasoning):'];
+				foreach ($recent as $c) {
+					$from = substr($c['from_email'], 0, 60);
+					$subj = substr($c['subject'], 0, 60);
+					$ki = ($c['original_label'] ?? '?') . '/' . ($c['original_priority'] ?? '?');
+					$human = $c['corrected_label'] . '/' . $c['corrected_priority']
+						. ($c['corrected_action'] ? ' (action)' : '');
+					$reason = $c['reasoning'] !== null && $c['reasoning'] !== ''
+						? ' — Grund: ' . substr($c['reasoning'], 0, 200)
+						: '';
+					$lines[] = "- From: {$from} | Subject: {$subj} | KI: {$ki} → Human: {$human}{$reason}";
+				}
+				$corrections = implode("\n", $lines) . "\n";
+			}
+		}
 
 		return <<<TXT
 USER_PROFILE:
@@ -240,7 +265,7 @@ USER_PROFILE:
 - language: {$userProfile['language']}
 - vip_senders: [{$vip}]
 - project_keywords: [{$kw}]
-
+{$corrections}
 MAILS_TO_CLASSIFY:
 {$mailsJson}
 
