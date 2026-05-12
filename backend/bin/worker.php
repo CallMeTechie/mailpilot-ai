@@ -53,9 +53,22 @@ $lastHousekeepingDay = null;
 
 $heartbeat = $pdo->prepare('UPDATE system_settings SET `value` = :v WHERE `key` = "worker.last_seen"');
 
+$lastBackgroundSync = 0;
+$backgroundIntervalSec = 300; // schedule a sync_job per mailbox every 5 min
+
 while (true) {
 	try {
 		$heartbeat->execute([':v' => gmdate('Y-m-d\TH:i:s\Z')]);
+
+		// Background-Sync — schedule a sync_job for every active mailbox
+		// at a regular cadence so new mail flows in without the user
+		// having to click "Aktualisieren". Skips mailboxes that already
+		// have a queued/running job.
+		$now = time();
+		if ($now - $lastBackgroundSync >= $backgroundIntervalSec) {
+			$lastBackgroundSync = $now;
+			scheduleBackgroundSync($pdo, $log);
+		}
 
 		$jobHint = null;
 		if ($redis !== null) {
@@ -99,6 +112,34 @@ while (true) {
 	} catch (\Throwable $e) {
 		$log->error('worker.loop_error', ['err' => $e->getMessage()]);
 		sleep(3);
+	}
+}
+
+/**
+ * Enqueue one sync_job per active mailbox that isn't already busy.
+ * Called on a 5-minute cadence from the main loop.
+ */
+function scheduleBackgroundSync(\PDO $pdo, \Monolog\Logger $log): void
+{
+	$rows = $pdo->query('SELECT id, tenant_id FROM mailboxes
+		WHERE sync_enabled = 1 AND deleted_at IS NULL')->fetchAll(\PDO::FETCH_ASSOC);
+	$existsStmt = $pdo->prepare('SELECT 1 FROM sync_jobs
+		WHERE mailbox_id = :m AND status IN ("queued","running") LIMIT 1');
+	$insertStmt = $pdo->prepare('INSERT INTO sync_jobs (id, tenant_id, mailbox_id, status)
+		VALUES (:id, :t, :m, "queued")');
+	$scheduled = 0;
+	foreach ($rows as $r) {
+		$existsStmt->execute([':m' => $r['id']]);
+		if ($existsStmt->fetchColumn()) continue;
+		$insertStmt->execute([
+			':id' => \MailPilot\Util\Uuid::v4(),
+			':t'  => $r['tenant_id'],
+			':m'  => $r['id'],
+		]);
+		$scheduled++;
+	}
+	if ($scheduled > 0) {
+		$log->info('worker.bg_sync_scheduled', ['count' => $scheduled]);
 	}
 }
 

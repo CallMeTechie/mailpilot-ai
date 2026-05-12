@@ -121,19 +121,43 @@ final class MailController extends BaseController
 		$pdo = $this->kernel->get(\PDO::class);
 		$scoreStmt = $pdo->prepare('SELECT 1 FROM mail_scores WHERE mail_id = :id LIMIT 1');
 		$scoreStmt->execute([':id' => $mail['id']]);
+		$wasJustScored = false;
 		if ($scoreStmt->fetchColumn() === false) {
 			$userRow = $this->fetchUser($ctx['user_id']);
 			$profile = $this->buildUserProfile($ctx, $userRow);
 			$this->kernel->get(MailScoringService::class)
 				->scoreBatch($ctx['tenant_id'], $profile, [$mail]);
+			$wasJustScored = true;
 		}
 
-		$stmt = $pdo->prepare('SELECT m.id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
+		$stmt = $pdo->prepare('SELECT m.id, m.mailbox_id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
 				s.label, s.action_required, s.priority, s.summary, s.scored_at
 			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.id = :id LIMIT 1');
 		$stmt->execute([':id' => $mail['id']]);
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+		// First-time score on this mail → run it through AutoSort right
+		// now so the user-visible effect is immediate ("I clicked it →
+		// it's in the right folder") instead of waiting for the next
+		// 5-minute background sweep.
+		if ($wasJustScored && ($r['label'] ?? null) !== null) {
+			$mb = null;
+			foreach ($mailboxes as $cand) {
+				if ((string)$cand['id'] === (string)$r['mailbox_id']) { $mb = $cand; break; }
+			}
+			if ($mb !== null) {
+				try {
+					$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+					$this->kernel->get(\MailPilot\Services\AutoSortService::class)
+						->applyToScoredMail($token, $ctx['tenant_id'], $ctx['user_id'], $mail, [
+							'label'           => $r['label'],
+							'priority'        => $r['priority'],
+							'action_required' => $r['action_required'],
+						]);
+				} catch (\Throwable) { /* best-effort, never break the response */ }
+			}
+		}
 
 		Response::json(['mail' => [
 			'id'             => $r['id']            ?? null,
