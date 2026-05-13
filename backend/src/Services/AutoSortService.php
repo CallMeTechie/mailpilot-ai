@@ -100,26 +100,44 @@ final class AutoSortService
 			]);
 			return ['moved' => true, 'folder' => $rule['folder_name']];
 		} catch (\Throwable $e) {
+			$msg = $e->getMessage();
 			$this->logger->warning('autosort.failed', [
 				'user'      => $userId,
 				'label'     => $label,
 				'sub_label' => $matchedSub,
-				'err'       => $e->getMessage(),
+				'err'       => $msg,
 			]);
-			$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $e->getMessage());
+			$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $msg);
 
-			// Stale cached id (folder deleted by user) → drop it so the
-			// next round re-resolves.
-			if (preg_match('/\b(404|410)\b/', $e->getMessage())) {
+			// Discriminate 404 by Graph error code (postJson packt das in
+			// die Exception-Message — siehe GraphClient::postJson).
+			$isItemMissing   = (bool)preg_match('/ErrorItemNotFound|ErrorMessageNotFound|MailboxItemNotFoundException/i', $msg);
+			$isFolderMissing = (bool)preg_match('/ErrorFolderNotFound|ErrorParentFolderNotFound|\b410\b/i', $msg);
+
+			if ($isItemMissing) {
+				// Mail existiert in Outlook nicht mehr (User hat sie manuell
+				// gelöscht/verschoben, REST-ID ist stale). Mail als deleted
+				// markieren — fällt aus der Match-Query raus, kein Retry-
+				// Loop. Score bleibt als Audit erhalten.
+				$this->db->prepare('UPDATE mails SET deleted_at = UTC_TIMESTAMP(3)
+					WHERE id = :m AND tenant_id = :t AND deleted_at IS NULL')
+					->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				$this->db->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3)
+					WHERE mail_id = :m AND tenant_id = :t AND auto_sorted_at IS NULL')
+					->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				return ['moved' => false, 'reason' => 'mail_gone'];
+			}
+
+			if ($isFolderMissing || preg_match('/\b404\b/', $msg)) {
+				// Folder weg ODER unspezifischer 404 → folder_id droppen
+				// damit der nächste Versuch ensureFolderPath neu läuft.
 				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, '');
 			}
 
-			// Retry-Cap: jeden Fail zählen, bei 3 endgültig skippen
-			// (auto_sorted_at = NOW() schließt die Mail aus der
-			// applyAutoSortNow-Match-Query aus, identisch zu success).
-			// Ohne diesen Cap hat die Frontend-Schleife dieselbe Mail
-			// bei jedem Token-Fehler 40+ mal wiederversucht — siehe
-			// das "2000 verarbeitet / 300 Fehler"-Symptom.
+			// Retry-Cap (Sprint 0.2): jeden Fail zählen, bei 3 endgültig
+			// skippen. Ohne Cap hat die Frontend-Schleife dieselbe Mail
+			// 40+ mal wiederversucht — siehe „2000 verarbeitet / 300
+			// Fehler"-Symptom.
 			$this->db->prepare('UPDATE mail_scores
 				SET auto_sort_attempts = auto_sort_attempts + 1
 				WHERE mail_id = :m AND tenant_id = :t')

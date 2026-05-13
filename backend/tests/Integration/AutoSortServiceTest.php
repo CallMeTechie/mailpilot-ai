@@ -239,6 +239,44 @@ final class AutoSortServiceTest extends TestCase
 		$this->assertSame([], $graph->moveCalls);
 	}
 
+	public function testItemNotFoundMarksMailDeletedAndSkipsRetries(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		// Graph reply when the message-id is stale (user moved/deleted
+		// the mail outside MailPilot). postJson packs the error code
+		// into the exception message.
+		$graph->failNextMove(new \RuntimeException('Graph POST failed: 404 (ErrorItemNotFound)'));
+
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('mail_gone', $res['reason']);
+
+		// Mail ist als geloescht markiert → faellt aus der applyAutoSortNow-
+		// Match-Query (deleted_at IS NULL) raus.
+		$stmt = $this->pdo()->prepare('SELECT deleted_at FROM mails WHERE id = :m');
+		$stmt->execute([':m' => $mail['id']]);
+		$this->assertNotNull($stmt->fetchColumn(),
+			'ErrorItemNotFound muss mails.deleted_at setzen');
+
+		// Score-Row hat auto_sorted_at gesetzt → kein Retry mehr.
+		$stmt = $this->pdo()->prepare('SELECT auto_sorted_at FROM mail_scores WHERE mail_id = :m');
+		$stmt->execute([':m' => $mail['id']]);
+		$this->assertNotNull($stmt->fetchColumn(),
+			'ErrorItemNotFound muss mail_scores.auto_sorted_at setzen');
+	}
+
 	public function testSingleFailureBumpsAttemptsButDoesNotSkip(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();

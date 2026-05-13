@@ -320,12 +320,23 @@ class GraphClient
 				'Content-Type: application/json',
 			],
 		]);
-		curl_exec($ch);
+		$body   = (string)curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		curl_close($ch);
 
 		if ($status < 200 || $status >= 300) {
-			throw new RuntimeException("Graph POST failed: {$status}");
+			// Graph 4xx liefert {error:{code,message}}. Wir packen den
+			// error.code in die Exception, damit der Caller (AutoSortService)
+			// zwischen "Message weg" (ErrorItemNotFound) und "Folder weg"
+			// (ErrorFolderNotFound) unterscheiden kann.
+			$code = '';
+			try {
+				$decoded = json_decode($body, true, 8, JSON_THROW_ON_ERROR);
+				if (is_array($decoded) && isset($decoded['error']['code'])) {
+					$code = ' (' . (string)$decoded['error']['code'] . ')';
+				}
+			} catch (\JsonException) { /* keine strukturierte Antwort */ }
+			throw new RuntimeException("Graph POST failed: {$status}{$code}");
 		}
 	}
 
