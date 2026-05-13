@@ -153,7 +153,7 @@ class Kernel
 				$this->get(SummaryRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
-				$this->config['claude']['model_summary'],
+				$this->get(PromptRepository::class),
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
 				$this->get(ClaudeProvider::class),
@@ -161,7 +161,7 @@ class Kernel
 				$this->get(DraftRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
-				$this->config['claude']['model_reply'],
+				$this->get(PromptRepository::class),
 			),
 			SyncService::class        => new SyncService(
 				$this->get(GraphClient::class),

@@ -7,10 +7,16 @@ use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\DraftRepository;
+use MailPilot\Repositories\PromptRepository;
 
+/**
+ * Reply-Draft via Claude Opus. Prompt + Model + max_tokens kommen
+ * seit Phase B aus prompt_versions (admin-editierbar via
+ * /admin/prompts).
+ */
 final class ReplyDraftService
 {
-	public const PROMPT_VERSION = 'P-REPLY@1.0';
+	private const PROMPT_KEY = 'P-REPLY';
 
 	public function __construct(
 		private readonly ClaudeProvider $claude,
@@ -18,7 +24,7 @@ final class ReplyDraftService
 		private readonly DraftRepository $drafts,
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
-		private readonly string $model,
+		private readonly PromptRepository $prompts,
 	) {
 	}
 
@@ -29,40 +35,42 @@ final class ReplyDraftService
 			throw new \RuntimeException('mail_not_found');
 		}
 
-		// Sanitise before inlining into the prompt — invalid UTF-8 inside
-		// $body propagates to AnthropicClient → json_encode → false →
-		// empty HTTP payload → Claude returns nothing → draft = "" and the
-		// add-in then renders the literal string "undefined".
 		$body = \MailPilot\Util\Utf8::sanitize(
 			$this->redactor->redact((string)($mail['body_text'] ?? '')),
 		);
 
-		$system = <<<TXT
-Du entwirfst eine Antwort auf eine E-Mail. Der Nutzer reviewt und sendet selbst.
+		$activePrompt = $this->prompts->getActive(self::PROMPT_KEY);
+		$promptVersionTag = $this->prompts->cacheVersionTag(
+			$activePrompt['key_name'],
+			$activePrompt['version'],
+		);
+		$model     = $activePrompt['model'];
+		$maxTokens = $activePrompt['max_tokens'];
 
-Regeln:
-- Ton aus dem Thread ableiten (Du/Sie, formal/locker)
-- Gleiche Sprache wie die eingehende Mail
-- Keine erfundenen Zusagen, Termine oder Zahlen
-- Wenn Entscheidung ansteht, die DER NUTZER treffen muss: Platzhalter [ENTSCHEIDUNG]
-- Grußformel passend zum Thread
-- Keine KI-Floskeln
-- Max 150 Wörter
+		$instructionBlock = $instruction !== null && $instruction !== ''
+			? "\n\nUSER_INSTRUCTION: " . $instruction
+			: '';
 
-Output: Nur der Mail-Body. Keine Subject-Zeile, kein Markdown, keine Erklärung.
-TXT;
-
-		$instr = $instruction !== null ? "\n\nUSER_INSTRUCTION: {$instruction}" : '';
-		$user = "ORIGINAL_MAIL:\nFrom: {$mail['from_name']} <{$mail['from_email']}>\n"
-			. "Subject: {$mail['subject']}\n---\n{$body}{$instr}\n\nEntwirf die Antwort.";
+		$system = $activePrompt['system_prompt'];
+		$user = str_replace(
+			['{{from_name}}', '{{from_email}}', '{{subject}}', '{{body}}', '{{instruction_block}}'],
+			[
+				(string)($mail['from_name'] ?? ''),
+				(string)($mail['from_email'] ?? ''),
+				(string)($mail['subject'] ?? ''),
+				$body,
+				$instructionBlock,
+			],
+			$activePrompt['user_template'],
+		);
 
 		$mailboxId = (string)($mail['mailbox_id'] ?? '') ?: null;
-		$gate = $this->budget->canSpend($tenantId, $userId, 800);
+		$gate = $this->budget->canSpend($tenantId, $userId, $maxTokens);
 		if (!$gate['ok']) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
 				'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
-				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'prompt_version' => $promptVersionTag, 'model' => $model,
 				'input_tokens' => 0, 'output_tokens' => 0,
 				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
 				'duration_ms' => 0, 'status' => 'blocked',
@@ -73,18 +81,17 @@ TXT;
 
 		$start = microtime(true);
 		try {
-			// Claude 4.x rejects "temperature" — let the model default.
 			$resp = $this->claude->messages([
-				'model'      => $this->model,
-				'max_tokens' => 800,
+				'model'      => $model,
+				'max_tokens' => $maxTokens,
 				'system'     => $system,
 				'messages'   => [['role' => 'user', 'content' => $user]],
 			]);
 		} catch (\Throwable $e) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
-				'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
-				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
+				'prompt_version' => $promptVersionTag, 'model' => $model,
 				'input_tokens' => 0, 'output_tokens' => 0,
 				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
 				'duration_ms' => (int)((microtime(true) - $start) * 1000),
@@ -95,8 +102,8 @@ TXT;
 		$u = $resp['usage'] ?? [];
 		$this->budget->recordUsage([
 			'tenant_id' => $tenantId, 'user_id' => $userId,
-			'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
-			'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+			'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
+			'prompt_version' => $promptVersionTag, 'model' => $model,
 			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
 			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
 			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
@@ -106,7 +113,7 @@ TXT;
 		]);
 
 		$draft = ClaudeClient::extractText($resp);
-		$this->drafts->create($tenantId, $mailId, $draft, $instruction, self::PROMPT_VERSION, $this->model);
+		$this->drafts->create($tenantId, $mailId, $draft, $instruction, $promptVersionTag, $model);
 		return $draft;
 	}
 }

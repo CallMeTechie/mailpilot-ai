@@ -58,7 +58,13 @@ final class SettingsRepository
 
 	public function set(string $key, string $value): void
 	{
-		$stmt = $this->db->prepare('UPDATE system_settings SET `value` = :v WHERE `key` = :k');
+		// UPSERT: bisher reines UPDATE → wenn die Row nicht existierte
+		// (z.B. Setting wird zum ersten Mal vom Admin-Panel gespeichert),
+		// schrieb UPDATE auf 0 Rows → der Wert "sprang zurück" beim
+		// Reload. INSERT … ON DUPLICATE KEY UPDATE deckt beide Fälle.
+		$stmt = $this->db->prepare('INSERT INTO system_settings (`key`, `value`, `type`)
+			VALUES (:k, :v, "string")
+			ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)');
 		$stmt->execute([':v' => $value, ':k' => $key]);
 		$this->cache[$key] = $value;
 	}

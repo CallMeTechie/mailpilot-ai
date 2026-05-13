@@ -6,11 +6,19 @@ namespace MailPilot\Services;
 use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SummaryRepository;
 
+/**
+ * Mail-Zusammenfassung via Claude Opus.
+ *
+ * Prompt + Model + max_tokens kommen seit Phase B aus prompt_versions
+ * (admin-editierbar via /admin/prompts). Der Service rendert das
+ * Template via str_replace mit den Platzhaltern aus Migration 0013.
+ */
 final class MailSummaryService
 {
-	public const PROMPT_VERSION = 'P-SUMMARY@1.0';
+	private const PROMPT_KEY = 'P-SUMMARY';
 
 	public function __construct(
 		private readonly ClaudeProvider $claude,
@@ -18,7 +26,7 @@ final class MailSummaryService
 		private readonly SummaryRepository $summaries,
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
-		private readonly string $model,
+		private readonly PromptRepository $prompts,
 	) {
 	}
 
@@ -35,34 +43,35 @@ final class MailSummaryService
 		}
 
 		$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');
-		// Strip stray non-UTF-8 bytes before they reach the JSON encoder
-		// inside AnthropicClient — otherwise the encoder returns false and
-		// the API request goes out with an empty body.
 		$body = \MailPilot\Util\Utf8::sanitize($this->redactor->redact($body));
 
-		$system = <<<TXT
-Du fasst eine E-Mail für {$userEmail} zusammen. Deine Zusammenfassung ersetzt
-das Lesen der Mail. Struktur:
+		// Aktiven Prompt aus DB laden
+		$activePrompt = $this->prompts->getActive(self::PROMPT_KEY);
+		$promptVersionTag = $this->prompts->cacheVersionTag(
+			$activePrompt['key_name'],
+			$activePrompt['version'],
+		);
+		$model     = $activePrompt['model'];
+		$maxTokens = $activePrompt['max_tokens'];
 
-**Worum geht's:** Ein Satz.
-**Was wird erwartet:** Ein Satz — was soll der Nutzer tun? Oder "Nichts, nur Information."
-**Deadline:** Datum/Zeit falls genannt, sonst "keine".
-**Kontext:** Ein Satz zum Thread-Kontext falls Reply, sonst weglassen.
-
-Antworte auf {$language}. Kein Markdown außer den Labels, klare Sätze. Max 120 Wörter.
-TXT;
-
-		$user = "From: {$mail['from_name']} <{$mail['from_email']}>\n"
-			. "Subject: {$mail['subject']}\n"
-			. "---\n" . $body;
+		$system = str_replace(
+			['{{user_email}}', '{{user_language}}'],
+			[$userEmail, $language],
+			$activePrompt['system_prompt'],
+		);
+		$user = str_replace(
+			['{{from_name}}', '{{from_email}}', '{{subject}}', '{{body}}'],
+			[(string)($mail['from_name'] ?? ''), (string)($mail['from_email'] ?? ''), (string)($mail['subject'] ?? ''), $body],
+			$activePrompt['user_template'],
+		);
 
 		$mailboxId = (string)($mail['mailbox_id'] ?? '') ?: null;
-		$gate = $this->budget->canSpend($tenantId, $userId, 400);
+		$gate = $this->budget->canSpend($tenantId, $userId, $maxTokens);
 		if (!$gate['ok']) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
 				'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
-				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'prompt_version' => $promptVersionTag, 'model' => $model,
 				'input_tokens' => 0, 'output_tokens' => 0,
 				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
 				'duration_ms' => 0, 'status' => 'blocked',
@@ -73,18 +82,17 @@ TXT;
 
 		$start = microtime(true);
 		try {
-			// Claude 4.x rejects "temperature" with HTTP 400.
 			$resp = $this->claude->messages([
-				'model'      => $this->model,
-				'max_tokens' => 400,
+				'model'      => $model,
+				'max_tokens' => $maxTokens,
 				'system'     => $system,
 				'messages'   => [['role' => 'user', 'content' => $user]],
 			]);
 		} catch (\Throwable $e) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
-				'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
-				'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+				'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
+				'prompt_version' => $promptVersionTag, 'model' => $model,
 				'input_tokens' => 0, 'output_tokens' => 0,
 				'cache_read_tokens' => 0, 'cache_creation_tokens' => 0,
 				'duration_ms' => (int)((microtime(true) - $start) * 1000),
@@ -95,8 +103,8 @@ TXT;
 		$u = $resp['usage'] ?? [];
 		$this->budget->recordUsage([
 			'tenant_id' => $tenantId, 'user_id' => $userId,
-			'mailbox_id' => (string)($mail['mailbox_id'] ?? '') ?: null, 'mail_id' => $mailId,
-			'prompt_version' => self::PROMPT_VERSION, 'model' => $this->model,
+			'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
+			'prompt_version' => $promptVersionTag, 'model' => $model,
 			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
 			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
 			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
@@ -106,7 +114,7 @@ TXT;
 		]);
 
 		$text = ClaudeClient::extractText($resp);
-		$this->summaries->create($tenantId, $mailId, $text, self::PROMPT_VERSION, $this->model);
+		$this->summaries->create($tenantId, $mailId, $text, $promptVersionTag, $model);
 		return $text;
 	}
 }
