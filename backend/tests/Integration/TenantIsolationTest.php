@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MailPilot\Tests\Integration;
 
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\VipRepository;
 use MailPilot\Tests\TestCase;
 
@@ -75,5 +76,32 @@ final class TenantIsolationTest extends TestCase
 		$this->assertCount(1, $repo->findUnscoredForMailbox($tenantB, $mbB));
 		// Cross-tenant query must return empty
 		$this->assertCount(0, $repo->findUnscoredForMailbox($tenantA, $mbB));
+	}
+
+	public function testSubLabelsAreTenantIsolated(): void
+	{
+		[$tenantA, $userA] = $this->insertTenantAndUser('a@test.de');
+		[$tenantB, $userB] = $this->insertTenantAndUser('b@test.de');
+
+		$repo = new SubLabelRepository($this->pdo());
+		$idA = $repo->create($tenantA, $userA, 'auto', 'GitHub CI',  null, null);
+		$idB = $repo->create($tenantB, $userB, 'auto', 'Bestellung', null, null);
+
+		$listA = $repo->listForUser($tenantA, $userA);
+		$listB = $repo->listForUser($tenantB, $userB);
+
+		$this->assertCount(1, $listA);
+		$this->assertCount(1, $listB);
+		$this->assertSame('GitHub CI',  $listA[0]['name']);
+		$this->assertSame('Bestellung', $listB[0]['name']);
+
+		// Cross-tenant update + delete must be no-ops, even with the right id.
+		$this->assertFalse($repo->update($tenantA, $userA, $idB, 'Hijack', null, null));
+		$this->assertFalse($repo->delete($tenantA, $userA, $idB));
+
+		// Tenant B's sub-label is still there, untouched.
+		$stillB = $repo->listForUser($tenantB, $userB);
+		$this->assertCount(1, $stillB);
+		$this->assertSame('Bestellung', $stillB[0]['name']);
 	}
 }
