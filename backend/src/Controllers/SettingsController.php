@@ -6,6 +6,7 @@ namespace MailPilot\Controllers;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\SubLabelRepository;
@@ -280,6 +281,57 @@ final class SettingsController extends BaseController
 		Response::json(['ok' => true]);
 	}
 
+	/**
+	 * "Mails neu klassifizieren" — User-getriggertes Re-Score-All.
+	 *
+	 * Wenn der User merkt, dass Klassifizierungen veraltet sind (z. B.
+	 * weil er gerade ein neues Sub-Label angelegt hat, das per
+	 * Sub-Label-CRUD-Trigger zwar den claude_cache geleert, aber die
+	 * bereits gespeicherten mail_scores nicht angefasst hat).
+	 *
+	 * Schritte:
+	 *   1. claude_cache fuer den Tenant atomar wischen
+	 *   2. Alle non-user-corrected mail_scores als "preset_deprecated"
+	 *      markieren. findUnscoredForMailbox() greift dieses Flag und
+	 *      schickt die Mails beim naechsten Sync neu durch Claude.
+	 *   3. Benutzer-Korrekturen bleiben unangetastet (user_corrected_at IS NOT NULL).
+	 *
+	 * Der eigentliche Sync wird vom Add-in im Anschluss via
+	 * POST /sync getriggert — so vermeiden wir Code-Duplikation
+	 * mit SyncController::trigger.
+	 */
+	public function rescoreAll(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$pdo = $this->kernel->get(\PDO::class);
+
+		$pdo->beginTransaction();
+		try {
+			$cachePurged = $this->kernel->get(CacheRepository::class)
+				->purgeForTenant($ctx['tenant_id']);
+
+			$stmt = $pdo->prepare('UPDATE mail_scores
+				SET model = "preset_deprecated"
+				WHERE tenant_id = :t AND user_corrected_at IS NULL');
+			$stmt->execute([':t' => $ctx['tenant_id']]);
+			$scoresMarked = $stmt->rowCount();
+
+			$pdo->commit();
+		} catch (\Throwable $e) {
+			if ($pdo->inTransaction()) $pdo->rollBack();
+			throw $e;
+		}
+
+		Response::json([
+			'ok'             => true,
+			'cache_purged'   => $cachePurged,
+			'scores_marked'  => $scoresMarked,
+			// Next step for the client: POST /api/v1/sync to actually
+			// re-run the classifier on the marked mails.
+			'next_action'    => 'sync',
+		]);
+	}
+
 	public function listSubLabels(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();
@@ -308,7 +360,14 @@ final class SettingsController extends BaseController
 		} catch (\InvalidArgumentException $e) {
 			throw HttpException::badRequest('VALIDATION', $e->getMessage());
 		}
-		Response::json(['id' => $id, 'parent' => $parent, 'name' => $name], 201);
+
+		// Pool-Pool-Override-Fix: bisher gecachte Scores wurden ohne diesen
+		// Sub-Label berechnet und liefern Cache-Hits weiterhin sub_label=NULL.
+		// Atomar wischen, damit die naechsten Score-Calls Claude wieder fragen.
+		$purged = $this->kernel->get(CacheRepository::class)
+			->purgeForTenant($ctx['tenant_id']);
+
+		Response::json(['id' => $id, 'parent' => $parent, 'name' => $name, 'cache_purged' => $purged], 201);
 	}
 
 	public function updateSubLabel(array $params, array $body): void
@@ -331,7 +390,13 @@ final class SettingsController extends BaseController
 		if (!$ok) {
 			throw HttpException::notFound('NOT_FOUND', 'Sub-Label nicht gefunden');
 		}
-		Response::json(['ok' => true]);
+
+		// Name- oder Description-Aenderung beeinflusst Claudes Sub-Label-Wahl
+		// → Cache wischen, sonst liefern Hits weiterhin den alten Wert.
+		$purged = $this->kernel->get(CacheRepository::class)
+			->purgeForTenant($ctx['tenant_id']);
+
+		Response::json(['ok' => true, 'cache_purged' => $purged]);
 	}
 
 	/**
@@ -358,10 +423,12 @@ final class SettingsController extends BaseController
 		$autoSort = $this->kernel->get(AutoSortRepository::class);
 		$pdo      = $this->kernel->get(\PDO::class);
 
-		// One transaction so a partial failure (e.g. the second delete
-		// throws) never leaves the rule pointing at a removed sub-label.
+		// One transaction so a partial failure never leaves the rule
+		// pointing at a removed sub-label and the cache full of stale
+		// scores that reference the deleted sub-label.
 		$alreadyInTx = $pdo->inTransaction();
 		if (!$alreadyInTx) $pdo->beginTransaction();
+		$cachePurged = 0;
 		try {
 			$ruleCount = $autoSort->countBySubLabel(
 				$ctx['tenant_id'], $ctx['user_id'], $row['parent'], $row['name'],
@@ -370,12 +437,18 @@ final class SettingsController extends BaseController
 				$autoSort->delete($ctx['tenant_id'], $ctx['user_id'], $row['parent'], $row['name']);
 			}
 			$subs->delete($ctx['tenant_id'], $ctx['user_id'], $id);
+			$cachePurged = $this->kernel->get(CacheRepository::class)
+				->purgeForTenant($ctx['tenant_id']);
 			if (!$alreadyInTx) $pdo->commit();
 		} catch (\Throwable $e) {
 			if (!$alreadyInTx && $pdo->inTransaction()) $pdo->rollBack();
 			throw $e;
 		}
 
-		Response::json(['ok' => true, 'deleted_rules' => $ruleCount]);
+		Response::json([
+			'ok'            => true,
+			'deleted_rules' => $ruleCount,
+			'cache_purged'  => $cachePurged,
+		]);
 	}
 }

@@ -65,6 +65,23 @@ final class CacheRepository
 		]);
 	}
 
+	/**
+	 * Removes every cache entry for one tenant. Called when the user
+	 * mutates their sub-labels (Sprint 0 fix): without a wipe, the
+	 * next score-call returns the old cached row that was computed
+	 * before the new sub-label existed, so the new pool never gets
+	 * a chance to influence the result.
+	 *
+	 * Returns the number of rows removed (useful for the API
+	 * response so the UI can show a toast).
+	 */
+	public function purgeForTenant(string $tenantId): int
+	{
+		$stmt = $this->db->prepare('DELETE FROM claude_cache WHERE tenant_id = :t');
+		$stmt->execute([':t' => $tenantId]);
+		return $stmt->rowCount();
+	}
+
 	private function markHit(string $hash): void
 	{
 		$stmt = $this->db->prepare('UPDATE claude_cache

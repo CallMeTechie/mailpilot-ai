@@ -114,13 +114,21 @@ final class MailScoringService
 	}
 
 	/**
-	 * @return array<string, list<string>>  parent label → sorted list of sub-label names
+	 * Per parent label a list of {name, description}. The description
+	 * is what the user typed in Settings — it goes into the prompt so
+	 * Claude knows WHY a topic exists ("GitHub CI" → "Mails von
+	 * notifications@github.com"), not just the name.
+	 *
+	 * @return array<string, list<array{name:string, description:?string}>>
 	 */
 	private function loadSubLabelMap(string $tenantId, string $userId): array
 	{
 		$map = [];
 		foreach ($this->subLabels->listForUser($tenantId, $userId) as $row) {
-			$map[$row['parent']][] = $row['name'];
+			$map[$row['parent']][] = [
+				'name'        => $row['name'],
+				'description' => $row['description'] ?? null,
+			];
 		}
 		return $map;
 	}
@@ -148,7 +156,7 @@ final class MailScoringService
 
 	/**
 	 * @param list<array<string, mixed>>     $mails
-	 * @param array<string, list<string>>    $subLabelMap  parent → names
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 * @return list<array<string, mixed>>
 	 */
 	private function callClaude(array $userProfile, array $mails, array $subLabelMap = []): array
@@ -258,7 +266,7 @@ TXT;
 	}
 
 	/**
-	 * @param array<string, list<string>> $subLabelMap parent → names (already loaded)
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap (already loaded)
 	 */
 	private function buildUserPrompt(array $userProfile, array $mails, array $subLabelMap = []): string
 	{
@@ -300,12 +308,21 @@ TXT;
 		// USER_SUBLABELS block: only emitted when the user actually
 		// defined sub-labels. Empty pool ⇒ block omitted ⇒ Claude is
 		// instructed to always return sub_label = null below.
+		// Description (wenn vorhanden) hilft Claude entscheiden, ob
+		// eine Mail in den Topic passt — z.B. "GitHub CI" mit
+		// Description "Mails von notifications@github.com".
 		$subLabelsBlock = '';
 		$schemaSubLabel = '"sub_label":null';
 		if ($subLabelMap !== []) {
 			$lines = ['', 'USER_SUBLABELS (the user\'s own finer buckets under each primary; pick exactly one name if a mail clearly fits, else null):'];
-			foreach ($subLabelMap as $parent => $names) {
-				$lines[] = '- ' . $parent . ': ' . implode(', ', $names);
+			foreach ($subLabelMap as $parent => $entries) {
+				foreach ($entries as $entry) {
+					$line = '- ' . $parent . ' / ' . $entry['name'];
+					if (!empty($entry['description'])) {
+						$line .= ' — ' . substr((string)$entry['description'], 0, 200);
+					}
+					$lines[] = $line;
+				}
 			}
 			$subLabelsBlock = implode("\n", $lines) . "\n";
 			$schemaSubLabel = '"sub_label":"<one name from USER_SUBLABELS under the chosen label, or null>"';
@@ -346,7 +363,7 @@ TXT;
 	}
 
 	/**
-	 * @param array<string, list<string>> $subLabelMap
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
 	private function buildScoreFromCache(string $tenantId, array $mail, array $cached, array $subLabelMap = []): array
 	{
@@ -368,7 +385,7 @@ TXT;
 	}
 
 	/**
-	 * @param array<string, list<string>> $subLabelMap
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
 	private function buildScoreFromClaude(string $tenantId, array $mail, array $result, array $subLabelMap = []): array
 	{
@@ -401,7 +418,7 @@ TXT;
 	 * (typos, hallucinations, stale cache from a deleted sub-label)
 	 * collapses to NULL — the catch-all bucket in AutoSort.
 	 *
-	 * @param array<string, list<string>> $subLabelMap
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
 	private function validateSubLabel(string $primary, mixed $candidate, array $subLabelMap): ?string
 	{
@@ -412,8 +429,9 @@ TXT;
 		if ($candidate === '') {
 			return null;
 		}
-		$pool = $subLabelMap[$primary] ?? [];
-		return in_array($candidate, $pool, true) ? $candidate : null;
+		$pool  = $subLabelMap[$primary] ?? [];
+		$names = array_column($pool, 'name');
+		return in_array($candidate, $names, true) ? $candidate : null;
 	}
 
 	private function truncate(string $s, int $max): string

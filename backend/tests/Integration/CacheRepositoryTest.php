@@ -83,4 +83,23 @@ final class CacheRepositoryTest extends TestCase
 
 		$this->assertNull($repo->get($tenantId, $hash, 'P-SCORE@1.0'));
 	}
+
+	public function testPurgeForTenantOnlyAffectsOwnTenant(): void
+	{
+		[$tenantA] = $this->insertTenantAndUser('a@test.de');
+		[$tenantB] = $this->insertTenantAndUser('b@test.de');
+		$repo = new CacheRepository($this->pdo(), 30);
+
+		$repo->put($tenantA, str_repeat('a', 64), 'P-SCORE@1.1', 'haiku', ['label' => 'direct']);
+		$repo->put($tenantA, str_repeat('b', 64), 'P-SCORE@1.1', 'haiku', ['label' => 'auto']);
+		$repo->put($tenantB, str_repeat('c', 64), 'P-SCORE@1.1', 'haiku', ['label' => 'direct']);
+
+		$removed = $repo->purgeForTenant($tenantA);
+		$this->assertSame(2, $removed);
+
+		$this->assertNull($repo->get($tenantA, str_repeat('a', 64), 'P-SCORE@1.1'));
+		$this->assertNull($repo->get($tenantA, str_repeat('b', 64), 'P-SCORE@1.1'));
+		// Tenant B unangetastet
+		$this->assertNotNull($repo->get($tenantB, str_repeat('c', 64), 'P-SCORE@1.1'));
+	}
 }

@@ -296,6 +296,13 @@
 				<p class="mp-muted" id="autosort-status"></p>
 			</div>
 
+			<div class="mp-section">
+				<h2>Wartung</h2>
+				<p class="mp-muted">Wenn du gerade neue Unter-Kategorien angelegt hast und alte Mails noch nicht passend einsortiert sind — hier den Re-Score erzwingen. Die KI bewertet alle nicht-korrigierten Mails neu mit deinem aktuellen Pool.</p>
+				<button class="mp-btn mp-btn-secondary" id="btn-rescore-all">Mails neu klassifizieren</button>
+				<p class="mp-muted" id="rescore-status"></p>
+			</div>
+
 			<div class="mp-section mp-danger">
 				<h2>Daten</h2>
 				<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
@@ -311,6 +318,19 @@
 	</footer>
 
 	<!-- Toast stack: transient notifications that do not overwrite each other -->
+	<!-- Modal dialog: ersetzt native confirm()/alert(), die im Office Task Pane
+	     vom Host unzuverlaessig unterdrueckt werden. Promise-basiert via mpConfirm(). -->
+	<div id="mp-modal-overlay" class="mp-modal-overlay" data-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mp-modal-title">
+		<div class="mp-modal">
+			<h3 id="mp-modal-title" class="mp-modal-title"></h3>
+			<div id="mp-modal-body" class="mp-modal-body"></div>
+			<div class="mp-modal-actions">
+				<button type="button" class="mp-btn mp-btn-ghost" id="mp-modal-cancel">Abbrechen</button>
+				<button type="button" class="mp-btn mp-btn-primary" id="mp-modal-ok">OK</button>
+			</div>
+		</div>
+	</div>
+
 	<div id="mp-toast-stack" class="mp-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
 	<script type="module" src="taskpane.js"></script>

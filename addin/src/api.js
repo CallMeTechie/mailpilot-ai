@@ -107,6 +107,7 @@ export const api = {
 		applyAutoSortNow: (limit = 50) => request('POST', '/settings/auto-sort/apply-now', { limit }),
 		deleteAutoSortSub: (label, name) => request('DELETE',
 			`/settings/auto-sort/sub/${encodeURIComponent(label)}/${encodeURIComponent(name)}`),
+		rescoreAll:    ()      => request('POST', '/settings/rescore-all'),
 		listSubLabels:   ()        => request('GET',    '/settings/sub-labels'),
 		addSubLabel:     (payload) => request('POST',   '/settings/sub-labels', payload),
 		updateSubLabel:  (id, p)   => request('PATCH',  `/settings/sub-labels/${id}`, p),

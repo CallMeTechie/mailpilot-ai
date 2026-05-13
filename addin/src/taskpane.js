@@ -492,8 +492,14 @@ function filterSinceUtc() {
 async function runBulkAction(action, label) {
 	const spec = BULK_ACTIONS[action];
 	if (!spec) return;
-	if (spec.confirm && !window.confirm(`${spec.label} — wirklich für alle gefilterten Mails ausführen?`)) {
-		return;
+	if (spec.confirm) {
+		const ok = await mpConfirm({
+			title: `${spec.label} — fuer alle gefilterten Mails?`,
+			body: 'Diese Aktion wird auf alle aktuell gefilterten Mails angewendet und kann nicht rueckgaengig gemacht werden.',
+			okLabel: spec.label,
+			danger: true,
+		});
+		if (!ok) return;
 	}
 
 	// Lock all bulk buttons + show progress immediately so the user sees
@@ -982,14 +988,15 @@ function initSettings() {
 		const meta = findSubLabelMetaById(id);
 		const deps = meta ? dependentRulesForSubLabel(meta.parent, meta.name) : [];
 
-		let prompt = meta
+		const title = meta
 			? `Unter-Kategorie "${labelText(meta.parent)} / ${meta.name}" löschen?`
 			: 'Unter-Kategorie löschen?';
+		let body = '';
 		if (deps.length > 0) {
 			const list = deps.map((r) => '• ' + r.folder_name).join('\n');
-			prompt += `\n\nDiese ${deps.length} Auto-Sort-Sub-Regel(n) werden mitgelöscht:\n${list}`;
+			body = `Diese ${deps.length} Auto-Sort-Sub-Regel(n) werden mitgelöscht:\n${list}`;
 		}
-		if (!confirm(prompt)) return;
+		if (!await mpConfirm({ title, body, okLabel: 'Löschen', danger: true })) return;
 
 		try {
 			const res = await api.settings.deleteSubLabel(id);
@@ -1010,7 +1017,13 @@ function initSettings() {
 		const btn = e.target.closest('button.remove-sub-rule');
 		if (!btn) return;
 		const { label, name } = btn.dataset;
-		if (!confirm(`Sub-Regel "${label} / ${name}" entfernen?`)) return;
+		const ok = await mpConfirm({
+			title: 'Sub-Regel entfernen?',
+			body: `${label} / ${name}\n\nMails in diesem Topic werden nicht zurueckverschoben.`,
+			okLabel: 'Entfernen',
+			danger: true,
+		});
+		if (!ok) return;
 		try {
 			await api.settings.deleteAutoSortSub(label, name);
 			loadSettings();
@@ -1019,6 +1032,7 @@ function initSettings() {
 
 	document.getElementById('btn-save-autosort')?.addEventListener('click', saveAutoSort);
 	document.getElementById('btn-apply-autosort-now')?.addEventListener('click', applyAutoSortNow);
+	document.getElementById('btn-rescore-all')?.addEventListener('click', rescoreAll);
 
 	document.getElementById('btn-export').addEventListener('click', async () => {
 		try {
@@ -1034,7 +1048,13 @@ function initSettings() {
 	});
 
 	document.getElementById('btn-delete').addEventListener('click', async () => {
-		if (!confirm('Wirklich Account und alle Daten löschen? Nicht rückgängig zu machen.')) return;
+		const ok = await mpConfirm({
+			title: 'Account und alle Daten löschen?',
+			body: 'Diese Aktion kann nicht rueckgaengig gemacht werden. Alle Mails, Klassifizierungen, Aliase, Regeln und Korrektur-Logs werden entfernt.',
+			okLabel: 'Endgueltig loeschen',
+			danger: true,
+		});
+		if (!ok) return;
 		try {
 			await api.me.deleteAccount();
 			clearToken();
@@ -1286,6 +1306,35 @@ function buildAutoSortRow(r, isSub) {
 	return tr;
 }
 
+async function rescoreAll() {
+	const btn = document.getElementById('btn-rescore-all');
+	const status = document.getElementById('rescore-status');
+	if (!btn || btn.disabled) return;
+
+	const ok = await mpConfirm({
+		title: 'Alle Mails neu klassifizieren?',
+		body: 'Der KI-Cache wird geleert und alle bisher klassifizierten Mails werden beim naechsten Sync neu durch Claude geschickt. Deine manuellen Korrekturen bleiben erhalten. Das kann ein paar Minuten dauern und kostet Token-Budget.',
+		okLabel: 'Neu klassifizieren',
+	});
+	if (!ok) return;
+
+	btn.disabled = true;
+	if (status) status.textContent = 'Cache wird geleert ...';
+	try {
+		const res = await api.settings.rescoreAll();
+		if (status) status.textContent = `${res.scores_marked ?? 0} Mails markiert. Sync wird gestartet ...`;
+
+		await api.sync.trigger();
+		if (status) status.textContent = `${res.scores_marked ?? 0} Mails werden neu klassifiziert. Cache geleert: ${res.cache_purged ?? 0} Eintraege.`;
+		showToast(`Re-Score gestartet: ${res.scores_marked ?? 0} Mails`, 'success', 4000);
+	} catch (err) {
+		if (status) status.textContent = '';
+		handleError(err);
+	} finally {
+		btn.disabled = false;
+	}
+}
+
 async function addAutoSortSubRule() {
 	const pick   = document.getElementById('autosort-sub-pick');
 	const folder = document.getElementById('autosort-sub-folder');
@@ -1308,7 +1357,14 @@ async function applyAutoSortNow() {
 	const btn = document.getElementById('btn-apply-autosort-now');
 	const status = document.getElementById('autosort-status');
 	if (!btn || btn.disabled) return;
-	if (!confirm('Aktive Regeln auf bestehende Mails anwenden? Das verschiebt rückwirkend alle gescoreten Mails in die konfigurierten Ordner.')) return;
+	{
+		const ok = await mpConfirm({
+			title: 'Aktive Regeln auf bestehende Mails anwenden?',
+			body: 'Alle bereits gescorten Mails werden in die konfigurierten Ordner verschoben. Mails mit hoher Prio (direct/action ab Prio 4) bleiben in der Inbox.',
+			okLabel: 'Jetzt anwenden',
+		});
+		if (!ok) return;
+	}
 
 	btn.disabled = true;
 	const totals = { processed: 0, moved: 0, protected: 0, errors: 0 };
@@ -1435,6 +1491,60 @@ function dismissToast(id) {
 	if (!toast || toast.classList.contains('is-leaving')) return;
 	toast.classList.add('is-leaving');
 	toast.addEventListener('animationend', () => toast.remove(), { once: true });
+}
+
+// ============================================================
+// Modal confirm — replaces native confirm() because Office task
+// panes (especially in Outlook on the web and on iOS) silently
+// suppress synchronous dialogs that would block the host. Returns
+// a Promise<boolean>: true on OK, false on Cancel/Esc/overlay-click.
+// ============================================================
+/**
+ * @param {{title: string, body: string, okLabel?: string, cancelLabel?: string, danger?: boolean}} opts
+ * @returns {Promise<boolean>}
+ */
+function mpConfirm(opts) {
+	return new Promise((resolve) => {
+		const overlay = document.getElementById('mp-modal-overlay');
+		const titleEl = document.getElementById('mp-modal-title');
+		const bodyEl  = document.getElementById('mp-modal-body');
+		const okBtn   = document.getElementById('mp-modal-ok');
+		const cancelBtn = document.getElementById('mp-modal-cancel');
+		if (!overlay || !titleEl || !bodyEl || !okBtn || !cancelBtn) {
+			// Last-resort fallback — keeps the flow alive on a half-broken DOM.
+			resolve(window.confirm(opts.title + '\n\n' + opts.body));
+			return;
+		}
+
+		titleEl.textContent = opts.title || '';
+		bodyEl.textContent  = opts.body  || '';
+		okBtn.textContent     = opts.okLabel     || 'OK';
+		cancelBtn.textContent = opts.cancelLabel || 'Abbrechen';
+		okBtn.classList.toggle('mp-btn-danger',  !!opts.danger);
+		okBtn.classList.toggle('mp-btn-primary', !opts.danger);
+		overlay.dataset.hidden = 'false';
+
+		const cleanup = (result) => {
+			overlay.dataset.hidden = 'true';
+			okBtn.removeEventListener('click', onOk);
+			cancelBtn.removeEventListener('click', onCancel);
+			overlay.removeEventListener('click', onOverlay);
+			document.removeEventListener('keydown', onKey);
+			resolve(result);
+		};
+		const onOk      = () => cleanup(true);
+		const onCancel  = () => cleanup(false);
+		const onOverlay = (e) => { if (e.target === overlay) cleanup(false); };
+		const onKey     = (e) => {
+			if (e.key === 'Escape') cleanup(false);
+			else if (e.key === 'Enter') cleanup(true);
+		};
+		okBtn.addEventListener('click', onOk);
+		cancelBtn.addEventListener('click', onCancel);
+		overlay.addEventListener('click', onOverlay);
+		document.addEventListener('keydown', onKey);
+		okBtn.focus();
+	});
 }
 
 function escape(s) {
