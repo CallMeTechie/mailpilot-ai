@@ -930,6 +930,12 @@ function useDraft() {
 /** @type {Record<string, Array<{id:string, name:string}>>} */
 let subLabelsByParent = {};
 
+// Last-loaded AutoSort rules, used by the sub-label-delete confirm
+// to preview which sub-rules will cascade with it. Kept in sync by
+// loadSettings + renderAutoSortRules.
+/** @type {Array<{label:string, sub_label:?string, enabled:boolean, folder_name:string}>} */
+let autoSortRulesCache = [];
+
 function initSettings() {
 	document.getElementById('btn-add-vip').addEventListener('click', async () => {
 		const email = document.getElementById('vip-email').value.trim();
@@ -969,10 +975,33 @@ function initSettings() {
 	document.getElementById('sub-list')?.addEventListener('click', async (e) => {
 		const btn = e.target.closest('button.remove');
 		if (!btn) return;
-		if (!confirm('Unter-Kategorie löschen? Bestehende AutoSort-Sub-Regeln, die darauf zeigen, bleiben aber bis du sie selbst entfernst.')) return;
+
+		// Look the sub-label up in the cache so we can preview its name
+		// and any AutoSort rules that will cascade with it.
+		const id   = btn.dataset.id;
+		const meta = findSubLabelMetaById(id);
+		const deps = meta ? dependentRulesForSubLabel(meta.parent, meta.name) : [];
+
+		let prompt = meta
+			? `Unter-Kategorie "${labelText(meta.parent)} / ${meta.name}" löschen?`
+			: 'Unter-Kategorie löschen?';
+		if (deps.length > 0) {
+			const list = deps.map((r) => '• ' + r.folder_name).join('\n');
+			prompt += `\n\nDiese ${deps.length} Auto-Sort-Sub-Regel(n) werden mitgelöscht:\n${list}`;
+		}
+		if (!confirm(prompt)) return;
+
 		try {
-			await api.settings.deleteSubLabel(btn.dataset.id);
+			const res = await api.settings.deleteSubLabel(id);
 			loadSettings();
+			const removed = (res && typeof res.deleted_rules === 'number') ? res.deleted_rules : 0;
+			showToast(
+				removed > 0
+					? `Sub-Kategorie + ${removed} Auto-Sort-Regel${removed === 1 ? '' : 'n'} entfernt`
+					: 'Sub-Kategorie entfernt',
+				'success',
+				3500,
+			);
 		} catch (err) { handleError(err); }
 	});
 
@@ -1091,6 +1120,27 @@ function renderSubLabels(items) {
 	populateAutoSortSubPick();
 }
 
+/**
+ * Walk subLabelsByParent and return { parent, name } for the given id,
+ * or null when the cache is stale.
+ */
+function findSubLabelMetaById(id) {
+	for (const [parent, list] of Object.entries(subLabelsByParent)) {
+		const hit = list.find((s) => s.id === id);
+		if (hit) return { parent, name: hit.name };
+	}
+	return null;
+}
+
+/**
+ * Returns all AutoSort sub-rules that would cascade if the given
+ * (parent, name) sub-label is removed. Driven by autoSortRulesCache
+ * so no extra HTTP round-trip is needed.
+ */
+function dependentRulesForSubLabel(parent, name) {
+	return autoSortRulesCache.filter((r) => r.label === parent && r.sub_label === name);
+}
+
 function populateAutoSortSubPick() {
 	const select = document.getElementById('autosort-sub-pick');
 	const addBtn = document.getElementById('btn-add-autosort-sub');
@@ -1120,6 +1170,7 @@ function populateAutoSortSubPick() {
 }
 
 function renderAutoSortRules(rules) {
+	autoSortRulesCache = rules;
 	const catchAlls = rules.filter((r) => r.sub_label === null);
 	const subRules  = rules.filter((r) => r.sub_label !== null);
 

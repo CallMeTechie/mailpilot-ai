@@ -334,15 +334,48 @@ final class SettingsController extends BaseController
 		Response::json(['ok' => true]);
 	}
 
+	/**
+	 * Deletes a sub-label and atomically clears any AutoSort sub-rule
+	 * that pointed at it. Without the cascade those rules would linger
+	 * as zombies: their (label, sub_label) pair would never match a
+	 * scored mail again because the sub-label is no longer in the
+	 * user's pool that Claude sees.
+	 *
+	 * Returns the count of removed rules so the UI can show a
+	 * "X + N rules deleted" toast.
+	 */
 	public function deleteSubLabel(array $params, array $body): void
 	{
-		$ctx = $this->requireAuth();
-		$id  = (string)($params['id'] ?? '');
-		$ok  = $this->kernel->get(SubLabelRepository::class)
-			->delete($ctx['tenant_id'], $ctx['user_id'], $id);
-		if (!$ok) {
+		$ctx  = $this->requireAuth();
+		$id   = (string)($params['id'] ?? '');
+		$subs = $this->kernel->get(SubLabelRepository::class);
+
+		$row = $subs->findById($ctx['tenant_id'], $ctx['user_id'], $id);
+		if ($row === null) {
 			throw HttpException::notFound('NOT_FOUND', 'Sub-Label nicht gefunden');
 		}
-		Response::json(['ok' => true]);
+
+		$autoSort = $this->kernel->get(AutoSortRepository::class);
+		$pdo      = $this->kernel->get(\PDO::class);
+
+		// One transaction so a partial failure (e.g. the second delete
+		// throws) never leaves the rule pointing at a removed sub-label.
+		$alreadyInTx = $pdo->inTransaction();
+		if (!$alreadyInTx) $pdo->beginTransaction();
+		try {
+			$ruleCount = $autoSort->countBySubLabel(
+				$ctx['tenant_id'], $ctx['user_id'], $row['parent'], $row['name'],
+			);
+			if ($ruleCount > 0) {
+				$autoSort->delete($ctx['tenant_id'], $ctx['user_id'], $row['parent'], $row['name']);
+			}
+			$subs->delete($ctx['tenant_id'], $ctx['user_id'], $id);
+			if (!$alreadyInTx) $pdo->commit();
+		} catch (\Throwable $e) {
+			if (!$alreadyInTx && $pdo->inTransaction()) $pdo->rollBack();
+			throw $e;
+		}
+
+		Response::json(['ok' => true, 'deleted_rules' => $ruleCount]);
 	}
 }

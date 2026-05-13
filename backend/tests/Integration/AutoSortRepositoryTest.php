@@ -197,4 +197,23 @@ final class AutoSortRepositoryTest extends TestCase
 		$this->expectException(\InvalidArgumentException::class);
 		$repo->upsert($tenantId, $userId, 'spam', null, true, 'x');
 	}
+
+	public function testCountAndListBySubLabel(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$repo = new AutoSortRepository($this->pdo());
+
+		$repo->upsert($tenantId, $userId, 'auto', null,        true,  'MailPilot/Auto');
+		$repo->upsert($tenantId, $userId, 'auto', 'GitHub CI', true,  'MailPilot/Auto/CI');
+		$repo->upsert($tenantId, $userId, 'auto', 'GitHub CI', false, 'MailPilot/Auto/CI-v2'); // overwrite
+
+		$this->assertSame(0, $repo->countBySubLabel($tenantId, $userId, 'auto', 'Unknown'));
+		$this->assertSame(0, $repo->countBySubLabel($tenantId, $userId, 'newsletter', 'GitHub CI'));
+		$this->assertSame(1, $repo->countBySubLabel($tenantId, $userId, 'auto', 'GitHub CI'));
+
+		$list = $repo->listBySubLabel($tenantId, $userId, 'auto', 'GitHub CI');
+		$this->assertCount(1, $list);
+		$this->assertSame('MailPilot/Auto/CI-v2', $list[0]['folder_name']);
+		$this->assertFalse($list[0]['enabled']);
+	}
 }

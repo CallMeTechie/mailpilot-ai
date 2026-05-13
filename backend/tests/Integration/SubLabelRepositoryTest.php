@@ -136,6 +136,25 @@ final class SubLabelRepositoryTest extends TestCase
 		$this->assertFalse($repo->delete($tenantId, $userId, $id), 'second delete is a no-op');
 	}
 
+	public function testFindByIdRoundtripAndTenantScope(): void
+	{
+		[$tenantA, $userA] = $this->insertTenantAndUser('a@test.de');
+		[$tenantB, $userB] = $this->insertTenantAndUser('b@test.de');
+		$repo = new SubLabelRepository($this->pdo());
+
+		$idA = $repo->create($tenantA, $userA, 'auto', 'GitHub CI', null, null);
+
+		$found = $repo->findById($tenantA, $userA, $idA);
+		$this->assertNotNull($found);
+		$this->assertSame('auto', $found['parent']);
+		$this->assertSame('GitHub CI', $found['name']);
+
+		// cross-tenant lookup must miss
+		$this->assertNull($repo->findById($tenantB, $userB, $idA));
+		// unknown id misses too
+		$this->assertNull($repo->findById($tenantA, $userA, $this->uuid()));
+	}
+
 	public function testListOrdersByParentEnumThenName(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();

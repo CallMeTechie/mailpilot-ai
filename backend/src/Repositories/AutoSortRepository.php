@@ -166,6 +166,37 @@ final class AutoSortRepository
 			]);
 	}
 
+	/**
+	 * How many rules exist for an exact (label, sub_label) pair?
+	 * Used by the cascade-delete flow when a sub-label is removed:
+	 * the UI shows the user which AutoSort rules will go with it.
+	 */
+	public function countBySubLabel(string $tenantId, string $userId, string $label, string $subLabel): int
+	{
+		$stmt = $this->db->prepare('SELECT COUNT(*) FROM auto_sort_rules
+			WHERE tenant_id = :t AND user_id = :u AND label = :l AND sub_label = :s');
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':l' => $label, ':s' => $subLabel]);
+		return (int)$stmt->fetchColumn();
+	}
+
+	/**
+	 * Same shape, returns the rows themselves so the UI can preview
+	 * folder names + enabled flags before confirming the cascade.
+	 *
+	 * @return list<array{folder_name:string, enabled:bool}>
+	 */
+	public function listBySubLabel(string $tenantId, string $userId, string $label, string $subLabel): array
+	{
+		$stmt = $this->db->prepare('SELECT folder_name, enabled FROM auto_sort_rules
+			WHERE tenant_id = :t AND user_id = :u AND label = :l AND sub_label = :s
+			ORDER BY folder_name');
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':l' => $label, ':s' => $subLabel]);
+		return array_map(static fn(array $r): array => [
+			'folder_name' => (string)$r['folder_name'],
+			'enabled'     => (bool)$r['enabled'],
+		], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+	}
+
 	public function delete(string $tenantId, string $userId, string $label, ?string $subLabel): bool
 	{
 		if ($subLabel === null) {

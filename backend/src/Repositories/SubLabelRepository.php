@@ -92,4 +92,30 @@ final class SubLabelRepository
 		$stmt->execute([':id' => $id, ':t' => $tenantId, ':u' => $userId]);
 		return $stmt->rowCount() > 0;
 	}
+
+	/**
+	 * Look a sub-label up by id, scoped to (tenant, user). Used by
+	 * the cascade-delete flow in SettingsController which needs the
+	 * (parent, name) pair to identify the auto_sort_rules rows that
+	 * point at this sub-label.
+	 *
+	 * @return array{id:string, parent:string, name:string}|null
+	 */
+	public function findById(string $tenantId, string $userId, string $id): ?array
+	{
+		$stmt = $this->db->prepare('SELECT id, parent, name
+			FROM user_sublabels
+			WHERE id = :id AND tenant_id = :t AND user_id = :u
+			LIMIT 1');
+		$stmt->execute([':id' => $id, ':t' => $tenantId, ':u' => $userId]);
+		$r = $stmt->fetch(\PDO::FETCH_ASSOC);
+		if ($r === false) {
+			return null;
+		}
+		return [
+			'id'     => (string)$r['id'],
+			'parent' => (string)$r['parent'],
+			'name'   => (string)$r['name'],
+		];
+	}
 }
