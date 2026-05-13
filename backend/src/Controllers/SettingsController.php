@@ -100,8 +100,15 @@ final class SettingsController extends BaseController
 	}
 
 	/**
-	 * Body: {"rules": [{"label": "newsletter", "enabled": true, "folder_name": "MailPilot/Newsletter"}, …]}
-	 * Accepts any subset; missing labels stay as-is.
+	 * Body: {"rules": [
+	 *   {"label": "newsletter", "enabled": true, "folder_name": "MailPilot/Newsletter"},
+	 *   {"label": "auto", "sub_label": "GitHub CI", "enabled": true, "folder_name": "MailPilot/Auto/CI"},
+	 *   …
+	 * ]}
+	 *
+	 * Each rule is keyed by (label, sub_label). sub_label null/missing
+	 * means the catch-all row. Accepts any subset; rules not in the
+	 * payload stay as-is.
 	 */
 	public function updateAutoSort(array $params, array $body): void
 	{
@@ -118,10 +125,14 @@ final class SettingsController extends BaseController
 			if (!in_array($label, AutoSortRepository::LABELS, true)) {
 				throw HttpException::badRequest('VALIDATION', "Unbekanntes Label: {$label}");
 			}
+			$subLabel = isset($r['sub_label']) && $r['sub_label'] !== null && $r['sub_label'] !== ''
+				? (string)$r['sub_label']
+				: null;
 			$repo->upsert(
 				$ctx['tenant_id'],
 				$ctx['user_id'],
 				$label,
+				$subLabel,
 				(bool)($r['enabled'] ?? false),
 				(string)($r['folder_name'] ?? ''),
 			);
@@ -151,11 +162,11 @@ final class SettingsController extends BaseController
 
 		$rules = $this->kernel->get(AutoSortRepository::class)
 			->listForUser($ctx['tenant_id'], $ctx['user_id']);
-		$activeLabels = array_values(array_map(
-			static fn(array $r): string => (string)$r['label'],
-			array_filter($rules, static fn(array $r): bool => (bool)$r['enabled']),
+		$enabledRules = array_values(array_filter(
+			$rules,
+			static fn(array $r): bool => (bool)$r['enabled'],
 		));
-		if ($activeLabels === []) {
+		if ($enabledRules === []) {
 			Response::json(['processed' => 0, 'moved' => 0, 'protected' => 0, 'errors' => 0, 'has_more' => false]);
 			return;
 		}
@@ -166,22 +177,31 @@ final class SettingsController extends BaseController
 			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
 		}
 
-		// Candidate mails: scored, label in active set, high-priority direct/action
-		// already filtered out so the count == real workload (UI progress is honest).
+		// Candidate mails: scored, with at least one enabled rule that
+		// could match. The EXISTS subquery does exact (label, sub_label)
+		// OR catch-all (sub_label IS NULL) matching — same precedence as
+		// AutoSortService::backfillForMailbox. high-priority direct/action
+		// is filtered out here so the returned count == real workload.
 		$pdo = $this->kernel->get(\PDO::class);
-		$place = implode(',', array_fill(0, count($activeLabels), '?'));
-		$sql = "SELECT m.*, s.label AS score_label, s.priority AS score_priority, s.action_required AS score_ar
+		$sql = "SELECT m.*, s.label AS score_label, s.sub_label AS score_sub_label,
+				s.priority AS score_priority, s.action_required AS score_ar
 			FROM mails m
 			INNER JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.tenant_id = ?
 			  AND m.deleted_at IS NULL
-			  AND s.label IN ($place)
 			  AND NOT (s.label IN ('direct','action') AND s.priority >= 4)
+			  AND EXISTS (
+				SELECT 1 FROM auto_sort_rules r
+				WHERE r.tenant_id = m.tenant_id
+				  AND r.user_id   = ?
+				  AND r.label     = s.label
+				  AND r.enabled   = 1
+				  AND (r.sub_label = s.sub_label OR r.sub_label IS NULL)
+			  )
 			ORDER BY m.received_at DESC
 			LIMIT " . ($limit + 1);
-		$args = array_merge([$ctx['tenant_id']], $activeLabels);
 		$stmt = $pdo->prepare($sql);
-		$stmt->execute($args);
+		$stmt->execute([$ctx['tenant_id'], $ctx['user_id']]);
 		$rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
 		$hasMore = count($rows) > $limit;
@@ -205,6 +225,7 @@ final class SettingsController extends BaseController
 			}
 			$score = [
 				'label'           => $row['score_label'],
+				'sub_label'       => $row['score_sub_label'] ?? null,
 				'priority'        => $row['score_priority'],
 				'action_required' => $row['score_ar'],
 			];

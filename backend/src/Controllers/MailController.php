@@ -131,7 +131,7 @@ final class MailController extends BaseController
 		}
 
 		$stmt = $pdo->prepare('SELECT m.id, m.mailbox_id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
-				s.label, s.action_required, s.priority, s.summary, s.scored_at
+				s.label, s.sub_label, s.action_required, s.priority, s.summary, s.scored_at
 			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.id = :id LIMIT 1');
 		$stmt->execute([':id' => $mail['id']]);
@@ -155,6 +155,7 @@ final class MailController extends BaseController
 					$this->kernel->get(\MailPilot\Services\AutoSortService::class)
 						->applyToScoredMail($token, $ctx['tenant_id'], $ctx['user_id'], $mail, [
 							'label'           => $r['label'],
+							'sub_label'       => $r['sub_label'] ?? null,
 							'priority'        => $r['priority'],
 							'action_required' => $r['action_required'],
 						]);

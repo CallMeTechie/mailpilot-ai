@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\VipRepository;
@@ -103,5 +104,38 @@ final class TenantIsolationTest extends TestCase
 		$stillB = $repo->listForUser($tenantB, $userB);
 		$this->assertCount(1, $stillB);
 		$this->assertSame('Bestellung', $stillB[0]['name']);
+	}
+
+	public function testAutoSortRulesAreTenantIsolated(): void
+	{
+		[$tenantA, $userA] = $this->insertTenantAndUser('a@test.de');
+		[$tenantB, $userB] = $this->insertTenantAndUser('b@test.de');
+
+		$repo = new AutoSortRepository($this->pdo());
+		$repo->upsert($tenantA, $userA, 'auto', 'GitHub CI', true, 'MailPilot/Auto/A');
+		$repo->upsert($tenantB, $userB, 'auto', 'GitHub CI', true, 'MailPilot/Auto/B');
+
+		// Each tenant sees only its own resolved rule.
+		$ruleA = $repo->findRule($tenantA, $userA, 'auto', 'GitHub CI');
+		$ruleB = $repo->findRule($tenantB, $userB, 'auto', 'GitHub CI');
+		$this->assertSame('MailPilot/Auto/A', $ruleA['folder_name']);
+		$this->assertSame('MailPilot/Auto/B', $ruleB['folder_name']);
+
+		// Cross-tenant lookup returns no exact match and falls back to
+		// the catch-all (here: the materialised disabled default).
+		$cross = $repo->findRule($tenantA, $userB, 'auto', 'GitHub CI');
+		$this->assertTrue($cross === null || $cross['sub_label'] === null,
+			'Cross-tenant exact match must NOT leak — must fall back to catch-all or null');
+
+		// Cross-tenant rememberFolderId / delete must be no-ops.
+		$repo->rememberFolderId($tenantA, $userA, 'auto', 'GitHub CI', 'a-side-id');
+		$repo->rememberFolderId($tenantB, $userA, 'auto', 'GitHub CI', 'b-via-A-attempt');
+		$this->assertSame('a-side-id', $repo->findRule($tenantA, $userA, 'auto', 'GitHub CI')['folder_id']);
+		$this->assertNull($repo->findRule($tenantB, $userB, 'auto', 'GitHub CI')['folder_id'],
+			'Cross-tenant write must not touch B\'s row');
+
+		$this->assertFalse($repo->delete($tenantA, $userB, 'auto', 'GitHub CI'));
+		$this->assertNotNull($repo->findRule($tenantB, $userB, 'auto', 'GitHub CI'),
+			'Cross-tenant delete must be a no-op');
 	}
 }

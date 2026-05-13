@@ -45,16 +45,24 @@ final class AutoSortService
 		array $score,
 	): array {
 		$label    = (string)($score['label']    ?? '');
+		$subLabel = isset($score['sub_label']) && $score['sub_label'] !== null && $score['sub_label'] !== ''
+			? (string)$score['sub_label']
+			: null;
 		$priority = (int)   ($score['priority'] ?? 0);
 
 		if (in_array($label, ['direct', 'action'], true) && $priority >= 4) {
 			return ['moved' => false, 'reason' => 'high_priority_protected'];
 		}
 
-		$rule = $this->rules->findRule($tenantId, $userId, $label);
+		$rule = $this->rules->findRule($tenantId, $userId, $label, $subLabel);
 		if ($rule === null || !$rule['enabled']) {
 			return ['moved' => false, 'reason' => 'rule_disabled'];
 		}
+		// findRule may have fallen back from the requested $subLabel to
+		// the catch-all (sub_label = null). Persist hits against the
+		// rule that actually matched so folder_id / last_error end up
+		// on the right row.
+		$matchedSub = $rule['sub_label'] ?? null;
 
 		$msMessageId = (string)($mail['ms_message_id'] ?? '');
 		if ($msMessageId === '') {
@@ -76,7 +84,7 @@ final class AutoSortService
 			$folderId = $rule['folder_id'];
 			if ($folderId === null || $folderId === '') {
 				$folderId = $this->graph->ensureFolderPath($accessToken, $rule['folder_name']);
-				$this->rules->rememberFolderId($tenantId, $userId, $label, $folderId);
+				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, $folderId);
 			}
 			$this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
 			// Mark so the background backfill query doesn't try to
@@ -85,23 +93,25 @@ final class AutoSortService
 				WHERE mail_id = :m AND tenant_id = :t')
 				->execute([':m' => $mail['id'], ':t' => $tenantId]);
 			$this->logger->info('autosort.moved', [
-				'user'   => $userId,
-				'label'  => $label,
-				'folder' => $rule['folder_name'],
+				'user'      => $userId,
+				'label'     => $label,
+				'sub_label' => $matchedSub,
+				'folder'    => $rule['folder_name'],
 			]);
 			return ['moved' => true, 'folder' => $rule['folder_name']];
 		} catch (\Throwable $e) {
 			$this->logger->warning('autosort.failed', [
-				'user'   => $userId,
-				'label'  => $label,
-				'err'    => $e->getMessage(),
+				'user'      => $userId,
+				'label'     => $label,
+				'sub_label' => $matchedSub,
+				'err'       => $e->getMessage(),
 			]);
-			$this->rules->rememberError($tenantId, $userId, $label, $e->getMessage());
+			$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $e->getMessage());
 
 			// Stale cached id (folder deleted by user) → drop it so the
 			// next round re-resolves.
 			if (preg_match('/\b(404|410)\b/', $e->getMessage())) {
-				$this->rules->rememberFolderId($tenantId, $userId, $label, '');
+				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, '');
 			}
 			return ['moved' => false, 'reason' => 'graph_error'];
 		}
@@ -120,19 +130,28 @@ final class AutoSortService
 	 */
 	public function backfillForMailbox(string $accessToken, string $tenantId, string $userId, string $mailboxId, int $limit = 50): array
 	{
+		// EXISTS sub-query: pick up any mail whose (label, sub_label)
+		// matches an enabled exact rule, OR whose label matches an
+		// enabled catch-all rule (sub_label IS NULL). applyToScoredMail
+		// resolves the precedence per row.
 		$stmt = $this->db->prepare('SELECT m.id, m.ms_message_id, m.mailbox_id,
-				s.label AS score_label, s.priority AS score_priority, s.action_required AS score_ar
+				s.label AS score_label, s.sub_label AS score_sub_label,
+				s.priority AS score_priority, s.action_required AS score_ar
 			FROM mails m
-			INNER JOIN mail_scores s        ON s.mail_id   = m.id
-			INNER JOIN auto_sort_rules r    ON r.tenant_id = m.tenant_id
-				AND r.user_id = :u
-				AND r.label   = s.label
-				AND r.enabled = 1
+			INNER JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.tenant_id    = :t
 			  AND m.mailbox_id   = :mb
 			  AND m.deleted_at IS NULL
 			  AND s.auto_sorted_at IS NULL
 			  AND NOT (s.label IN ("direct","action") AND s.priority >= 4)
+			  AND EXISTS (
+				SELECT 1 FROM auto_sort_rules r
+				WHERE r.tenant_id = m.tenant_id
+				  AND r.user_id   = :u
+				  AND r.label     = s.label
+				  AND r.enabled   = 1
+				  AND (r.sub_label = s.sub_label OR r.sub_label IS NULL)
+			  )
 			ORDER BY m.received_at DESC
 			LIMIT :lim');
 		$stmt->bindValue(':t',  $tenantId);
@@ -146,6 +165,7 @@ final class AutoSortService
 		foreach ($rows as $row) {
 			$res = $this->applyToScoredMail($accessToken, $tenantId, $userId, $row, [
 				'label'           => $row['score_label'],
+				'sub_label'       => $row['score_sub_label'],
 				'priority'        => $row['score_priority'],
 				'action_required' => $row['score_ar'],
 			]);
