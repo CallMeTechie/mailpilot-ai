@@ -121,4 +121,44 @@ final class ScoreRepositoryTest extends TestCase
 		$this->assertSame('updated', $result['summary']);
 		$this->assertSame(5, (int)$result['priority']);
 	}
+
+	public function testSubLabelPersistsAndStaysStickyAfterCorrection(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$mailId = $this->insertMail($tenantId, $mailboxId);
+		$repo = new ScoreRepository($this->pdo());
+
+		$repo->upsertMany([[
+			'id' => $this->uuid(), 'tenant_id' => $tenantId, 'mail_id' => $mailId,
+			'label' => 'auto', 'sub_label' => 'GitHub CI',
+			'action_required' => 0, 'priority' => 2,
+			'summary' => 'CI passed', 'reasoning' => 'r',
+			'prompt_version' => 'P-SCORE@1.1', 'model' => 'haiku', 'cached' => 0,
+		]]);
+
+		$stmt = $this->pdo()->prepare('SELECT label, sub_label FROM mail_scores WHERE mail_id = :m');
+		$stmt->execute([':m' => $mailId]);
+		$row = $stmt->fetch();
+		$this->assertSame('auto', $row['label']);
+		$this->assertSame('GitHub CI', $row['sub_label']);
+
+		// Simulate user-correction (CorrectionService normally sets this).
+		$this->pdo()->prepare('UPDATE mail_scores SET user_corrected_at = UTC_TIMESTAMP(3) WHERE mail_id = :m')
+			->execute([':m' => $mailId]);
+
+		// Worker re-scores the same mail (e.g. content unchanged, cache miss
+		// after the @1.1 bump) and Claude this time picks a different sub.
+		$repo->upsertMany([[
+			'id' => $this->uuid(), 'tenant_id' => $tenantId, 'mail_id' => $mailId,
+			'label' => 'auto', 'sub_label' => 'Bestellung',
+			'action_required' => 0, 'priority' => 2,
+			'summary' => 'CI passed v2', 'reasoning' => 'r',
+			'prompt_version' => 'P-SCORE@1.1', 'model' => 'haiku', 'cached' => 0,
+		]]);
+
+		$stmt->execute([':m' => $mailId]);
+		$row = $stmt->fetch();
+		$this->assertSame('GitHub CI', $row['sub_label'], 'sub_label must stay frozen once user-corrected');
+	}
 }

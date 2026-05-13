@@ -9,6 +9,7 @@ use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\BudgetService;
 use MailPilot\Services\MailScoringService;
@@ -43,6 +44,7 @@ final class MailScoringServiceTest extends TestCase
 			new RedactionService(),
 			$budget,
 			new CorrectionRepository($pdo),
+			new SubLabelRepository($pdo),
 			'claude-haiku-4-5-20251001',
 			20,
 			2048,
@@ -214,5 +216,145 @@ final class MailScoringServiceTest extends TestCase
 		$sent = json_encode($payload, JSON_UNESCAPED_UNICODE);
 		$this->assertStringNotContainsString('DE89', $sent, 'IBAN must not reach Claude');
 		$this->assertStringContainsString('[IBAN-REDACTED]', $sent);
+	}
+
+	// --- Stage 5b: sub-labels ---------------------------------------
+
+	public function testSubLabelChosenByClaudeIsPersisted(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId, [
+			'from_email' => 'notifications@github.com',
+			'subject'    => '[mailpilot-ai] CI run #1234 success',
+		]);
+
+		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', 'CI pipeline mails', null);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'auto',
+			'sub_label' => 'GitHub CI',
+			'action_required' => false,
+			'priority' => 2,
+			'summary' => 'CI passed',
+			'reasoning' => 'github notification',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertSame('auto', $scores[0]['label']);
+		$this->assertSame('GitHub CI', $scores[0]['sub_label']);
+
+		// Prompt actually contained the USER_SUBLABELS block
+		$prompt = (string)$claude->lastCall()['messages'][0]['content'];
+		$this->assertStringContainsString('USER_SUBLABELS', $prompt);
+		$this->assertStringContainsString('GitHub CI', $prompt);
+	}
+
+	public function testHallucinatedSubLabelCollapsesToNull(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId);
+
+		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'auto',
+			'sub_label' => 'Made Up Bucket',   // not in user's pool
+			'action_required' => false,
+			'priority' => 2,
+			'summary' => 's',
+			'reasoning' => 'r',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertSame('auto', $scores[0]['label']);
+		$this->assertNull($scores[0]['sub_label'], 'Off-pool sub_label must collapse to NULL');
+	}
+
+	public function testSubLabelFromDifferentPrimaryIsRejected(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId);
+
+		// User has "GitHub CI" under auto only — Claude must not borrow it
+		// for a mail labelled `direct`.
+		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'direct',
+			'sub_label' => 'GitHub CI',   // valid name, wrong parent
+			'action_required' => true,
+			'priority' => 4,
+			'summary' => 's',
+			'reasoning' => 'r',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertSame('direct', $scores[0]['label']);
+		$this->assertNull($scores[0]['sub_label'], 'Sub-label only valid under its declared primary');
+	}
+
+	public function testEmptySubLabelPoolKeepsNullAndOmitsBlock(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'direct',
+			'sub_label' => 'anything',
+			'action_required' => false,
+			'priority' => 3,
+			'summary' => 's',
+			'reasoning' => 'r',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertNull($scores[0]['sub_label']);
+		$prompt = (string)$claude->lastCall()['messages'][0]['content'];
+		$this->assertStringNotContainsString('USER_SUBLABELS', $prompt, 'No pool ⇒ no block in prompt');
+		$this->assertStringContainsString('"sub_label":null', $prompt, 'Schema must hardcode null');
 	}
 }

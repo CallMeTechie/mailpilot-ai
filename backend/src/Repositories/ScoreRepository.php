@@ -22,13 +22,14 @@ final class ScoreRepository
 
 		// IF(user_corrected_at IS NOT NULL, …, …): a user-flagged score
 		// is sticky — Claude can still refresh summary/reasoning, but
-		// label/priority/action_required stay frozen until the user
-		// re-corrects.
+		// label/sub_label/priority/action_required stay frozen until
+		// the user re-corrects.
 		$sql = 'INSERT INTO mail_scores
-			(id, tenant_id, mail_id, label, action_required, priority, summary, reasoning, prompt_version, model, cached, scored_at)
-			VALUES (:id, :tenant_id, :mail_id, :label, :action_required, :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
+			(id, tenant_id, mail_id, label, sub_label, action_required, priority, summary, reasoning, prompt_version, model, cached, scored_at)
+			VALUES (:id, :tenant_id, :mail_id, :label, :sub_label, :action_required, :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
 				label           = IF(user_corrected_at IS NULL, VALUES(label),           label),
+				sub_label       = IF(user_corrected_at IS NULL, VALUES(sub_label),       sub_label),
 				action_required = IF(user_corrected_at IS NULL, VALUES(action_required), action_required),
 				priority        = IF(user_corrected_at IS NULL, VALUES(priority),        priority),
 				summary         = VALUES(summary),
@@ -45,6 +46,7 @@ final class ScoreRepository
 				':tenant_id'       => $s['tenant_id'],
 				':mail_id'         => $s['mail_id'],
 				':label'           => $s['label'],
+				':sub_label'       => $s['sub_label'] ?? null,
 				':action_required' => $s['action_required'],
 				':priority'        => $s['priority'],
 				':summary'         => $s['summary'],

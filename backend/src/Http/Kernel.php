@@ -138,6 +138,7 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(CorrectionRepository::class),
+				$this->get(SubLabelRepository::class),
 				$this->config['claude']['model_scoring'],
 				(int)$this->config['limits']['scoring_batch_size'],
 				(int)$this->config['limits']['max_body_bytes'],

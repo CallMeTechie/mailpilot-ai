@@ -89,6 +89,61 @@ in derselben Reihenfolge.
 
 ---
 
+## P-SCORE v1.1 — Batch Mail Classification + Sub-Labels
+
+**Model:** `claude-haiku-4-5-20251001`
+**Max tokens:** scales with batch (≥ 2000, +160 per mail, +400 slack)
+**Purpose:** Same as v1.0, plus the per-user free-form sub-label axis.
+
+### What changed vs v1.0
+
+- New optional `USER_SUBLABELS` block — only emitted when the user has
+  defined at least one sub-label. Lists the user's own buckets grouped by
+  primary, e.g. `auto: GitHub CI, Bestellung`.
+- JSON schema gains `sub_label`. Two shapes:
+  - User has no sub-labels → schema is `"sub_label":null` (Claude must
+    always return null).
+  - User has sub-labels → schema is `"sub_label":"<one name from
+    USER_SUBLABELS under the chosen label, or null>"`.
+- Backend whitelists the response against the user's own pool *under the
+  chosen primary*. Anything outside collapses to `null` (catch-all). Stale
+  cache entries from deleted sub-labels behave the same way.
+- Cache key includes `prompt_version` — bump to `P-SCORE@1.1` invalidates
+  every existing entry, so mails re-score once after deploy.
+
+### System prompt
+
+Unchanged from v1.0 (the new axis is in the user prompt; system prompt
+already constrains output to "AUSSCHLIESSLICH gültigem JSON").
+
+### User prompt template
+
+```
+USER_PROFILE:
+- email: {user_email}
+- language: {user_language}
+- vip_senders: [{vip_senders_csv}]
+- project_keywords: [{project_keywords_csv}]
+
+{PRIOR_USER_CORRECTIONS block — only if any}
+
+USER_SUBLABELS (the user's own finer buckets under each primary; pick
+exactly one name if a mail clearly fits, else null):
+- auto: GitHub CI, Bestellung
+- newsletter: Tech, Marketing
+- direct: Wichtig
+
+MAILS_TO_CLASSIFY:
+{mails_json}
+
+Gib exakt ein JSON-Objekt zurück:
+{"results":[{"id":"<mail.id>","label":"direct|action|cc|newsletter|auto|noise","sub_label":"<one name from USER_SUBLABELS under the chosen label, or null>","action_required":true|false,"priority":1-5,"summary":"max 160 chars","reasoning":"max 80 chars"}]}
+
+Anzahl results = Anzahl mails, in derselben Reihenfolge.
+```
+
+---
+
 ## P-SUMMARY v1.0 — Single Mail Deep Summary
 
 **Model:** `claude-opus-4-7`
@@ -161,5 +216,6 @@ Entwirf die Antwort.
 | Version | Date | Change | Reason |
 |---------|------|--------|--------|
 | P-SCORE v1.0 | 2026-04-16 | Initial | — |
+| P-SCORE v1.1 | 2026-05-13 | + sub_label axis | Stage 5b: per-user free-form sub-labels under each primary (CI/Bestellung/etc.) — Claude picks one or returns null, backend whitelists |
 | P-SUMMARY v1.0 | 2026-04-16 | Initial | — |
 | P-REPLY v1.0 | 2026-04-16 | Initial | — |

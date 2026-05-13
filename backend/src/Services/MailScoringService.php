@@ -8,6 +8,7 @@ use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\CacheRepository;
+use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Util\Uuid;
 
 /**
@@ -21,7 +22,10 @@ use MailPilot\Util\Uuid;
  */
 final class MailScoringService
 {
-	public const PROMPT_VERSION = 'P-SCORE@1.0';
+	// @1.1: Sub-Labels axis. Claude now also picks one of the user's
+	// free-form sub labels (or returns null). Bump invalidates the
+	// content-hash cache so already-scored mails get re-scored once.
+	public const PROMPT_VERSION = 'P-SCORE@1.1';
 
 	public function __construct(
 		private readonly ClaudeProvider $claude,
@@ -31,6 +35,7 @@ final class MailScoringService
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
 		private readonly \MailPilot\Repositories\CorrectionRepository $corrections,
+		private readonly SubLabelRepository $subLabels,
 		private readonly string $model,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
@@ -54,6 +59,15 @@ final class MailScoringService
 		$scored   = [];
 		$toClaude = [];
 
+		// Sub-Labels: per-user free-form names grouped by primary. Fed
+		// into the Claude prompt as context; Claude either picks one
+		// or returns null. The lookup map is the whitelist used by
+		// the cache- and Claude-pathway alike.
+		$userId       = (string)($userProfile['user_id'] ?? '');
+		$subLabelMap  = $userId !== ''
+			? $this->loadSubLabelMap($tenantId, $userId)
+			: [];
+
 		foreach ($mails as $mail) {
 			// Pre-filter previously short-circuited every mail with a
 			// List-Unsubscribe header to a hard-coded "Automatischer
@@ -68,7 +82,7 @@ final class MailScoringService
 			$hash = $this->contentHash($mail);
 			$cached = $this->cache->get($tenantId, $hash, self::PROMPT_VERSION);
 			if ($cached !== null) {
-				$row = $this->buildScoreFromCache($tenantId, $mail, $cached);
+				$row = $this->buildScoreFromCache($tenantId, $mail, $cached, $subLabelMap);
 				$scored[] = $row;
 				if ($onChunkDone) { $onChunkDone(count($scored)); }
 				continue;
@@ -80,14 +94,14 @@ final class MailScoringService
 
 		// --- Step 4: batches to Claude ---
 		foreach (array_chunk($toClaude, $this->batchSize) as $chunk) {
-			$results = $this->callClaude($userProfile, array_column($chunk, 'mail'));
+			$results = $this->callClaude($userProfile, array_column($chunk, 'mail'), $subLabelMap);
 			foreach ($chunk as $i => $item) {
 				$claudeResult = $results[$i] ?? null;
 				if ($claudeResult === null) {
 					$this->logger->warning('scoring.missing_result', ['mail_id' => $item['mail']['id']]);
 					continue;
 				}
-				$row = $this->buildScoreFromClaude($tenantId, $item['mail'], $claudeResult);
+				$row = $this->buildScoreFromClaude($tenantId, $item['mail'], $claudeResult, $subLabelMap);
 				$scored[] = $row;
 
 				$this->cache->put($tenantId, $item['hash'], self::PROMPT_VERSION, $this->model, $claudeResult);
@@ -97,6 +111,18 @@ final class MailScoringService
 
 		$this->scores->upsertMany($scored);
 		return $scored;
+	}
+
+	/**
+	 * @return array<string, list<string>>  parent label → sorted list of sub-label names
+	 */
+	private function loadSubLabelMap(string $tenantId, string $userId): array
+	{
+		$map = [];
+		foreach ($this->subLabels->listForUser($tenantId, $userId) as $row) {
+			$map[$row['parent']][] = $row['name'];
+		}
+		return $map;
 	}
 
 	private function isObviousNewsletter(array $mail, array $userProfile): bool
@@ -121,10 +147,11 @@ final class MailScoringService
 	}
 
 	/**
-	 * @param list<array<string, mixed>> $mails
+	 * @param list<array<string, mixed>>     $mails
+	 * @param array<string, list<string>>    $subLabelMap  parent → names
 	 * @return list<array<string, mixed>>
 	 */
-	private function callClaude(array $userProfile, array $mails): array
+	private function callClaude(array $userProfile, array $mails, array $subLabelMap = []): array
 	{
 		$redacted = array_map(
 			fn(array $m): array => $this->redactor->redactMail([
@@ -144,7 +171,7 @@ final class MailScoringService
 		);
 
 		$system = $this->buildSystemPrompt();
-		$user   = $this->buildUserPrompt($userProfile, $redacted);
+		$user   = $this->buildUserPrompt($userProfile, $redacted, $subLabelMap);
 
 		// Output sizes scale linearly with batch — empirically ~140 tokens
 		// per mail for the JSON result line. Add 400 tokens of slack for
@@ -230,7 +257,10 @@ Zusammenfassung max. 160 Zeichen, in user.language, keine Anführungszeichen, ke
 TXT;
 	}
 
-	private function buildUserPrompt(array $userProfile, array $mails): string
+	/**
+	 * @param array<string, list<string>> $subLabelMap parent → names (already loaded)
+	 */
+	private function buildUserPrompt(array $userProfile, array $mails, array $subLabelMap = []): string
 	{
 		$vip = implode(', ', $userProfile['vip_senders'] ?? []);
 		$kw  = implode(', ', $userProfile['project_keywords'] ?? []);
@@ -267,18 +297,32 @@ TXT;
 			}
 		}
 
+		// USER_SUBLABELS block: only emitted when the user actually
+		// defined sub-labels. Empty pool ⇒ block omitted ⇒ Claude is
+		// instructed to always return sub_label = null below.
+		$subLabelsBlock = '';
+		$schemaSubLabel = '"sub_label":null';
+		if ($subLabelMap !== []) {
+			$lines = ['', 'USER_SUBLABELS (the user\'s own finer buckets under each primary; pick exactly one name if a mail clearly fits, else null):'];
+			foreach ($subLabelMap as $parent => $names) {
+				$lines[] = '- ' . $parent . ': ' . implode(', ', $names);
+			}
+			$subLabelsBlock = implode("\n", $lines) . "\n";
+			$schemaSubLabel = '"sub_label":"<one name from USER_SUBLABELS under the chosen label, or null>"';
+		}
+
 		return <<<TXT
 USER_PROFILE:
 - email: {$userProfile['email']}
 - language: {$userProfile['language']}
 - vip_senders: [{$vip}]
 - project_keywords: [{$kw}]
-{$corrections}
+{$corrections}{$subLabelsBlock}
 MAILS_TO_CLASSIFY:
 {$mailsJson}
 
 Gib exakt ein JSON-Objekt zurück:
-{"results":[{"id":"<mail.id>","label":"direct|action|cc|newsletter|auto|noise","action_required":true|false,"priority":1-5,"summary":"max 160 chars","reasoning":"max 80 chars"}]}
+{"results":[{"id":"<mail.id>","label":"direct|action|cc|newsletter|auto|noise",{$schemaSubLabel},"action_required":true|false,"priority":1-5,"summary":"max 160 chars","reasoning":"max 80 chars"}]}
 
 Anzahl results = Anzahl mails, in derselben Reihenfolge.
 TXT;
@@ -301,13 +345,18 @@ TXT;
 		];
 	}
 
-	private function buildScoreFromCache(string $tenantId, array $mail, array $cached): array
+	/**
+	 * @param array<string, list<string>> $subLabelMap
+	 */
+	private function buildScoreFromCache(string $tenantId, array $mail, array $cached, array $subLabelMap = []): array
 	{
+		$label = (string)($cached['label'] ?? 'auto');
 		return [
 			'id'              => Uuid::v4(),
 			'tenant_id'       => $tenantId,
 			'mail_id'         => $mail['id'],
-			'label'           => (string)($cached['label'] ?? 'auto'),
+			'label'           => $label,
+			'sub_label'       => $this->validateSubLabel($label, $cached['sub_label'] ?? null, $subLabelMap),
 			'action_required' => (int)($cached['action_required'] ?? 0),
 			'priority'        => (int)($cached['priority'] ?? 2),
 			'summary'         => $this->truncate((string)($cached['summary'] ?? ''), 200),
@@ -318,13 +367,18 @@ TXT;
 		];
 	}
 
-	private function buildScoreFromClaude(string $tenantId, array $mail, array $result): array
+	/**
+	 * @param array<string, list<string>> $subLabelMap
+	 */
+	private function buildScoreFromClaude(string $tenantId, array $mail, array $result, array $subLabelMap = []): array
 	{
+		$label = $this->validateLabel((string)($result['label'] ?? 'auto'));
 		return [
 			'id'              => Uuid::v4(),
 			'tenant_id'       => $tenantId,
 			'mail_id'         => $mail['id'],
-			'label'           => $this->validateLabel((string)($result['label'] ?? 'auto')),
+			'label'           => $label,
+			'sub_label'       => $this->validateSubLabel($label, $result['sub_label'] ?? null, $subLabelMap),
 			'action_required' => (int)(bool)($result['action_required'] ?? false),
 			'priority'        => max(1, min(5, (int)($result['priority'] ?? 2))),
 			'summary'         => $this->truncate((string)($result['summary'] ?? ''), 200),
@@ -339,6 +393,27 @@ TXT;
 	{
 		$allowed = ['direct', 'action', 'cc', 'newsletter', 'auto', 'noise'];
 		return in_array($label, $allowed, true) ? $label : 'auto';
+	}
+
+	/**
+	 * Whitelist a Claude-/cache-supplied sub_label against the user's
+	 * own pool under the chosen primary. Anything outside the pool
+	 * (typos, hallucinations, stale cache from a deleted sub-label)
+	 * collapses to NULL — the catch-all bucket in AutoSort.
+	 *
+	 * @param array<string, list<string>> $subLabelMap
+	 */
+	private function validateSubLabel(string $primary, mixed $candidate, array $subLabelMap): ?string
+	{
+		if (!is_string($candidate)) {
+			return null;
+		}
+		$candidate = trim($candidate);
+		if ($candidate === '') {
+			return null;
+		}
+		$pool = $subLabelMap[$primary] ?? [];
+		return in_array($candidate, $pool, true) ? $candidate : null;
 	}
 
 	private function truncate(string $s, int $max): string
