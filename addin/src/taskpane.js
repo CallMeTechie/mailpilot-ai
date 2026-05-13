@@ -3,7 +3,7 @@
  * Listens to Office.js events, drives the three panels.
  */
 
-import { api, setToken, clearToken, ApiError } from './api.js';
+import { api, setToken, clearToken, ApiError, startTokenRefreshLoop, stopTokenRefreshLoop } from './api.js';
 
 // ============================================================
 // State
@@ -155,10 +155,17 @@ Office.onReady((info) => {
 	initSettings();
 	startAutoRefresh();
 
+	// If we already have a JWT in storage (page reload after login),
+	// arm the pre-emptive refresh loop right away. setToken() does
+	// this automatically for fresh logins; this handles the reload case.
+	if (localStorage.getItem('mp_jwt')) {
+		startTokenRefreshLoop();
+	}
+
 	// Path 1: postMessage (works when window.opener survived).
 	window.addEventListener('message', (event) => {
 		if (event.data?.type === 'mp-auth-complete' && event.data.token) {
-			localStorage.setItem('mp_jwt', event.data.token);
+			setToken(event.data.token);
 			setStatus('Angemeldet — lade Briefing…');
 			loadBriefing();
 		}
@@ -191,7 +198,7 @@ function consumeHandoff() {
 	try {
 		const { token, ts } = JSON.parse(raw);
 		if (token && typeof ts === 'number' && Date.now() - ts < 5 * 60 * 1000) {
-			localStorage.setItem('mp_jwt', token);
+			setToken(token);
 		}
 	} catch (e) { /* ignore malformed handoff */ }
 	localStorage.removeItem('mp_jwt_handoff');
@@ -306,7 +313,7 @@ function initBriefing() {
 							const res = await api.auth.exchange(state);
 							if (res && res.token) {
 								clearInterval(pollInterval);
-								localStorage.setItem('mp_jwt', res.token);
+								setToken(res.token);
 								setStatus('Angemeldet — lade Briefing…');
 								try { dialog.close(); } catch (e) { /* ignore */ }
 								loadBriefing();

@@ -61,7 +61,10 @@ final class BriefingController extends BaseController
 		$workerOk   = false;
 		if ($lastSeen !== '') {
 			$age = time() - strtotime($lastSeen);
-			$workerOk = $age >= 0 && $age < 120; // 2-minute grace
+			// 5-minute grace: a single Score-Batch with full Anthropic
+			// latency can take 30-60s; 5min covers bulk-rescore-storms
+			// without flashing "Worker offline" at the user.
+			$workerOk = $age >= 0 && $age < 300;
 		}
 
 		Response::json([

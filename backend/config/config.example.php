@@ -13,7 +13,11 @@ return [
 		// APP_BASE_URL must be set per deployment — there is no sensible default.
 		'base_url'     => getenv('APP_BASE_URL') ?: '',
 		'jwt_secret'   => getenv('JWT_SECRET') ?: '',
-		'jwt_ttl'      => 3600,
+		// JWT-TTL: 1h default is short for the bulk operations the add-in
+		// runs (rescore-all + apply-now can take 10+ minutes). The add-in
+		// has a 401-retry-with-refresh fallback (Sprint 0.1), but a
+		// generous TTL keeps the refresh path off the hot path.
+		'jwt_ttl'      => (int)(getenv('JWT_TTL') ?: 28800),
 		'jwt_issuer'   => getenv('JWT_ISSUER')   ?: 'mailpilot.ai',
 		'jwt_audience' => getenv('JWT_AUDIENCE') ?: 'mailpilot-addin',
 		'encrypt_key'  => getenv('ENCRYPT_KEY') ?: '', // 32 bytes hex for AES-256-GCM

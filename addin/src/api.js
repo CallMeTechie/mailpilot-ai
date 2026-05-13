@@ -28,13 +28,53 @@ function getToken() {
 
 export function setToken(token) {
 	localStorage.setItem(TOKEN_KEY, token);
+	// Arm the pre-emptive refresh loop. If one is already running it's
+	// re-started cleanly with a fresh interval.
+	startTokenRefreshLoop();
 }
 
 export function clearToken() {
 	localStorage.removeItem(TOKEN_KEY);
+	stopTokenRefreshLoop();
 }
 
-async function request(method, path, body = null) {
+/**
+ * Dedupes concurrent refresh attempts — if 12 parallel requests hit
+ * a 401 at the same time, we want exactly one /auth/refresh roundtrip,
+ * not 12.
+ */
+let refreshInFlight = null;
+
+async function tryRefreshToken() {
+	if (refreshInFlight) return refreshInFlight;
+	const dead = getToken();
+	if (!dead) return null;
+	refreshInFlight = (async () => {
+		try {
+			const res = await fetch(`${BASE_URL}/auth/refresh`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${dead}`,
+				},
+				body: JSON.stringify({ token: dead }),
+			});
+			if (!res.ok) return null;
+			const data = await res.json().catch(() => null);
+			if (data && typeof data.token === 'string' && data.token.length > 0) {
+				setToken(data.token);
+				return data.token;
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	})();
+	try { return await refreshInFlight; }
+	finally { refreshInFlight = null; }
+}
+
+async function request(method, path, body = null, _retried = false) {
 	const token = getToken();
 	const headers = { 'Content-Type': 'application/json' };
 	if (token) {
@@ -52,10 +92,17 @@ async function request(method, path, body = null) {
 	const data = await res.json().catch(() => ({}));
 
 	if (!res.ok) {
-		// Poisoned-token safety net: any 401 means the cached JWT is no
-		// longer valid (expired, signed with a rotated secret, revoked).
-		// Drop it so the next request triggers the login flow cleanly
-		// instead of looping through 401s with the same dead token.
+		// 401-Recovery: one-shot refresh-then-retry. Only effective in the
+		// <30s leeway window after expiry (the server's /auth/refresh
+		// requires a still-decodable JWT) — for the long pause case the
+		// pre-emptive refresh loop in taskpane.js keeps the token fresh.
+		// The /auth/refresh path is exempt to avoid infinite recursion.
+		if (res.status === 401 && !_retried && !path.startsWith('/auth/refresh')) {
+			const fresh = await tryRefreshToken();
+			if (fresh) {
+				return request(method, path, body, true);
+			}
+		}
 		if (res.status === 401) {
 			clearToken();
 		}
@@ -68,6 +115,28 @@ async function request(method, path, body = null) {
 	}
 
 	return data;
+}
+
+/**
+ * Pre-emptive token refresh: while the add-in is open, refresh the JWT
+ * in the background every 30 minutes. Together with the 8h TTL this
+ * means the user never sees a 401 unless the add-in was closed for
+ * > 8h and reopened. Call once from taskpane.js after successful login.
+ */
+let refreshLoopId = null;
+export function startTokenRefreshLoop(intervalMs = 30 * 60 * 1000) {
+	stopTokenRefreshLoop();
+	refreshLoopId = setInterval(() => {
+		// Fire-and-forget; tryRefreshToken handles its own dedupe + error.
+		tryRefreshToken();
+	}, intervalMs);
+}
+
+export function stopTokenRefreshLoop() {
+	if (refreshLoopId !== null) {
+		clearInterval(refreshLoopId);
+		refreshLoopId = null;
+	}
 }
 
 export const api = {
