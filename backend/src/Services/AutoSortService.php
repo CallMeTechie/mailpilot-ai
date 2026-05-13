@@ -107,12 +107,19 @@ final class AutoSortService
 				'sub_label' => $matchedSub,
 				'err'       => $msg,
 			]);
-			$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $msg);
 
 			// Discriminate 404 by Graph error code (postJson packt das in
 			// die Exception-Message — siehe GraphClient::postJson).
 			$isItemMissing   = (bool)preg_match('/ErrorItemNotFound|ErrorMessageNotFound|MailboxItemNotFoundException/i', $msg);
 			$isFolderMissing = (bool)preg_match('/ErrorFolderNotFound|ErrorParentFolderNotFound|\b410\b/i', $msg);
+
+			// rememberError schreibt in auto_sort_rules.last_error — das ist
+			// die Rule-Diagnose im Add-in. Bei ErrorItemNotFound ist die
+			// Rule aber nicht das Problem, nur die einzelne Mail-ID war
+			// stale → den Rule-Error NICHT anrühren.
+			if (!$isItemMissing) {
+				$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $msg);
+			}
 
 			if ($isItemMissing) {
 				// Mail existiert in Outlook nicht mehr (User hat sie manuell
