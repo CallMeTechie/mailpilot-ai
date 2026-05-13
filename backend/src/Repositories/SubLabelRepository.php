@@ -20,11 +20,11 @@ final class SubLabelRepository
 	}
 
 	/**
-	 * @return list<array{id:string, parent:string, name:string, description:?string, color:?string, updated_at:string}>
+	 * @return list<array{id:string, parent:string, name:string, description:?string, color:?string, created_by:string, updated_at:string}>
 	 */
 	public function listForUser(string $tenantId, string $userId): array
 	{
-		$stmt = $this->db->prepare('SELECT id, parent, name, description, color, updated_at
+		$stmt = $this->db->prepare('SELECT id, parent, name, description, color, created_by, updated_at
 			FROM user_sublabels
 			WHERE tenant_id = :t AND user_id = :u
 			ORDER BY parent, name');
@@ -35,14 +35,18 @@ final class SubLabelRepository
 			'name'        => (string)$r['name'],
 			'description' => $r['description'] !== null ? (string)$r['description'] : null,
 			'color'       => $r['color']       !== null ? (string)$r['color']       : null,
+			'created_by'  => (string)($r['created_by'] ?? 'user'),
 			'updated_at'  => (string)$r['updated_at'],
 		], $stmt->fetchAll(PDO::FETCH_ASSOC));
 	}
 
-	public function create(string $tenantId, string $userId, string $parent, string $name, ?string $description, ?string $color): string
+	public function create(string $tenantId, string $userId, string $parent, string $name, ?string $description, ?string $color, string $createdBy = 'user'): string
 	{
 		if (!in_array($parent, self::PRIMARIES, true)) {
 			throw new \InvalidArgumentException("Unknown primary label: {$parent}");
+		}
+		if (!in_array($createdBy, ['user', 'ki'], true)) {
+			throw new \InvalidArgumentException("Unknown created_by: {$createdBy}");
 		}
 		$name = trim($name);
 		if ($name === '') {
@@ -50,8 +54,8 @@ final class SubLabelRepository
 		}
 		$id = Uuid::v4();
 		$stmt = $this->db->prepare('INSERT INTO user_sublabels
-			(id, tenant_id, user_id, parent, name, description, color)
-			VALUES (:id, :t, :u, :p, :n, :d, :c)
+			(id, tenant_id, user_id, parent, name, description, color, created_by)
+			VALUES (:id, :t, :u, :p, :n, :d, :c, :cb)
 			ON DUPLICATE KEY UPDATE
 				description = VALUES(description),
 				color       = VALUES(color)');
@@ -63,6 +67,7 @@ final class SubLabelRepository
 			':n'  => $name,
 			':d'  => $description !== null ? substr($description, 0, 500) : null,
 			':c'  => $color,
+			':cb' => $createdBy,
 		]);
 		return $id;
 	}

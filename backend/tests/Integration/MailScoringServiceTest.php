@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
@@ -45,6 +46,7 @@ final class MailScoringServiceTest extends TestCase
 			$budget,
 			new CorrectionRepository($pdo),
 			new SubLabelRepository($pdo),
+			new AutoSortRepository($pdo),
 			'claude-haiku-4-5-20251001',
 			20,
 			2048,
@@ -354,7 +356,136 @@ final class MailScoringServiceTest extends TestCase
 
 		$this->assertNull($scores[0]['sub_label']);
 		$prompt = (string)$claude->lastCall()['messages'][0]['content'];
-		$this->assertStringNotContainsString('USER_SUBLABELS', $prompt, 'No pool ⇒ no block in prompt');
-		$this->assertStringContainsString('"sub_label":null', $prompt, 'Schema must hardcode null');
+		// Pool-Header (mit Bucket-Liste) darf NICHT im Prompt sein — kein User-Pool.
+		// Das Wort USER_SUBLABELS taucht aber in der TOPIC_DISCOVERY-Anweisung
+		// als Referenz auf — das ist gewollt.
+		$this->assertStringNotContainsString('USER_SUBLABELS (existing buckets', $prompt,
+			'Empty pool ⇒ no existing-bucket header');
+		$this->assertStringContainsString('TOPIC_DISCOVERY', $prompt,
+			'Discovery block must always be present (Phase 6b)');
+	}
+
+	// --- Phase 6b: Topic-Discovery ---------------------------------
+
+	public function testKiProposesNewTopicCreatesSubLabelAndRule(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId, [
+			'from_email' => 'notifications@stripe.com',
+			'subject'    => 'Payment received',
+		]);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'auto',
+			'sub_label' => 'Stripe Payments',
+			'sub_label_is_new' => true,
+			'action_required' => false,
+			'priority' => 2,
+			'summary' => 'Zahlung erhalten',
+			'reasoning' => 'stripe notification',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertSame('Stripe Payments', $scores[0]['sub_label']);
+
+		// user_sublabels: neuer Eintrag mit created_by='ki'
+		$subs = (new SubLabelRepository($this->pdo()))->listForUser($tenantId, $userId);
+		$this->assertCount(1, $subs);
+		$this->assertSame('Stripe Payments', $subs[0]['name']);
+		$this->assertSame('auto', $subs[0]['parent']);
+		$this->assertSame('ki', $subs[0]['created_by']);
+
+		// auto_sort_rules: passende Sub-Rule angelegt
+		$rule = (new AutoSortRepository($this->pdo()))
+			->findRule($tenantId, $userId, 'auto', 'Stripe Payments');
+		$this->assertNotNull($rule);
+		$this->assertTrue($rule['enabled']);
+		$this->assertStringContainsString('Stripe Payments', $rule['folder_name']);
+	}
+
+	public function testFuzzyMergeReusesExistingTopicInsteadOfCreatingDuplicate(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId);
+
+		// User hat bereits "GitHub CI" — Claude schlaegt "GitHub Actions"
+		// vor (Levenshtein-Distanz <= 3 ggue. "GitHub CI"? "GitHub Actions"
+		// und "GitHub CI" sind Distanz ~6; baue auf nahem Match auf).
+		(new SubLabelRepository($this->pdo()))
+			->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'auto',
+			'sub_label' => 'Github CI',   // Tippfehler: kleines 'h', Distanz 1
+			'sub_label_is_new' => true,
+			'action_required' => false,
+			'priority' => 2,
+			'summary' => 's',
+			'reasoning' => 'r',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertSame('GitHub CI', $scores[0]['sub_label'],
+			'Tippfehler-Variante muss auf existing Topic gemerged werden');
+
+		// Es darf weiterhin nur den einen existing Topic geben
+		$subs = (new SubLabelRepository($this->pdo()))->listForUser($tenantId, $userId);
+		$this->assertCount(1, $subs);
+		$this->assertSame('user', $subs[0]['created_by'],
+			'Der existing Topic wurde nicht ueberschrieben');
+	}
+
+	public function testInvalidNewTopicNameRejected(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId);
+
+		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+		$claude = new FakeClaudeClient();
+		$claude->scriptJson(['results' => [[
+			'id' => $mails[0]['id'],
+			'label' => 'auto',
+			'sub_label' => str_repeat('A', 50),   // > 30 chars → rejected
+			'sub_label_is_new' => true,
+			'action_required' => false,
+			'priority' => 2,
+			'summary' => 's',
+			'reasoning' => 'r',
+		]]]);
+
+		$service = $this->makeService($claude);
+		$profile = [
+			'email' => 'marc@test.de', 'language' => 'de',
+			'vip_senders' => [], 'project_keywords' => [],
+			'tenant_id' => $tenantId, 'user_id' => $userId,
+		];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertNull($scores[0]['sub_label']);
+		$this->assertSame([], (new SubLabelRepository($this->pdo()))->listForUser($tenantId, $userId),
+			'Format-invalid name darf nichts in user_sublabels schreiben');
 	}
 }

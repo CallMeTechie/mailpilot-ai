@@ -5,6 +5,7 @@ namespace MailPilot\Services;
 
 use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
+use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\CacheRepository;
@@ -22,10 +23,13 @@ use MailPilot\Util\Uuid;
  */
 final class MailScoringService
 {
-	// @1.1: Sub-Labels axis. Claude now also picks one of the user's
-	// free-form sub labels (or returns null). Bump invalidates the
-	// content-hash cache so already-scored mails get re-scored once.
-	public const PROMPT_VERSION = 'P-SCORE@1.1';
+	// @1.2: Topic-Discovery (Phase 6b). Claude darf jetzt auch NEUE
+	// Sub-Label-Namen vorschlagen, wenn keiner der vom User
+	// angelegten Pool-Einträge passt. Backend speichert die via
+	// SubLabelRepository::create(... 'ki') + AutoSortRepository::upsert
+	// und liefert für die Mail den finalen (ggf. fuzzy-gemergten)
+	// Topic-Namen zurück.
+	public const PROMPT_VERSION = 'P-SCORE@1.2';
 
 	public function __construct(
 		private readonly ClaudeProvider $claude,
@@ -36,6 +40,7 @@ final class MailScoringService
 		private readonly BudgetService $budget,
 		private readonly \MailPilot\Repositories\CorrectionRepository $corrections,
 		private readonly SubLabelRepository $subLabels,
+		private readonly AutoSortRepository $autoSortRules,
 		private readonly string $model,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
@@ -82,7 +87,7 @@ final class MailScoringService
 			$hash = $this->contentHash($mail);
 			$cached = $this->cache->get($tenantId, $hash, self::PROMPT_VERSION);
 			if ($cached !== null) {
-				$row = $this->buildScoreFromCache($tenantId, $mail, $cached, $subLabelMap);
+				$row = $this->buildScoreFromCache($tenantId, $userId, $mail, $cached, $subLabelMap);
 				$scored[] = $row;
 				if ($onChunkDone) { $onChunkDone(count($scored)); }
 				continue;
@@ -101,7 +106,7 @@ final class MailScoringService
 					$this->logger->warning('scoring.missing_result', ['mail_id' => $item['mail']['id']]);
 					continue;
 				}
-				$row = $this->buildScoreFromClaude($tenantId, $item['mail'], $claudeResult, $subLabelMap);
+				$row = $this->buildScoreFromClaude($tenantId, $userId, $item['mail'], $claudeResult, $subLabelMap);
 				$scored[] = $row;
 
 				$this->cache->put($tenantId, $item['hash'], self::PROMPT_VERSION, $this->model, $claudeResult);
@@ -305,16 +310,24 @@ TXT;
 			}
 		}
 
-		// USER_SUBLABELS block: only emitted when the user actually
-		// defined sub-labels. Empty pool ⇒ block omitted ⇒ Claude is
-		// instructed to always return sub_label = null below.
-		// Description (wenn vorhanden) hilft Claude entscheiden, ob
-		// eine Mail in den Topic passt — z.B. "GitHub CI" mit
-		// Description "Mails von notifications@github.com".
+		// USER_SUBLABELS-Block: listet vom User angelegte Sub-Labels plus
+		// in Phase 6b von der KI selbst vorgeschlagene (created_by='ki').
+		// Description hilft, in den richtigen Topic einzuordnen — z. B.
+		// "GitHub CI" mit Description "Mails von notifications@github.com".
+		//
+		// Phase 6b: Wenn keiner der existierenden Buckets passt, DARF
+		// Claude einen NEUEN kurzen Topic-Namen vorschlagen (max 30
+		// Zeichen, capitalized, single word oder kurze Phrase wie
+		// "Stripe Payments"). Backend speichert das in user_sublabels +
+		// auto_sort_rules und routet die Mail in einen neuen Outlook-
+		// Ordner. Damit die KI nicht 50 verschiedene Topics für die
+		// gleiche Kategorie erfindet, packen wir Beispiele und eine
+		// strikte Anweisung in den Prompt.
 		$subLabelsBlock = '';
-		$schemaSubLabel = '"sub_label":null';
+		$schemaSubLabel = '"sub_label":"<a topic name OR null>","sub_label_is_new":true|false';
+		$discoveryNote = '';
 		if ($subLabelMap !== []) {
-			$lines = ['', 'USER_SUBLABELS (the user\'s own finer buckets under each primary; pick exactly one name if a mail clearly fits, else null):'];
+			$lines = ['', 'USER_SUBLABELS (existing buckets; prefer these when the mail clearly fits one):'];
 			foreach ($subLabelMap as $parent => $entries) {
 				foreach ($entries as $entry) {
 					$line = '- ' . $parent . ' / ' . $entry['name'];
@@ -325,8 +338,14 @@ TXT;
 				}
 			}
 			$subLabelsBlock = implode("\n", $lines) . "\n";
-			$schemaSubLabel = '"sub_label":"<one name from USER_SUBLABELS under the chosen label, or null>"';
 		}
+
+		$discoveryNote = "\nTOPIC_DISCOVERY (Phase 6b):"
+			. "\n- If the mail clearly belongs to a recurring category that USER_SUBLABELS does NOT yet cover, you MAY propose a NEW short topic name (max 30 chars, Title Case, e.g. \"Stripe Payments\", \"GitHub CI\", \"Bestellung\")."
+			. "\n- Only propose a new topic when you can identify a clear recurring sender or pattern. Do NOT invent topics for one-off mails."
+			. "\n- Set \"sub_label_is_new\":true exactly when you propose a NEW topic that is NOT in USER_SUBLABELS."
+			. "\n- If a USER_SUBLABEL matches, return its existing name verbatim and set \"sub_label_is_new\":false."
+			. "\n- If neither fits (truly unique mail), return \"sub_label\":null and \"sub_label_is_new\":false.\n";
 
 		return <<<TXT
 USER_PROFILE:
@@ -334,7 +353,7 @@ USER_PROFILE:
 - language: {$userProfile['language']}
 - vip_senders: [{$vip}]
 - project_keywords: [{$kw}]
-{$corrections}{$subLabelsBlock}
+{$corrections}{$subLabelsBlock}{$discoveryNote}
 MAILS_TO_CLASSIFY:
 {$mailsJson}
 
@@ -365,7 +384,7 @@ TXT;
 	/**
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function buildScoreFromCache(string $tenantId, array $mail, array $cached, array $subLabelMap = []): array
+	private function buildScoreFromCache(string $tenantId, string $userId, array $mail, array $cached, array &$subLabelMap): array
 	{
 		$label = (string)($cached['label'] ?? 'auto');
 		return [
@@ -373,7 +392,10 @@ TXT;
 			'tenant_id'       => $tenantId,
 			'mail_id'         => $mail['id'],
 			'label'           => $label,
-			'sub_label'       => $this->validateSubLabel($label, $cached['sub_label'] ?? null, $subLabelMap),
+			// Cache enthält sub_label aus früherem Score-Call — also nicht "new"
+			'sub_label'       => $this->resolveOrDiscoverSubLabel(
+				$tenantId, $userId, $label, $cached['sub_label'] ?? null, false, $subLabelMap,
+			),
 			'action_required' => (int)($cached['action_required'] ?? 0),
 			'priority'        => (int)($cached['priority'] ?? 2),
 			'summary'         => $this->truncate((string)($cached['summary'] ?? ''), 200),
@@ -387,15 +409,18 @@ TXT;
 	/**
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function buildScoreFromClaude(string $tenantId, array $mail, array $result, array $subLabelMap = []): array
+	private function buildScoreFromClaude(string $tenantId, string $userId, array $mail, array $result, array &$subLabelMap): array
 	{
 		$label = $this->validateLabel((string)($result['label'] ?? 'auto'));
+		$isNew = (bool)($result['sub_label_is_new'] ?? false);
 		return [
 			'id'              => Uuid::v4(),
 			'tenant_id'       => $tenantId,
 			'mail_id'         => $mail['id'],
 			'label'           => $label,
-			'sub_label'       => $this->validateSubLabel($label, $result['sub_label'] ?? null, $subLabelMap),
+			'sub_label'       => $this->resolveOrDiscoverSubLabel(
+				$tenantId, $userId, $label, $result['sub_label'] ?? null, $isNew, $subLabelMap,
+			),
 			'action_required' => (int)(bool)($result['action_required'] ?? false),
 			'priority'        => max(1, min(5, (int)($result['priority'] ?? 2))),
 			'summary'         => $this->truncate((string)($result['summary'] ?? ''), 200),
@@ -413,25 +438,90 @@ TXT;
 	}
 
 	/**
-	 * Whitelist a Claude-/cache-supplied sub_label against the user's
-	 * own pool under the chosen primary. Anything outside the pool
-	 * (typos, hallucinations, stale cache from a deleted sub-label)
-	 * collapses to NULL — the catch-all bucket in AutoSort.
+	 * Whitelist + Topic-Discovery (Phase 6b).
+	 *
+	 *   - In existing pool? → use as-is.
+	 *   - sub_label_is_new=true AND not in pool: Fuzzy-Merge gegen Pool
+	 *     (Levenshtein ≤ 3) — bei Match: existing name; sonst neuen
+	 *     Topic in user_sublabels (created_by='ki') + auto_sort_rules
+	 *     (enabled=true, default folder) anlegen.
+	 *   - Andernfalls (KI hat halluziniert): NULL.
+	 *
+	 * Die Map wird by-ref geupdatet, damit weitere Mails im selben
+	 * Batch den frisch entdeckten Topic ohne neuen DB-Round-Trip sehen.
 	 *
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function validateSubLabel(string $primary, mixed $candidate, array $subLabelMap): ?string
-	{
-		if (!is_string($candidate)) {
-			return null;
-		}
+	private function resolveOrDiscoverSubLabel(
+		string $tenantId,
+		string $userId,
+		string $primary,
+		mixed $candidate,
+		bool $isNew,
+		array &$subLabelMap,
+	): ?string {
+		if (!is_string($candidate)) return null;
 		$candidate = trim($candidate);
-		if ($candidate === '') {
-			return null;
-		}
+		if ($candidate === '') return null;
+
 		$pool  = $subLabelMap[$primary] ?? [];
 		$names = array_column($pool, 'name');
-		return in_array($candidate, $names, true) ? $candidate : null;
+
+		// 1) Exact match — Claude hat existing topic gewählt
+		if (in_array($candidate, $names, true)) {
+			return $candidate;
+		}
+
+		// 2) Discovery-Pfad
+		if ($isNew && $userId !== '') {
+			// 2a) Format-Sanity: max 30 chars, only letters/digits/-/_/space/slash
+			if (mb_strlen($candidate) > 30 || !preg_match('/^[\p{L}\p{N}\s\-_\/]+$/u', $candidate)) {
+				$this->logger->info('topic.discovery_rejected', [
+					'name'    => $candidate,
+					'primary' => $primary,
+					'reason'  => 'format',
+				]);
+				return null;
+			}
+
+			// 2b) Fuzzy-Merge gegen existing names (lowercase) — vermeidet
+			// "GitHub CI" + "GitHub Actions" + "CI Pipeline" Drift
+			foreach ($names as $existing) {
+				if (levenshtein(strtolower($candidate), strtolower($existing)) <= 3) {
+					$this->logger->info('topic.merged_to_existing', [
+						'proposed' => $candidate,
+						'matched'  => $existing,
+						'primary'  => $primary,
+					]);
+					return $existing;
+				}
+			}
+
+			// 2c) Anlegen: user_sublabels (created_by='ki') + auto_sort_rules
+			try {
+				$this->subLabels->create($tenantId, $userId, $primary, $candidate, null, null, 'ki');
+				// Default-Folder-Pfad wird in upsert() berechnet wenn folder_name leer ist
+				$this->autoSortRules->upsert($tenantId, $userId, $primary, $candidate, true, '');
+				$this->logger->info('topic.discovered', [
+					'name'    => $candidate,
+					'primary' => $primary,
+				]);
+				// Map lokal updaten, damit Folge-Mails im selben Batch
+				// den neuen Topic als "existing" sehen
+				$subLabelMap[$primary][] = ['name' => $candidate, 'description' => null];
+				return $candidate;
+			} catch (\Throwable $e) {
+				$this->logger->warning('topic.discovery_failed', [
+					'name'    => $candidate,
+					'primary' => $primary,
+					'err'     => $e->getMessage(),
+				]);
+				return null;
+			}
+		}
+
+		// 3) KI hat halluziniert (Name nicht im Pool, isNew=false)
+		return null;
 	}
 
 	private function truncate(string $s, int $max): string
