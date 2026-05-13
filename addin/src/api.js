@@ -173,7 +173,7 @@ export const api = {
 		addRedaction:  (p, d)  => request('POST', '/settings/redaction', { pattern: p, description: d }),
 		listAutoSort:  ()      => request('GET',  '/settings/auto-sort'),
 		updateAutoSort:(rules) => request('PATCH','/settings/auto-sort', { rules }),
-		applyAutoSortNow: (limit = 50) => request('POST', '/settings/auto-sort/apply-now', { limit }),
+		applyAutoSortNow: (limit = 50, afterId = null) => request('POST', '/settings/auto-sort/apply-now', { limit, after_id: afterId }),
 		deleteAutoSortSub: (label, name) => request('DELETE',
 			`/settings/auto-sort/sub/${encodeURIComponent(label)}/${encodeURIComponent(name)}`),
 		rescoreAll:    ()      => request('POST', '/settings/rescore-all'),

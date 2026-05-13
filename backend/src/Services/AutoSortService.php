@@ -113,6 +113,24 @@ final class AutoSortService
 			if (preg_match('/\b(404|410)\b/', $e->getMessage())) {
 				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, '');
 			}
+
+			// Retry-Cap: jeden Fail zählen, bei 3 endgültig skippen
+			// (auto_sorted_at = NOW() schließt die Mail aus der
+			// applyAutoSortNow-Match-Query aus, identisch zu success).
+			// Ohne diesen Cap hat die Frontend-Schleife dieselbe Mail
+			// bei jedem Token-Fehler 40+ mal wiederversucht — siehe
+			// das "2000 verarbeitet / 300 Fehler"-Symptom.
+			$this->db->prepare('UPDATE mail_scores
+				SET auto_sort_attempts = auto_sort_attempts + 1
+				WHERE mail_id = :m AND tenant_id = :t')
+				->execute([':m' => $mail['id'], ':t' => $tenantId]);
+			$this->db->prepare('UPDATE mail_scores
+				SET auto_sorted_at = UTC_TIMESTAMP(3)
+				WHERE mail_id = :m AND tenant_id = :t
+				  AND auto_sort_attempts >= 3
+				  AND auto_sorted_at IS NULL')
+				->execute([':m' => $mail['id'], ':t' => $tenantId]);
+
 			return ['moved' => false, 'reason' => 'graph_error'];
 		}
 	}

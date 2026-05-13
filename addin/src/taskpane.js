@@ -1314,9 +1314,8 @@ function buildAutoSortRow(r, isSub) {
 }
 
 async function rescoreAll() {
-	const btn = document.getElementById('btn-rescore-all');
+	if (mpBusy !== null) return;
 	const status = document.getElementById('rescore-status');
-	if (!btn || btn.disabled) return;
 
 	const ok = await mpConfirm({
 		title: 'Alle Mails neu klassifizieren?',
@@ -1325,20 +1324,63 @@ async function rescoreAll() {
 	});
 	if (!ok) return;
 
-	btn.disabled = true;
-	if (status) status.textContent = 'Cache wird geleert ...';
-	try {
-		const res = await api.settings.rescoreAll();
-		if (status) status.textContent = `${res.scores_marked ?? 0} Mails markiert. Sync wird gestartet ...`;
+	setBusy('rescore');
+	const progress = mpProgress({
+		title: 'Mails werden neu klassifiziert',
+		status: 'Cache wird geleert ...',
+	});
+	let cancelled = false;
+	progress.waitForCancel().then(() => { cancelled = true; setBusy('canceling'); });
 
-		await api.sync.trigger();
-		if (status) status.textContent = `${res.scores_marked ?? 0} Mails werden neu klassifiziert. Cache geleert: ${res.cache_purged ?? 0} Eintraege.`;
-		showToast(`Re-Score gestartet: ${res.scores_marked ?? 0} Mails`, 'success', 4000);
+	try {
+		// 1. Cache wipe + scores als veraltet markieren
+		const res = await api.settings.rescoreAll();
+		const total = res.scores_marked ?? 0;
+		progress.update({ done: 0, total, status: `${total} Mails markiert. Sync wird gestartet ...` });
+
+		// 2. Sync-Jobs anwerfen (eine pro Mailbox)
+		const syncRes = await api.sync.trigger();
+		const jobIds = (syncRes && syncRes.job_ids) || [];
+
+		if (jobIds.length === 0) {
+			// Kein Mailbox-Sync nötig (kein Postfach verknüpft)
+			progress.update({ done: 0, total, status: `${total} Mails markiert. Kein Sync-Job — Postfach pruefen.` });
+		} else {
+			// 3. Polling: warte bis alle Jobs durch sind
+			let done = 0;
+			let allDone = false;
+			let pollIterations = 0;
+			const maxPoll = 600; // 600 × 2s = 20 Min hard-cap
+			while (!allDone && !cancelled && pollIterations++ < maxPoll) {
+				await new Promise((r) => setTimeout(r, 2000));
+				if (cancelled) break;
+				done = 0;
+				allDone = true;
+				for (const id of jobIds) {
+					try {
+						const s = await api.sync.status(id);
+						if (s.status === 'queued' || s.status === 'running') allDone = false;
+						done += parseInt(s.processed ?? 0, 10);
+					} catch { /* transient, weiter */ }
+				}
+				progress.update({ done, total, status: `${done} / ${total} Mails neu klassifiziert ...` });
+			}
+		}
+
+		progress.close();
+		if (cancelled) {
+			showToast('Abgebrochen — Worker laeuft im Hintergrund weiter', 'warn', 5000);
+			if (status) status.textContent = 'Abgebrochen.';
+		} else {
+			showToast(`${total} Mails neu klassifiziert`, 'success', 4000);
+			if (status) status.textContent = `Fertig: ${total} Mails neu klassifiziert. Cache geleert: ${res.cache_purged ?? 0} Eintraege.`;
+		}
 	} catch (err) {
+		progress.close();
 		if (status) status.textContent = '';
 		handleError(err);
 	} finally {
-		btn.disabled = false;
+		clearBusy();
 	}
 }
 
@@ -1361,44 +1403,79 @@ async function addAutoSortSubRule() {
 }
 
 async function applyAutoSortNow() {
-	const btn = document.getElementById('btn-apply-autosort-now');
+	if (mpBusy !== null) return;
 	const status = document.getElementById('autosort-status');
-	if (!btn || btn.disabled) return;
-	{
-		const ok = await mpConfirm({
-			title: 'Aktive Regeln auf bestehende Mails anwenden?',
-			body: 'Alle bereits gescorten Mails werden in die konfigurierten Ordner verschoben. Mails mit hoher Prio (direct/action ab Prio 4) bleiben in der Inbox.',
-			okLabel: 'Jetzt anwenden',
-		});
-		if (!ok) return;
-	}
 
-	btn.disabled = true;
+	const ok = await mpConfirm({
+		title: 'Aktive Regeln auf bestehende Mails anwenden?',
+		body: 'Alle bereits gescorten Mails werden in die konfigurierten Ordner verschoben. Mails mit hoher Prio (direct/action ab Prio 4) bleiben in der Inbox.',
+		okLabel: 'Jetzt anwenden',
+	});
+	if (!ok) return;
+
+	setBusy('autosort');
+	const progress = mpProgress({
+		title: 'Regeln werden angewendet',
+		status: 'Sammle passende Mails ...',
+	});
+	let cancelled = false;
+	progress.waitForCancel().then(() => { cancelled = true; setBusy('canceling'); });
+
 	const totals = { processed: 0, moved: 0, protected: 0, errors: 0 };
-	const toastId = showToast('Wende Regeln an…', 'info', 60000);
+	let total = null;
+	let afterId = null;
+
 	try {
-		let hasMore = true;
-		let safety = 50; // up to 50 × 50 = 2500 mails worst-case
-		while (hasMore && safety-- > 0) {
-			const res = await api.settings.applyAutoSortNow(50);
+		// Hard-Cap als Last-Resort gegen Backend-Bug oder bösen Cursor;
+		// die echte Stopbedingung ist has_more=false plus Cursor-Advance.
+		let safety = 1000;
+		while (safety-- > 0) {
+			if (cancelled) break;
+
+			const res = await api.settings.applyAutoSortNow(50, afterId);
+			if (res.total !== undefined && res.total !== null && total === null) {
+				total = res.total;
+			}
+
 			totals.processed += res.processed ?? 0;
 			totals.moved     += res.moved ?? 0;
 			totals.protected += res.protected ?? 0;
 			totals.errors    += res.errors ?? 0;
-			status.textContent = `${totals.moved} verschoben · ${totals.processed} verarbeitet${res.has_more ? ' · läuft…' : ''}`;
-			hasMore = !!res.has_more;
+
+			const parts = [`${totals.moved} verschoben`];
+			if (totals.protected) parts.push(`${totals.protected} geschuetzt`);
+			if (totals.errors)    parts.push(`${totals.errors} Fehler`);
+			progress.update({
+				done: totals.processed,
+				total: total ?? totals.processed,
+				status: parts.join(' · '),
+			});
+
+			if (!res.has_more) break;
+			// Cursor MUSS sich bewegen — wenn next_after_id wie vor dem
+			// Aufruf bleibt, ist das ein Backend-Bug; lieber abbrechen
+			// als endlos loopen wie vor Sprint 0.2.
+			if (!res.next_after_id || res.next_after_id === afterId) break;
+			afterId = res.next_after_id;
 		}
-		dismissToast(toastId);
-		const parts = [`${totals.moved} verschoben`];
-		if (totals.protected) parts.push(`${totals.protected} geschützt (Prio≥4)`);
-		if (totals.errors)    parts.push(`${totals.errors} Fehler`);
-		showToast('Regeln angewendet: ' + parts.join(' · '), totals.errors ? 'error' : 'success', 6000);
-		status.textContent = `Fertig: ${parts.join(' · ')}.`;
+
+		progress.close();
+		const finalParts = [`${totals.moved} verschoben`];
+		if (totals.protected) finalParts.push(`${totals.protected} geschuetzt (Prio>=4)`);
+		if (totals.errors)    finalParts.push(`${totals.errors} Fehler`);
+		const finalText = finalParts.join(' · ');
+		if (cancelled) {
+			showToast('Abgebrochen: ' + finalText, 'warn', 5000);
+			if (status) status.textContent = 'Abgebrochen: ' + finalText;
+		} else {
+			showToast('Regeln angewendet: ' + finalText, totals.errors ? 'error' : 'success', 6000);
+			if (status) status.textContent = `Fertig: ${finalText}.`;
+		}
 	} catch (err) {
-		dismissToast(toastId);
+		progress.close();
 		handleError(err);
 	} finally {
-		btn.disabled = false;
+		clearBusy();
 	}
 }
 
@@ -1498,6 +1575,81 @@ function dismissToast(id) {
 	if (!toast || toast.classList.contains('is-leaving')) return;
 	toast.classList.add('is-leaving');
 	toast.addEventListener('animationend', () => toast.remove(), { once: true });
+}
+
+// ============================================================
+// Long-Op Lock & Progress-Modal
+// ============================================================
+// Globaler Busy-State. Setzt UI-Knöpfe disabled, damit der User
+// nicht „Mails neu klassifizieren" und „Regeln jetzt anwenden"
+// parallel anwirft (beide würden auf denselben Score-Daten arbeiten
+// und sich gegenseitig die Cursor stehlen).
+let mpBusy = null; // null | 'rescore' | 'autosort' | 'canceling'
+
+function setBusy(kind) {
+	mpBusy = kind;
+	refreshButtonStates();
+}
+
+function clearBusy() {
+	mpBusy = null;
+	refreshButtonStates();
+}
+
+function refreshButtonStates() {
+	const locked = mpBusy !== null && mpBusy !== 'canceling';
+	['btn-rescore-all', 'btn-apply-autosort-now'].forEach((id) => {
+		const el = document.getElementById(id);
+		if (el) el.disabled = locked;
+	});
+}
+
+/**
+ * Promise-basiertes Progress-Modal. Returns a controller with
+ *   update({ done, total, status })  → live updates
+ *   close()                            → success path
+ *   waitForCancel()                    → Promise that resolves on Cancel-click
+ */
+function mpProgress(opts) {
+	const overlay = document.getElementById('mp-progress-overlay');
+	const titleEl = document.getElementById('mp-progress-title');
+	const statusEl = document.getElementById('mp-progress-status');
+	const fillEl = document.getElementById('mp-progress-fill');
+	const cancelBtn = document.getElementById('mp-progress-cancel');
+	if (!overlay || !titleEl || !statusEl || !fillEl || !cancelBtn) {
+		return { update: () => {}, close: () => {}, waitForCancel: () => new Promise(() => {}) };
+	}
+
+	titleEl.textContent = opts.title || '';
+	statusEl.textContent = opts.status || '';
+	fillEl.style.width = '0%';
+	overlay.dataset.hidden = 'false';
+
+	let cancelResolve = null;
+	const cancelPromise = new Promise((res) => { cancelResolve = res; });
+	const onCancel = () => {
+		cancelBtn.disabled = true;
+		cancelBtn.textContent = 'Wird abgebrochen ...';
+		if (cancelResolve) cancelResolve();
+	};
+	cancelBtn.disabled = false;
+	cancelBtn.textContent = opts.cancelLabel || 'Abbrechen';
+	cancelBtn.addEventListener('click', onCancel);
+
+	return {
+		update({ done, total, status }) {
+			if (typeof total === 'number' && total > 0 && typeof done === 'number') {
+				const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+				fillEl.style.width = pct + '%';
+			}
+			if (status !== undefined) statusEl.textContent = status;
+		},
+		close() {
+			overlay.dataset.hidden = 'true';
+			cancelBtn.removeEventListener('click', onCancel);
+		},
+		waitForCancel: () => cancelPromise,
+	};
 }
 
 // ============================================================

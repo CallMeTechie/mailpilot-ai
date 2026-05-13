@@ -318,6 +318,22 @@
 	</footer>
 
 	<!-- Toast stack: transient notifications that do not overwrite each other -->
+	<!-- Progress-Modal fuer langlaufende Operationen (Rescore, ApplyAutoSortNow).
+	     Cancel ist best-effort: setzt ein Flag, das die Loop vor dem naechsten
+	     Batch prueft. -->
+	<div id="mp-progress-overlay" class="mp-modal-overlay" data-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mp-progress-title">
+		<div class="mp-modal">
+			<h3 id="mp-progress-title" class="mp-modal-title"></h3>
+			<div id="mp-progress-body" class="mp-modal-body">
+				<div class="mp-progress-bar"><div id="mp-progress-fill" class="mp-progress-fill" style="width:0%"></div></div>
+				<p id="mp-progress-status" class="mp-muted"></p>
+			</div>
+			<div class="mp-modal-actions">
+				<button type="button" class="mp-btn mp-btn-ghost" id="mp-progress-cancel">Abbrechen</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- Modal dialog: ersetzt native confirm()/alert(), die im Office Task Pane
 	     vom Host unzuverlaessig unterdrueckt werden. Promise-basiert via mpConfirm(). -->
 	<div id="mp-modal-overlay" class="mp-modal-overlay" data-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mp-modal-title">

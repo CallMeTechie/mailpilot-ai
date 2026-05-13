@@ -158,8 +158,11 @@ final class SettingsController extends BaseController
 	 */
 	public function applyAutoSortNow(array $params, array $body): void
 	{
-		$ctx   = $this->requireAuth();
-		$limit = max(1, min(200, (int)($body['limit'] ?? 50)));
+		$ctx     = $this->requireAuth();
+		$limit   = max(1, min(200, (int)($body['limit'] ?? 50)));
+		$afterId = isset($body['after_id']) && $body['after_id'] !== null && $body['after_id'] !== ''
+			? (string)$body['after_id']
+			: null;
 
 		$rules = $this->kernel->get(AutoSortRepository::class)
 			->listForUser($ctx['tenant_id'], $ctx['user_id']);
@@ -168,7 +171,11 @@ final class SettingsController extends BaseController
 			static fn(array $r): bool => (bool)$r['enabled'],
 		));
 		if ($enabledRules === []) {
-			Response::json(['processed' => 0, 'moved' => 0, 'protected' => 0, 'errors' => 0, 'has_more' => false]);
+			Response::json([
+				'processed' => 0, 'moved' => 0, 'protected' => 0, 'errors' => 0,
+				'has_more' => false, 'next_after_id' => null,
+				'total' => $afterId === null ? 0 : null,
+			]);
 			return;
 		}
 
@@ -179,34 +186,57 @@ final class SettingsController extends BaseController
 		}
 
 		// Candidate mails: scored, with at least one enabled rule that
-		// could match. The EXISTS subquery does exact (label, sub_label)
-		// OR catch-all (sub_label IS NULL) matching — same precedence as
-		// AutoSortService::backfillForMailbox. high-priority direct/action
-		// is filtered out here so the returned count == real workload.
+		// could match. Cursor-Pagination via m.id (UUID-stable order)
+		// damit auch failed Moves bei jedem Loop-Schritt überschritten
+		// werden. Retry-Cap (auto_sort_attempts < 3) hält Mails draußen,
+		// die schon dreimal gescheitert sind — siehe AutoSortService.
 		$pdo = $this->kernel->get(\PDO::class);
+
+		$where = "m.tenant_id = :t
+			AND m.deleted_at IS NULL
+			AND NOT (s.label IN ('direct','action') AND s.priority >= 4)
+			AND s.auto_sorted_at IS NULL
+			AND s.auto_sort_attempts < 3
+			AND EXISTS (
+				SELECT 1 FROM auto_sort_rules r
+				WHERE r.tenant_id = m.tenant_id
+				  AND r.user_id   = :u
+				  AND r.label     = s.label
+				  AND r.enabled   = 1
+				  AND (r.sub_label = s.sub_label OR r.sub_label IS NULL)
+			)";
+		$afterClause = $afterId !== null ? ' AND m.id > :after_id' : '';
+
+		// Total nur beim ersten Call (after_id IS NULL) — Frontend braucht
+		// das einmalig für die Progress-Bar, danach trackt es selbst.
+		$total = null;
+		if ($afterId === null) {
+			$countStmt = $pdo->prepare("SELECT COUNT(*) FROM mails m
+				INNER JOIN mail_scores s ON s.mail_id = m.id
+				WHERE {$where}");
+			$countStmt->execute([':t' => $ctx['tenant_id'], ':u' => $ctx['user_id']]);
+			$total = (int)$countStmt->fetchColumn();
+		}
+
 		$sql = "SELECT m.*, s.label AS score_label, s.sub_label AS score_sub_label,
 				s.priority AS score_priority, s.action_required AS score_ar
 			FROM mails m
 			INNER JOIN mail_scores s ON s.mail_id = m.id
-			WHERE m.tenant_id = ?
-			  AND m.deleted_at IS NULL
-			  AND NOT (s.label IN ('direct','action') AND s.priority >= 4)
-			  AND EXISTS (
-				SELECT 1 FROM auto_sort_rules r
-				WHERE r.tenant_id = m.tenant_id
-				  AND r.user_id   = ?
-				  AND r.label     = s.label
-				  AND r.enabled   = 1
-				  AND (r.sub_label = s.sub_label OR r.sub_label IS NULL)
-			  )
-			ORDER BY m.received_at DESC
+			WHERE {$where}{$afterClause}
+			ORDER BY m.id ASC
 			LIMIT " . ($limit + 1);
 		$stmt = $pdo->prepare($sql);
-		$stmt->execute([$ctx['tenant_id'], $ctx['user_id']]);
+		$stmt->bindValue(':t', $ctx['tenant_id']);
+		$stmt->bindValue(':u', $ctx['user_id']);
+		if ($afterId !== null) {
+			$stmt->bindValue(':after_id', $afterId);
+		}
+		$stmt->execute();
 		$rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
 		$hasMore = count($rows) > $limit;
 		$rows    = array_slice($rows, 0, $limit);
+		$nextAfterId = $rows !== [] ? (string)end($rows)['id'] : $afterId;
 
 		// Per-mailbox token cache so we don't refresh on every iteration.
 		$tokens = $this->kernel->get(TokenService::class);
@@ -243,11 +273,13 @@ final class SettingsController extends BaseController
 		}
 
 		Response::json([
-			'processed' => count($rows),
-			'moved'     => $moved,
-			'protected' => $protected,
-			'errors'    => $errors,
-			'has_more'  => $hasMore,
+			'processed'     => count($rows),
+			'moved'         => $moved,
+			'protected'     => $protected,
+			'errors'        => $errors,
+			'has_more'      => $hasMore,
+			'next_after_id' => $nextAfterId,
+			'total'         => $total,
 		]);
 	}
 
@@ -310,8 +342,15 @@ final class SettingsController extends BaseController
 			$cachePurged = $this->kernel->get(CacheRepository::class)
 				->purgeForTenant($ctx['tenant_id']);
 
+			// Mark non-user-corrected scores als veraltet damit der Worker
+			// sie beim naechsten Sync neu durch Claude schickt. Plus:
+			// auto_sorted_at + auto_sort_attempts zuruecksetzen, damit
+			// frueher failed Moves (z.B. wegen Token-Rotation) wieder
+			// eine Chance auf einen sauberen Move bekommen.
 			$stmt = $pdo->prepare('UPDATE mail_scores
-				SET model = "preset_deprecated"
+				SET model = "preset_deprecated",
+				    auto_sorted_at = NULL,
+				    auto_sort_attempts = 0
 				WHERE tenant_id = :t AND user_corrected_at IS NULL');
 			$stmt->execute([':t' => $ctx['tenant_id']]);
 			$scoresMarked = $stmt->rowCount();

@@ -238,4 +238,65 @@ final class AutoSortServiceTest extends TestCase
 		$this->assertSame('rule_disabled', $res['reason']);
 		$this->assertSame([], $graph->moveCalls);
 	}
+
+	public function testSingleFailureBumpsAttemptsButDoesNotSkip(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$graph->failNextMove(new \RuntimeException('Graph POST failed: 401'));
+
+		$this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$row = $this->pdo()->prepare('SELECT auto_sort_attempts, auto_sorted_at
+			FROM mail_scores WHERE mail_id = :m');
+		$row->execute([':m' => $mail['id']]);
+		$score = $row->fetch();
+		$this->assertSame(1, (int)$score['auto_sort_attempts']);
+		$this->assertNull($score['auto_sorted_at'], 'Mail muss noch retry-faehig sein');
+	}
+
+	public function testThirdFailureMarksMailPermanentlySkipped(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		// Drei Graph-Failures hintereinander, je ein eigener Service-Aufruf
+		// (jeder Aufruf is one applyToScoredMail() — Cycles)
+		for ($i = 0; $i < 3; $i++) {
+			$graph = new FakeGraphClient();
+			$graph->failNextMove(new \RuntimeException('Graph POST failed: 500'));
+			(new AutoSortService(
+				$graph,
+				new AutoSortRepository($this->pdo()),
+				$this->pdo(),
+				$this->logger(),
+			))->applyToScoredMail(
+				'tok', $tenantId, $userId, $mail,
+				['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+			);
+		}
+
+		$row = $this->pdo()->prepare('SELECT auto_sort_attempts, auto_sorted_at
+			FROM mail_scores WHERE mail_id = :m');
+		$row->execute([':m' => $mail['id']]);
+		$score = $row->fetch();
+		$this->assertSame(3, (int)$score['auto_sort_attempts']);
+		$this->assertNotNull($score['auto_sorted_at'],
+			'Nach 3 Failures muss auto_sorted_at gesetzt sein (Skip-Marker)');
+	}
 }
