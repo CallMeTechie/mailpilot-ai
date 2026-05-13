@@ -82,6 +82,24 @@ final class CacheRepository
 		return $stmt->rowCount();
 	}
 
+	/**
+	 * Wipes every cache row whose prompt_version starts with the given
+	 * key prefix (e.g. "P-SCORE@" matches "P-SCORE@1.0", "P-SCORE@1.2",
+	 * ...). Called by the admin panel when a new prompt version is
+	 * activated — sonst kommen Cache-Hits mit dem alten Prompt-Schema
+	 * durch und der frisch aktivierte Prompt wirkt nie.
+	 *
+	 * Tenant-übergreifend (Admin-Aktion ist global; siehe PRD-Phase-6
+	 * §6 — Prompt-Versionierung ist nicht tenant-scoped).
+	 */
+	public function purgeByPromptKey(string $keyName): int
+	{
+		$stmt = $this->db->prepare('DELETE FROM claude_cache
+			WHERE prompt_version LIKE :prefix');
+		$stmt->execute([':prefix' => $keyName . '@%']);
+		return $stmt->rowCount();
+	}
+
 	private function markHit(string $hash): void
 	{
 		$stmt = $this->db->prepare('UPDATE claude_cache

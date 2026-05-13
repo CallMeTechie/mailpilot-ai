@@ -53,7 +53,10 @@ abstract class TestCase extends BaseTestCase
 		$pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 		$tables = ['tenants','users','tenant_user','mailboxes','mails','mail_scores',
 			'mail_summaries','reply_drafts','claude_cache','vip_senders',
-			'redaction_rules','project_keywords','prompt_versions','audit_log',
+			'redaction_rules','project_keywords','audit_log',
+			// prompt_versions: bewusst nicht truncieren — Seeds aus 0003 + 0012
+			// (P-SCORE@1.2 aktiv) muessen ueberleben, sonst werfen Tests die
+			// scoreBatch aufrufen RuntimeException "no active prompt_versions row".
 			'sync_jobs','oauth_states',
 			// 0005_token_budgets_and_usage — keep system_settings and
 			// model_pricing untouched (they hold seeded defaults the

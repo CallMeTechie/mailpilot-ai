@@ -8,6 +8,7 @@ use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PricingRepository;
+use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\SubLabelRepository;
@@ -47,7 +48,7 @@ final class MailScoringServiceTest extends TestCase
 			new CorrectionRepository($pdo),
 			new SubLabelRepository($pdo),
 			new AutoSortRepository($pdo),
-			'claude-haiku-4-5-20251001',
+			new PromptRepository($pdo),
 			20,
 			2048,
 			$this->logger(),

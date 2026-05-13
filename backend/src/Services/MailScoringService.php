@@ -7,6 +7,7 @@ use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\SubLabelRepository;
@@ -23,13 +24,12 @@ use MailPilot\Util\Uuid;
  */
 final class MailScoringService
 {
-	// @1.2: Topic-Discovery (Phase 6b). Claude darf jetzt auch NEUE
-	// Sub-Label-Namen vorschlagen, wenn keiner der vom User
-	// angelegten Pool-Einträge passt. Backend speichert die via
-	// SubLabelRepository::create(... 'ki') + AutoSortRepository::upsert
-	// und liefert für die Mail den finalen (ggf. fuzzy-gemergten)
-	// Topic-Namen zurück.
-	public const PROMPT_VERSION = 'P-SCORE@1.2';
+	// Schema-Version: erhöhen, wenn die Code-Logik so geändert wird,
+	// dass alte Cache-Einträge nicht mehr kompatibel sind (z.B.
+	// neue Felder im Output-Schema). Wird mit der DB-Prompt-Version
+	// in den Cache-Key gehängt: "P-SCORE@<db-version>+code<N>".
+	private const SCHEMA_CODE_REVISION = 1;
+	private const PROMPT_KEY = 'P-SCORE';
 
 	public function __construct(
 		private readonly ClaudeProvider $claude,
@@ -41,7 +41,7 @@ final class MailScoringService
 		private readonly \MailPilot\Repositories\CorrectionRepository $corrections,
 		private readonly SubLabelRepository $subLabels,
 		private readonly AutoSortRepository $autoSortRules,
-		private readonly string $model,
+		private readonly PromptRepository $prompts,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
 		private readonly \Psr\Log\LoggerInterface $logger,
@@ -64,6 +64,18 @@ final class MailScoringService
 		$scored   = [];
 		$toClaude = [];
 
+		// Aktive Prompt-Version aus DB laden — sobald der Admin im
+		// Panel eine neue Version aktiviert, greift sie ab dem
+		// nächsten Score-Batch ohne Code-Deploy. Cache-Versions-Tag
+		// kombiniert key_name+version+code-revision, sodass alte
+		// Cache-Einträge automatisch ungültig werden, wenn entweder
+		// der Prompt oder die Code-Logik sich geändert hat.
+		$activePrompt    = $this->prompts->getActive(self::PROMPT_KEY);
+		$promptVersionTag = $this->prompts->cacheVersionTag(
+			$activePrompt['key_name'],
+			$activePrompt['version'] . '+code' . self::SCHEMA_CODE_REVISION,
+		);
+
 		// Sub-Labels: per-user free-form names grouped by primary. Fed
 		// into the Claude prompt as context; Claude either picks one
 		// or returns null. The lookup map is the whitelist used by
@@ -74,20 +86,11 @@ final class MailScoringService
 			: [];
 
 		foreach ($mails as $mail) {
-			// Pre-filter previously short-circuited every mail with a
-			// List-Unsubscribe header to a hard-coded "Automatischer
-			// Newsletter" preset. That header is mandatory under DSGVO
-			// even for transactional senders (law firms, banks,
-			// DocuSign, government portals), so the heuristic mislabelled
-			// important mails as marketing and never asked Claude.
-			// Now every mail runs through the cache → Claude path; the
-			// budget gate provides the cost cap instead.
-
 			// --- Cache lookup ---
 			$hash = $this->contentHash($mail);
-			$cached = $this->cache->get($tenantId, $hash, self::PROMPT_VERSION);
+			$cached = $this->cache->get($tenantId, $hash, $promptVersionTag);
 			if ($cached !== null) {
-				$row = $this->buildScoreFromCache($tenantId, $userId, $mail, $cached, $subLabelMap);
+				$row = $this->buildScoreFromCache($tenantId, $userId, $mail, $cached, $subLabelMap, $promptVersionTag, $activePrompt['model']);
 				$scored[] = $row;
 				if ($onChunkDone) { $onChunkDone(count($scored)); }
 				continue;
@@ -99,17 +102,17 @@ final class MailScoringService
 
 		// --- Step 4: batches to Claude ---
 		foreach (array_chunk($toClaude, $this->batchSize) as $chunk) {
-			$results = $this->callClaude($userProfile, array_column($chunk, 'mail'), $subLabelMap);
+			$results = $this->callClaude($userProfile, array_column($chunk, 'mail'), $subLabelMap, $activePrompt);
 			foreach ($chunk as $i => $item) {
 				$claudeResult = $results[$i] ?? null;
 				if ($claudeResult === null) {
 					$this->logger->warning('scoring.missing_result', ['mail_id' => $item['mail']['id']]);
 					continue;
 				}
-				$row = $this->buildScoreFromClaude($tenantId, $userId, $item['mail'], $claudeResult, $subLabelMap);
+				$row = $this->buildScoreFromClaude($tenantId, $userId, $item['mail'], $claudeResult, $subLabelMap, $promptVersionTag, $activePrompt['model']);
 				$scored[] = $row;
 
-				$this->cache->put($tenantId, $item['hash'], self::PROMPT_VERSION, $this->model, $claudeResult);
+				$this->cache->put($tenantId, $item['hash'], $promptVersionTag, $activePrompt['model'], $claudeResult);
 			}
 			if ($onChunkDone) { $onChunkDone(count($scored)); }
 		}
@@ -164,7 +167,10 @@ final class MailScoringService
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 * @return list<array<string, mixed>>
 	 */
-	private function callClaude(array $userProfile, array $mails, array $subLabelMap = []): array
+	/**
+	 * @param array{system_prompt:string, user_template:string, model:string, max_tokens:int, key_name:string, version:string, temperature:float} $activePrompt
+	 */
+	private function callClaude(array $userProfile, array $mails, array $subLabelMap, array $activePrompt): array
 	{
 		$redacted = array_map(
 			fn(array $m): array => $this->redactor->redactMail([
@@ -183,45 +189,48 @@ final class MailScoringService
 			$mails,
 		);
 
-		$system = $this->buildSystemPrompt();
-		$user   = $this->buildUserPrompt($userProfile, $redacted, $subLabelMap);
+		$system = $activePrompt['system_prompt'];
+		$user   = $this->renderUserTemplate($activePrompt['user_template'], $userProfile, $redacted, $subLabelMap);
+		$model  = $activePrompt['model'];
 
 		// Output sizes scale linearly with batch — empirically ~140 tokens
 		// per mail for the JSON result line. Add 400 tokens of slack for
 		// the opening/closing JSON scaffold so the response never hits the
 		// hard cap mid-object (which would yield unparseable JSON and lose
 		// the whole batch).
-		$maxTokens = max(2000, count($mails) * 160 + 400);
+		$maxTokens = max($activePrompt['max_tokens'], count($mails) * 160 + 400);
 
 		$tenantId  = (string)($userProfile['tenant_id'] ?? '');
 		$userId    = (string)($userProfile['user_id'] ?? '') ?: null;
 		$mailboxId = (string)($mails[0]['mailbox_id'] ?? '') ?: null;
+		$promptVersionTag = $this->prompts->cacheVersionTag(
+			$activePrompt['key_name'],
+			$activePrompt['version'] . '+code' . self::SCHEMA_CODE_REVISION,
+		);
 
 		// Pre-flight: refuse if we'd blow the daily budget. estimate =
 		// the same maxTokens we'd pass to Anthropic (worst-case spend).
 		if ($tenantId !== '') {
 			$gate = $this->budget->canSpend($tenantId, $userId, $maxTokens);
 			if (!$gate['ok']) {
-				$this->recordCall($tenantId, $userId, $mailboxId, null, [], 0, 'blocked', $gate['reason']);
+				$this->recordCall($tenantId, $userId, $mailboxId, null, [], 0, 'blocked', $gate['reason'], $promptVersionTag, $model);
 				throw new BudgetExceededException((string)$gate['scope']);
 			}
 		}
 
 		$start = microtime(true);
 		try {
-			// temperature was 0.1 — Claude 4.x rejects the parameter as
-			// deprecated and returns HTTP 400.
 			$response = $this->claude->messages([
-				'model'      => $this->model,
+				'model'      => $model,
 				'max_tokens' => $maxTokens,
 				'system'     => $system,
 				'messages'   => [['role' => 'user', 'content' => $user]],
 			]);
 		} catch (\Throwable $e) {
-			$this->recordCall($tenantId, $userId, $mailboxId, null, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage());
+			$this->recordCall($tenantId, $userId, $mailboxId, null, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage(), $promptVersionTag, $model);
 			throw $e;
 		}
-		$this->recordCall($tenantId, $userId, $mailboxId, null, $response['usage'] ?? [], (int)((microtime(true) - $start) * 1000), 'success', null);
+		$this->recordCall($tenantId, $userId, $mailboxId, null, $response['usage'] ?? [], (int)((microtime(true) - $start) * 1000), 'success', null, $promptVersionTag, $model);
 
 		$text = ClaudeClient::extractText($response);
 		$text = $this->stripCodeFences($text);
@@ -245,50 +254,27 @@ final class MailScoringService
 		return trim($text);
 	}
 
-	private function buildSystemPrompt(): string
-	{
-		return <<<TXT
-Du bist MailPilot, ein präziser E-Mail-Triage-Assistent. Du klassifizierst
-eingehende E-Mails aus Sicht eines bestimmten Nutzers. Du antwortest
-AUSSCHLIESSLICH in gültigem JSON nach dem vorgegebenen Schema. Kein Prosa,
-keine Markdown-Codefences, kein Kommentar.
-
-Labels:
-- direct: E-Mail ist persönlich an den Nutzer gerichtet, erwartet Wahrnehmung
-- action: Absender erwartet konkret Antwort/Entscheidung/Handlung
-- cc: Nutzer ist nur informativ im CC/BCC
-- newsletter: Marketing, Abonnement (List-Unsubscribe gesetzt)
-- auto: Automatisiert (CI, Monitoring, Rechnungen, Versandbestätigungen)
-- noise: Spam-verdächtig / irrelevant
-
-direct und cc schließen sich aus. action_required kann zusätzlich gesetzt sein.
-Bei Newsletter/Auto/Noise ist action_required immer false.
-
-Priorität 1-5: 5=sofort, 4=heute, 3=diese Woche, 2=wann passt, 1=ignorierbar.
-
-Zusammenfassung max. 160 Zeichen, in user.language, keine Anführungszeichen, keine Emojis.
-TXT;
-	}
-
 	/**
-	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap (already loaded)
+	 * Rendert das DB-User-Template (Admin-Panel-editierbar) mit den
+	 * dynamischen Platzhaltern. Die Werte werden hier zur Laufzeit
+	 * generiert (Corrections, Sub-Label-Pool, Discovery-Note,
+	 * Output-Schema-Snippet). Das Template selbst sagt nur, WO sie
+	 * platziert werden — der Operator kann Wortlaut und Layout im
+	 * Admin-Panel anpassen, ohne Code-Deploy.
+	 *
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function buildUserPrompt(array $userProfile, array $mails, array $subLabelMap = []): string
+	private function renderUserTemplate(string $template, array $userProfile, array $mails, array $subLabelMap): string
 	{
 		$vip = implode(', ', $userProfile['vip_senders'] ?? []);
 		$kw  = implode(', ', $userProfile['project_keywords'] ?? []);
-		// Repository layer already sanitises, but defend against any stray
-		// non-UTF-8 byte from cached rows or hand-imported data.
 		$mailsJson = json_encode(
 			$mails,
 			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
 		);
 
-		// Feed the user's recent corrections back as few-shot examples
-		// so Claude learns the per-user calibration. Pulled from the
-		// CorrectionRepository — empty section if the user never
-		// corrected anything.
-		$corrections = '';
+		// Few-Shot-Korrekturen (leer wenn keine)
+		$correctionsBlock = '';
 		$tenantId = (string)($userProfile['tenant_id'] ?? '');
 		$userId   = (string)($userProfile['user_id']   ?? '');
 		if ($tenantId !== '' && $userId !== '') {
@@ -306,26 +292,13 @@ TXT;
 						: '';
 					$lines[] = "- From: {$from} | Subject: {$subj} | KI: {$ki} → Human: {$human}{$reason}";
 				}
-				$corrections = implode("\n", $lines) . "\n";
+				$correctionsBlock = implode("\n", $lines) . "\n";
 			}
 		}
 
-		// USER_SUBLABELS-Block: listet vom User angelegte Sub-Labels plus
-		// in Phase 6b von der KI selbst vorgeschlagene (created_by='ki').
-		// Description hilft, in den richtigen Topic einzuordnen — z. B.
-		// "GitHub CI" mit Description "Mails von notifications@github.com".
-		//
-		// Phase 6b: Wenn keiner der existierenden Buckets passt, DARF
-		// Claude einen NEUEN kurzen Topic-Namen vorschlagen (max 30
-		// Zeichen, capitalized, single word oder kurze Phrase wie
-		// "Stripe Payments"). Backend speichert das in user_sublabels +
-		// auto_sort_rules und routet die Mail in einen neuen Outlook-
-		// Ordner. Damit die KI nicht 50 verschiedene Topics für die
-		// gleiche Kategorie erfindet, packen wir Beispiele und eine
-		// strikte Anweisung in den Prompt.
+		// USER_SUBLABELS-Block (leer wenn Pool leer)
 		$subLabelsBlock = '';
 		$schemaSubLabel = '"sub_label":"<a topic name OR null>","sub_label_is_new":true|false';
-		$discoveryNote = '';
 		if ($subLabelMap !== []) {
 			$lines = ['', 'USER_SUBLABELS (existing buckets; prefer these when the mail clearly fits one):'];
 			foreach ($subLabelMap as $parent => $entries) {
@@ -340,6 +313,9 @@ TXT;
 			$subLabelsBlock = implode("\n", $lines) . "\n";
 		}
 
+		// Topic-Discovery-Note (Phase 6b) — immer eingesetzt, kann
+		// im Admin-Panel-Template aber per Weglassen des Platzhalters
+		// deaktiviert werden.
 		$discoveryNote = "\nTOPIC_DISCOVERY (Phase 6b):"
 			. "\n- If the mail clearly belongs to a recurring category that USER_SUBLABELS does NOT yet cover, you MAY propose a NEW short topic name (max 30 chars, Title Case, e.g. \"Stripe Payments\", \"GitHub CI\", \"Bestellung\")."
 			. "\n- Only propose a new topic when you can identify a clear recurring sender or pattern. Do NOT invent topics for one-off mails."
@@ -347,21 +323,27 @@ TXT;
 			. "\n- If a USER_SUBLABEL matches, return its existing name verbatim and set \"sub_label_is_new\":false."
 			. "\n- If neither fits (truly unique mail), return \"sub_label\":null and \"sub_label_is_new\":false.\n";
 
-		return <<<TXT
-USER_PROFILE:
-- email: {$userProfile['email']}
-- language: {$userProfile['language']}
-- vip_senders: [{$vip}]
-- project_keywords: [{$kw}]
-{$corrections}{$subLabelsBlock}{$discoveryNote}
-MAILS_TO_CLASSIFY:
-{$mailsJson}
-
-Gib exakt ein JSON-Objekt zurück:
-{"results":[{"id":"<mail.id>","label":"direct|action|cc|newsletter|auto|noise",{$schemaSubLabel},"action_required":true|false,"priority":1-5,"summary":"max 160 chars","reasoning":"max 80 chars"}]}
-
-Anzahl results = Anzahl mails, in derselben Reihenfolge.
-TXT;
+		return str_replace([
+			'{{user_email}}',
+			'{{user_language}}',
+			'{{vip_senders_csv}}',
+			'{{project_keywords_csv}}',
+			'{{corrections_block}}',
+			'{{user_sublabels_block}}',
+			'{{topic_discovery_note}}',
+			'{{mails_json}}',
+			'{{output_schema_sub_label}}',
+		], [
+			(string)($userProfile['email'] ?? ''),
+			(string)($userProfile['language'] ?? 'de'),
+			$vip,
+			$kw,
+			$correctionsBlock,
+			$subLabelsBlock,
+			$discoveryNote,
+			(string)$mailsJson,
+			$schemaSubLabel,
+		], $template);
 	}
 
 	private function buildPresetScore(string $tenantId, array $mail, string $label, int $priority, string $summary): array
@@ -375,7 +357,7 @@ TXT;
 			'priority'        => $priority,
 			'summary'         => $summary,
 			'reasoning'       => 'preset:pre-filter',
-			'prompt_version' => self::PROMPT_VERSION,
+			'prompt_version'  => self::PROMPT_KEY . '@preset',
 			'model'           => 'preset',
 			'cached'          => 0,
 		];
@@ -384,7 +366,7 @@ TXT;
 	/**
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function buildScoreFromCache(string $tenantId, string $userId, array $mail, array $cached, array &$subLabelMap): array
+	private function buildScoreFromCache(string $tenantId, string $userId, array $mail, array $cached, array &$subLabelMap, string $promptVersionTag, string $model): array
 	{
 		$label = (string)($cached['label'] ?? 'auto');
 		return [
@@ -400,8 +382,8 @@ TXT;
 			'priority'        => (int)($cached['priority'] ?? 2),
 			'summary'         => $this->truncate((string)($cached['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($cached['reasoning'] ?? ''), 200),
-			'prompt_version' => self::PROMPT_VERSION,
-			'model'           => $this->model,
+			'prompt_version'  => $promptVersionTag,
+			'model'           => $model,
 			'cached'          => 1,
 		];
 	}
@@ -409,7 +391,7 @@ TXT;
 	/**
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 */
-	private function buildScoreFromClaude(string $tenantId, string $userId, array $mail, array $result, array &$subLabelMap): array
+	private function buildScoreFromClaude(string $tenantId, string $userId, array $mail, array $result, array &$subLabelMap, string $promptVersionTag, string $model): array
 	{
 		$label = $this->validateLabel((string)($result['label'] ?? 'auto'));
 		$isNew = (bool)($result['sub_label_is_new'] ?? false);
@@ -425,8 +407,8 @@ TXT;
 			'priority'        => max(1, min(5, (int)($result['priority'] ?? 2))),
 			'summary'         => $this->truncate((string)($result['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($result['reasoning'] ?? ''), 200),
-			'prompt_version' => self::PROMPT_VERSION,
-			'model'           => $this->model,
+			'prompt_version'  => $promptVersionTag,
+			'model'           => $model,
 			'cached'          => 0,
 		];
 	}
@@ -541,6 +523,8 @@ TXT;
 		int $durationMs,
 		string $status,
 		?string $errorText,
+		string $promptVersionTag,
+		string $model,
 	): void {
 		if ($tenantId === '') return; // not enough context to attribute the call
 		$this->budget->recordUsage([
@@ -548,8 +532,8 @@ TXT;
 			'user_id'                => $userId,
 			'mailbox_id'             => $mailboxId,
 			'mail_id'                => $mailId,
-			'prompt_version'         => self::PROMPT_VERSION,
-			'model'                  => $this->model,
+			'prompt_version'         => $promptVersionTag,
+			'model'                  => $model,
 			'input_tokens'           => (int)($usage['input_tokens']                 ?? 0),
 			'output_tokens'          => (int)($usage['output_tokens']                ?? 0),
 			'cache_read_tokens'      => (int)($usage['cache_read_input_tokens']      ?? 0),

@@ -17,6 +17,7 @@ use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\SummaryRepository;
 use MailPilot\Repositories\UsageRepository;
@@ -102,6 +103,7 @@ class Kernel
 			AutoSortRepository::class => new AutoSortRepository($this->get(PDO::class)),
 			CorrectionRepository::class => new CorrectionRepository($this->get(PDO::class)),
 			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
+			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
 			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
@@ -140,7 +142,7 @@ class Kernel
 				$this->get(CorrectionRepository::class),
 				$this->get(SubLabelRepository::class),
 				$this->get(AutoSortRepository::class),
-				$this->config['claude']['model_scoring'],
+				$this->get(PromptRepository::class),
 				(int)$this->config['limits']['scoring_batch_size'],
 				(int)$this->config['limits']['max_body_bytes'],
 				$this->get(Logger::class),

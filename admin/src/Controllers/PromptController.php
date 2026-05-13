@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MailPilot\Admin\Controllers;
 
+use MailPilot\Repositories\CacheRepository;
 use PDO;
 
 final class PromptController extends BaseController
@@ -75,6 +76,7 @@ final class PromptController extends BaseController
 		}
 
 		$pdo->beginTransaction();
+		$cachePurged = 0;
 		try {
 			$pdo->prepare('UPDATE prompt_versions SET active = 0 WHERE key_name = :kn')
 				->execute([':kn' => $row['key_name']]);
@@ -83,13 +85,22 @@ final class PromptController extends BaseController
 			$pdo->prepare('INSERT INTO audit_log (event, entity, entity_id)
 				VALUES ("admin.prompt.activate", "prompt", :id)')
 				->execute([':id' => $params['id']]);
+			// Cache-Invalidate: alle claude_cache-Rows für den Prompt-Key
+			// löschen, sonst sehen Worker beim nächsten Score-Call alte
+			// Cache-Hits mit der vorigen Prompt-Schema-Version. SoT ist
+			// jetzt die DB; Cache muss sich daran binden.
+			$cache = new CacheRepository($pdo, 30);
+			$cachePurged = $cache->purgeByPromptKey((string)$row['key_name']);
 			$pdo->commit();
 		} catch (\Throwable $e) {
 			$pdo->rollBack();
 			throw $e;
 		}
 
-		$this->flash('success', 'Prompt aktiviert. Cache wird mit nächster Version invalidiert.');
+		$msg = $cachePurged > 0
+			? "Prompt aktiviert. {$cachePurged} Cache-Eintraege wurden invalidiert."
+			: 'Prompt aktiviert. Cache war bereits leer.';
+		$this->flash('success', $msg);
 		$this->redirect('/admin/prompts');
 	}
 
