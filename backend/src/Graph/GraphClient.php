@@ -17,7 +17,14 @@ use RuntimeException;
  *
  * Uses OAuth2 authorization code flow; tokens are stored encrypted per mailbox.
  */
-final class GraphClient
+/**
+ * Concrete implementation. Not declared `final` so test fakes can
+ * extend it with a no-args constructor and override the handful of
+ * methods they exercise — see backend/tests/Fixtures/FakeGraphClient.
+ * Production code should still depend on this concrete type; we have
+ * one provider, an interface here would be pure ceremony.
+ */
+class GraphClient
 {
 	private const AUTH_BASE  = 'https://login.microsoftonline.com';
 	private const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';

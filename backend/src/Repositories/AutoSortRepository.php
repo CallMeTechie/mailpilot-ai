@@ -183,12 +183,23 @@ final class AutoSortRepository
 	/**
 	 * Worker side: persist the resolved Graph folder id so the next
 	 * move call doesn't have to look it up / create it again.
-	 * Clears last_error on success.
+	 *
+	 * A non-empty folder_id implies a successful resolve and clears
+	 * last_error. Passing an empty string is the "drop the cache,
+	 * force re-resolve on next run" signal (used after a stale-folder
+	 * 404) — in that case last_error stays put so the UI can still
+	 * show why the previous attempt blew up.
 	 */
 	public function rememberFolderId(string $tenantId, string $userId, string $label, ?string $subLabel, string $folderId): void
 	{
 		$existingId = $this->findExistingId($tenantId, $userId, $label, $subLabel);
 		if ($existingId === null) {
+			return;
+		}
+		if ($folderId === '') {
+			$this->db->prepare('UPDATE auto_sort_rules
+				SET folder_id = NULL WHERE id = :id')
+				->execute([':id' => $existingId]);
 			return;
 		}
 		$this->db->prepare('UPDATE auto_sort_rules

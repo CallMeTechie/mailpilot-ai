@@ -1,0 +1,241 @@
+<?php
+declare(strict_types=1);
+
+namespace MailPilot\Tests\Integration;
+
+use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Services\AutoSortService;
+use MailPilot\Tests\Fixtures\FakeGraphClient;
+use MailPilot\Tests\TestCase;
+
+/**
+ * End-to-end tests for the AutoSort move pipeline, with a Fake
+ * GraphClient so the precedence logic, folder-id caching and
+ * already_sorted gate are exercised without hitting Microsoft.
+ *
+ * @group integration
+ */
+final class AutoSortServiceTest extends TestCase
+{
+	protected function setUp(): void
+	{
+		$this->truncateAll();
+	}
+
+	private function makeService(FakeGraphClient $graph): AutoSortService
+	{
+		return new AutoSortService(
+			$graph,
+			new AutoSortRepository($this->pdo()),
+			$this->pdo(),
+			$this->logger(),
+		);
+	}
+
+	private function insertScoredMail(string $tenantId, string $mailboxId, string $label, ?string $subLabel, int $priority = 2): array
+	{
+		$msId  = 'ms-' . substr(md5($label . ($subLabel ?? '') . microtime(true) . random_int(0, 9999)), 0, 12);
+		$mailId = $this->insertMail($tenantId, $mailboxId, ['ms_message_id' => $msId]);
+		$this->pdo()->prepare('INSERT INTO mail_scores
+			(id, tenant_id, mail_id, label, sub_label, action_required, priority, summary, reasoning, prompt_version, model, cached)
+			VALUES (:id, :t, :m, :l, :s, 0, :p, "test", "r", "P-SCORE@1.1", "haiku", 0)')
+			->execute([
+				':id' => $this->uuid(), ':t' => $tenantId, ':m' => $mailId,
+				':l' => $label, ':s' => $subLabel, ':p' => $priority,
+			]);
+		return ['id' => $mailId, 'ms_message_id' => $msId];
+	}
+
+	public function testExactSubLabelMatchMovesToItsFolder(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null,        true, 'MailPilot/Auto');
+		$rules->upsert($tenantId, $userId, 'auto', 'GitHub CI', true, 'MailPilot/Auto/CI');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', 'GitHub CI');
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => 'GitHub CI', 'priority' => 2],
+		);
+
+		$this->assertTrue($res['moved']);
+		$this->assertSame('MailPilot/Auto/CI', $res['folder']);
+		$this->assertCount(1, $graph->moveCalls);
+		$this->assertSame($mail['ms_message_id'], $graph->moveCalls[0]['message_id']);
+		$this->assertSame('MailPilot/Auto/CI', $graph->folderCalls[0]['path']);
+
+		// folder_id was cached on the exact sub-rule, NOT on the catch-all
+		$exact = $rules->findRule($tenantId, $userId, 'auto', 'GitHub CI');
+		$catch = $rules->findRule($tenantId, $userId, 'auto', null);
+		$this->assertNotNull($exact['folder_id']);
+		$this->assertNull($catch['folder_id'], 'catch-all rule must stay un-touched');
+	}
+
+	public function testUnknownSubLabelFallsBackToCatchAllFolder(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => 'Unknown', 'priority' => 2],
+		);
+
+		$this->assertTrue($res['moved']);
+		$this->assertSame('MailPilot/Auto', $res['folder']);
+
+		// folder_id landed on the catch-all rule (which is what got matched)
+		$catch = $rules->findRule($tenantId, $userId, 'auto', null);
+		$this->assertNotNull($catch['folder_id']);
+	}
+
+	public function testHighPriorityDirectActionStaysInInbox(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'direct', null, true, 'MailPilot/Direct');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'direct', null, 5);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'direct', 'sub_label' => null, 'priority' => 5],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('high_priority_protected', $res['reason']);
+		$this->assertSame([], $graph->moveCalls, 'Must never call Graph for protected mails');
+	}
+
+	public function testDisabledRuleResultsInNoMove(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, false, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('rule_disabled', $res['reason']);
+		$this->assertSame([], $graph->moveCalls);
+	}
+
+	public function testAlreadySortedMailIsSkipped(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+		$this->pdo()->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3) WHERE mail_id = :m')
+			->execute([':m' => $mail['id']]);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('already_sorted', $res['reason']);
+		$this->assertSame([], $graph->moveCalls);
+	}
+
+	public function testCachedFolderIdSkipsEnsureFolderPath(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+		$rules->rememberFolderId($tenantId, $userId, 'auto', null, 'cached-folder-id');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertTrue($res['moved']);
+		$this->assertSame([], $graph->folderCalls, 'Cached folder_id ⇒ no ensureFolderPath call');
+		$this->assertSame('cached-folder-id', $graph->moveCalls[0]['folder_id']);
+	}
+
+	public function test404DropsCachedFolderIdSoNextRunReResolves(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+		$rules->rememberFolderId($tenantId, $userId, 'auto', null, 'stale-id');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$graph->failNextMove(new \RuntimeException('Graph move failed: 404 Not Found'));
+
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('graph_error', $res['reason']);
+
+		// folder_id was dropped (back to NULL) so the next run hits
+		// ensureFolderPath again instead of repeating the stale move.
+		$rule = $rules->findRule($tenantId, $userId, 'auto', null);
+		$this->assertNull($rule['folder_id']);
+
+		// last_error was persisted on the catch-all
+		$stmt = $this->pdo()->prepare("SELECT last_error FROM auto_sort_rules
+			WHERE tenant_id = :t AND user_id = :u AND label = 'auto' AND sub_label IS NULL");
+		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+		$this->assertStringContainsString('404', (string)$stmt->fetchColumn());
+	}
+
+	public function testNonExistentRuleProducesNoMove(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			['label' => 'auto', 'sub_label' => null, 'priority' => 2],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('rule_disabled', $res['reason']);
+		$this->assertSame([], $graph->moveCalls);
+	}
+}

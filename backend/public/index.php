@@ -48,6 +48,7 @@ $router->post('/api/v1/settings/redaction',      'SettingsController@addRedactio
 $router->get ('/api/v1/settings/auto-sort',      'SettingsController@listAutoSort');
 $router->patch('/api/v1/settings/auto-sort',     'SettingsController@updateAutoSort');
 $router->post('/api/v1/settings/auto-sort/apply-now', 'SettingsController@applyAutoSortNow');
+$router->delete('/api/v1/settings/auto-sort/sub/{label}/{name}', 'SettingsController@deleteAutoSortSub');
 $router->get   ('/api/v1/settings/sub-labels',       'SettingsController@listSubLabels');
 $router->post  ('/api/v1/settings/sub-labels',       'SettingsController@addSubLabel');
 $router->patch ('/api/v1/settings/sub-labels/{id}',  'SettingsController@updateSubLabel');

@@ -250,6 +250,36 @@ final class SettingsController extends BaseController
 		]);
 	}
 
+	/**
+	 * Drops a single sub-label rule. The catch-all (sub_label = NULL)
+	 * rows are not deletable via this endpoint — disable them via
+	 * updateAutoSort instead, listForUser then materialises a fresh
+	 * disabled default in their place.
+	 *
+	 * URL: DELETE /api/v1/settings/auto-sort/sub/{label}/{name}
+	 *      {name} is URL-encoded by the client.
+	 */
+	public function deleteAutoSortSub(array $params, array $body): void
+	{
+		$ctx   = $this->requireAuth();
+		$label = (string)($params['label'] ?? '');
+		$name  = trim(urldecode((string)($params['name'] ?? '')));
+
+		if (!in_array($label, AutoSortRepository::LABELS, true)) {
+			throw HttpException::badRequest('VALIDATION', "Unbekanntes Label: {$label}");
+		}
+		if ($name === '') {
+			throw HttpException::badRequest('VALIDATION', 'Sub-Label-Name erforderlich');
+		}
+
+		$ok = $this->kernel->get(AutoSortRepository::class)
+			->delete($ctx['tenant_id'], $ctx['user_id'], $label, $name);
+		if (!$ok) {
+			throw HttpException::notFound('NOT_FOUND', 'Sub-Regel nicht gefunden');
+		}
+		Response::json(['ok' => true]);
+	}
+
 	public function listSubLabels(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();
