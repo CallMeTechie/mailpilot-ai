@@ -105,6 +105,12 @@ export const api = {
 		listAutoSort:  ()      => request('GET',  '/settings/auto-sort'),
 		updateAutoSort:(rules) => request('PATCH','/settings/auto-sort', { rules }),
 		applyAutoSortNow: (limit = 50) => request('POST', '/settings/auto-sort/apply-now', { limit }),
+		deleteAutoSortSub: (label, name) => request('DELETE',
+			`/settings/auto-sort/sub/${encodeURIComponent(label)}/${encodeURIComponent(name)}`),
+		listSubLabels:   ()        => request('GET',    '/settings/sub-labels'),
+		addSubLabel:     (payload) => request('POST',   '/settings/sub-labels', payload),
+		updateSubLabel:  (id, p)   => request('PATCH',  `/settings/sub-labels/${id}`, p),
+		deleteSubLabel:  (id)      => request('DELETE', `/settings/sub-labels/${id}`),
 	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),

@@ -245,14 +245,50 @@
 			</div>
 
 			<div class="mp-section">
+				<h2>Unter-Kategorien</h2>
+				<p class="mp-muted">Eigene Buckets unter den sechs Klassen. Die KI bekommt diese Liste mit und kann eine passende auswählen — z. B. <code>auto → GitHub CI</code> oder <code>auto → Bestellung</code>. Optional.</p>
+				<div class="mp-field mp-field-row">
+					<select id="sub-parent">
+						<option value="direct">Direkt</option>
+						<option value="action">Aktion</option>
+						<option value="cc">CC</option>
+						<option value="newsletter">Newsletter</option>
+						<option value="auto" selected>Auto</option>
+						<option value="noise">Noise</option>
+					</select>
+					<input type="text" id="sub-name" placeholder="z. B. GitHub CI" maxlength="50">
+					<input type="text" id="sub-desc" placeholder="Beschreibung (optional)" maxlength="200">
+					<button class="mp-btn mp-btn-secondary" id="btn-add-sub">Hinzufügen</button>
+				</div>
+				<ul class="mp-list" id="sub-list"></ul>
+			</div>
+
+			<div class="mp-section">
 				<h2>Auto-Sort</h2>
 				<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
 				<table class="mp-autosort-table" id="autosort-table">
 					<thead>
 						<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
 					</thead>
-					<tbody id="autosort-rows"><!-- gefüllt durch initSettings() --></tbody>
+					<tbody id="autosort-rows"><!-- catch-all-Zeilen, gefüllt durch initSettings() --></tbody>
 				</table>
+
+				<h3>Sub-Regeln</h3>
+				<p class="mp-muted">Genauere Routen für Unter-Kategorien — schlagen die Catch-all-Regel oben, wenn die KI diese Sub-Kategorie wählt.</p>
+				<table class="mp-autosort-table" id="autosort-sub-table">
+					<thead>
+						<tr><th>Label</th><th>Sub</th><th>Aktiv</th><th>Ordner</th><th></th></tr>
+					</thead>
+					<tbody id="autosort-sub-rows"><!-- gefüllt durch initSettings() --></tbody>
+				</table>
+				<div class="mp-field mp-field-row">
+					<select id="autosort-sub-pick" disabled>
+						<option value="">— Unter-Kategorie wählen —</option>
+					</select>
+					<input type="text" id="autosort-sub-folder" placeholder="MailPilot/Auto/CI">
+					<button class="mp-btn mp-btn-secondary" id="btn-add-autosort-sub" disabled>Sub-Regel hinzufügen</button>
+				</div>
+
 				<div class="mp-actions">
 					<button class="mp-btn mp-btn-primary" id="btn-save-autosort">Speichern</button>
 					<button class="mp-btn mp-btn-secondary" id="btn-apply-autosort-now">Regeln jetzt anwenden</button>

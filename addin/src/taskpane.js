@@ -923,6 +923,13 @@ function useDraft() {
 // ============================================================
 // Settings
 // ============================================================
+// Cache of the user's sub-labels, grouped by primary. Populated by
+// loadSettings(), consumed by the "add sub-rule" dropdown in the
+// AutoSort section so the user can only pick a sub they actually
+// created — no free-form typos that would never match a score.
+/** @type {Record<string, Array<{id:string, name:string}>>} */
+let subLabelsByParent = {};
+
 function initSettings() {
 	document.getElementById('btn-add-vip').addEventListener('click', async () => {
 		const email = document.getElementById('vip-email').value.trim();
@@ -942,6 +949,41 @@ function initSettings() {
 			await api.settings.addRedaction(p, d);
 			document.getElementById('red-pattern').value = '';
 			document.getElementById('red-desc').value = '';
+			loadSettings();
+		} catch (err) { handleError(err); }
+	});
+
+	document.getElementById('btn-add-sub')?.addEventListener('click', async () => {
+		const parent = document.getElementById('sub-parent').value;
+		const name   = document.getElementById('sub-name').value.trim();
+		const desc   = document.getElementById('sub-desc').value.trim();
+		if (!parent || !name) return;
+		try {
+			await api.settings.addSubLabel({ parent, name, description: desc || null });
+			document.getElementById('sub-name').value = '';
+			document.getElementById('sub-desc').value = '';
+			loadSettings();
+		} catch (err) { handleError(err); }
+	});
+
+	document.getElementById('sub-list')?.addEventListener('click', async (e) => {
+		const btn = e.target.closest('button.remove');
+		if (!btn) return;
+		if (!confirm('Unter-Kategorie löschen? Bestehende AutoSort-Sub-Regeln, die darauf zeigen, bleiben aber bis du sie selbst entfernst.')) return;
+		try {
+			await api.settings.deleteSubLabel(btn.dataset.id);
+			loadSettings();
+		} catch (err) { handleError(err); }
+	});
+
+	document.getElementById('btn-add-autosort-sub')?.addEventListener('click', addAutoSortSubRule);
+	document.getElementById('autosort-sub-rows')?.addEventListener('click', async (e) => {
+		const btn = e.target.closest('button.remove-sub-rule');
+		if (!btn) return;
+		const { label, name } = btn.dataset;
+		if (!confirm(`Sub-Regel "${label} / ${name}" entfernen?`)) return;
+		try {
+			await api.settings.deleteAutoSortSub(label, name);
 			loadSettings();
 		} catch (err) { handleError(err); }
 	});
@@ -974,42 +1016,241 @@ function initSettings() {
 
 async function loadSettings() {
 	try {
-		const [vip, red, autosort] = await Promise.all([
+		const [vip, red, autosort, subs] = await Promise.all([
 			api.settings.listVip(),
 			api.settings.listRedaction(),
 			api.settings.listAutoSort(),
+			api.settings.listSubLabels(),
 		]);
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
 		renderList('red-list', red.items ?? [], (r) => `<code>${escape(r.pattern)}</code> — ${escape(r.description ?? '')}`, 'deleteRedaction');
+		renderSubLabels(subs.items ?? []);
 		renderAutoSortRules(autosort.rules ?? []);
 	} catch (err) {
 		handleError(err);
 	}
 }
 
-function renderAutoSortRules(rules) {
-	const tbody = document.getElementById('autosort-rows');
-	if (!tbody) return;
-	tbody.innerHTML = '';
-	rules.forEach((r) => {
-		const tr = document.createElement('tr');
-		tr.dataset.label = r.label;
-		const isProtectedLabel = r.label === 'direct' || r.label === 'action';
-		const hint = isProtectedLabel ? ' <small class="mp-muted">(nur Prio &lt; 4)</small>' : '';
-		tr.innerHTML = `
-			<td><span class="mp-badge" data-label="${escape(r.label)}">${labelText(r.label)}</span>${hint}</td>
-			<td><label class="mp-switch"><input type="checkbox" class="autosort-enabled" ${r.enabled ? 'checked' : ''}><span></span></label></td>
-			<td><input type="text" class="autosort-folder" value="${escape(r.folder_name ?? '')}" placeholder="MailPilot/${labelText(r.label)}"></td>
-		`;
-		if (r.last_error) {
-			const errCell = document.createElement('td');
-			errCell.className = 'mp-error-hint';
-			errCell.title = r.last_error;
-			errCell.textContent = '⚠';
-			tr.appendChild(errCell);
+/**
+ * Build a <td> with a small inline badge (label colour) followed by
+ * arbitrary plain-text content. Uses textContent for the user-supplied
+ * part so a sub-label called `<script>` can never escape.
+ */
+function buildLabelTd(label, plainSuffix = '') {
+	const td = document.createElement('td');
+	const badge = document.createElement('span');
+	badge.className = 'mp-badge';
+	badge.dataset.label = label;
+	badge.textContent = labelText(label);
+	td.appendChild(badge);
+	if (plainSuffix) {
+		td.appendChild(document.createTextNode(' ' + plainSuffix));
+	}
+	return td;
+}
+
+function renderSubLabels(items) {
+	subLabelsByParent = {};
+	for (const it of items) {
+		(subLabelsByParent[it.parent] ??= []).push({ id: it.id, name: it.name });
+	}
+
+	const ul = document.getElementById('sub-list');
+	if (ul) {
+		ul.replaceChildren();
+		for (const s of items) {
+			const li = document.createElement('li');
+
+			const wrap = document.createElement('span');
+			const badge = document.createElement('span');
+			badge.className = 'mp-badge';
+			badge.dataset.label = s.parent;
+			badge.textContent = labelText(s.parent);
+			wrap.appendChild(badge);
+			wrap.appendChild(document.createTextNode(' ' + s.name));
+			if (s.description) {
+				wrap.appendChild(document.createTextNode(' — '));
+				const muted = document.createElement('span');
+				muted.className = 'mp-muted';
+				muted.textContent = s.description;
+				wrap.appendChild(muted);
+			}
+			li.appendChild(wrap);
+
+			const btn = document.createElement('button');
+			btn.className = 'remove';
+			btn.dataset.id = s.id;
+			btn.setAttribute('aria-label', 'Löschen');
+			btn.textContent = '×';
+			li.appendChild(btn);
+
+			ul.appendChild(li);
 		}
-		tbody.appendChild(tr);
-	});
+	}
+
+	populateAutoSortSubPick();
+}
+
+function populateAutoSortSubPick() {
+	const select = document.getElementById('autosort-sub-pick');
+	const addBtn = document.getElementById('btn-add-autosort-sub');
+	if (!select || !addBtn) return;
+
+	select.replaceChildren();
+	const totalSubs = Object.values(subLabelsByParent).reduce((n, arr) => n + arr.length, 0);
+
+	const placeholder = document.createElement('option');
+	placeholder.value = '';
+	placeholder.textContent = totalSubs === 0
+		? '— erst Unter-Kategorie anlegen —'
+		: '— Unter-Kategorie wählen —';
+	select.appendChild(placeholder);
+
+	for (const parent of ['direct', 'action', 'cc', 'newsletter', 'auto', 'noise']) {
+		for (const s of (subLabelsByParent[parent] ?? [])) {
+			const opt = document.createElement('option');
+			opt.value = parent + '|' + s.name;
+			opt.textContent = labelText(parent) + ' / ' + s.name;
+			select.appendChild(opt);
+		}
+	}
+
+	select.disabled = totalSubs === 0;
+	addBtn.disabled = totalSubs === 0;
+}
+
+function renderAutoSortRules(rules) {
+	const catchAlls = rules.filter((r) => r.sub_label === null);
+	const subRules  = rules.filter((r) => r.sub_label !== null);
+
+	const tbody = document.getElementById('autosort-rows');
+	if (tbody) {
+		tbody.replaceChildren();
+		for (const r of catchAlls) {
+			tbody.appendChild(buildAutoSortRow(r, false));
+		}
+	}
+
+	const subTbody = document.getElementById('autosort-sub-rows');
+	if (subTbody) {
+		subTbody.replaceChildren();
+		if (subRules.length === 0) {
+			const tr = document.createElement('tr');
+			const td = document.createElement('td');
+			td.colSpan = 5;
+			td.className = 'mp-muted';
+			td.textContent = 'Noch keine Sub-Regeln. Lege unten eine an.';
+			tr.appendChild(td);
+			subTbody.appendChild(tr);
+		} else {
+			for (const r of subRules) {
+				subTbody.appendChild(buildAutoSortRow(r, true));
+			}
+		}
+	}
+}
+
+/**
+ * Build a single <tr> for the AutoSort table, either as a catch-all
+ * row (4 cells: label, enabled, folder, optional error) or as a
+ * sub-rule row (5 cells: label, sub, enabled, folder, controls).
+ * All user-supplied text goes via textContent/dataset — no innerHTML
+ * concatenation with untrusted values.
+ */
+function buildAutoSortRow(r, isSub) {
+	const tr = document.createElement('tr');
+	tr.dataset.label = r.label;
+	if (isSub) tr.dataset.subLabel = r.sub_label;
+
+	// label badge
+	const labelTd = buildLabelTd(r.label);
+	if (!isSub && (r.label === 'direct' || r.label === 'action')) {
+		const small = document.createElement('small');
+		small.className = 'mp-muted';
+		small.textContent = ' (nur Prio < 4)';
+		labelTd.appendChild(small);
+	}
+	tr.appendChild(labelTd);
+
+	// sub-label cell (only on sub rows)
+	if (isSub) {
+		const subTd = document.createElement('td');
+		subTd.textContent = r.sub_label;
+		tr.appendChild(subTd);
+	}
+
+	// enabled switch
+	const enabledTd = document.createElement('td');
+	const switchLbl = document.createElement('label');
+	switchLbl.className = 'mp-switch';
+	const cb = document.createElement('input');
+	cb.type = 'checkbox';
+	cb.className = 'autosort-enabled';
+	cb.checked = !!r.enabled;
+	const knob = document.createElement('span');
+	switchLbl.appendChild(cb);
+	switchLbl.appendChild(knob);
+	enabledTd.appendChild(switchLbl);
+	tr.appendChild(enabledTd);
+
+	// folder input
+	const folderTd = document.createElement('td');
+	const folderInput = document.createElement('input');
+	folderInput.type = 'text';
+	folderInput.className = 'autosort-folder';
+	folderInput.value = r.folder_name ?? '';
+	folderInput.placeholder = isSub
+		? `MailPilot/${labelText(r.label)}/${r.sub_label}`
+		: `MailPilot/${labelText(r.label)}`;
+	folderTd.appendChild(folderInput);
+	tr.appendChild(folderTd);
+
+	// controls (sub) / error indicator (catch-all)
+	if (isSub) {
+		const ctrlTd = document.createElement('td');
+		if (r.last_error) {
+			const errSpan = document.createElement('span');
+			errSpan.className = 'mp-error-hint';
+			errSpan.title = r.last_error;
+			errSpan.textContent = '⚠ ';
+			ctrlTd.appendChild(errSpan);
+		}
+		const rm = document.createElement('button');
+		rm.className = 'mp-icon-btn mp-icon-btn-ghost remove-sub-rule';
+		rm.dataset.label = r.label;
+		rm.dataset.name = r.sub_label;
+		rm.setAttribute('aria-label', 'Sub-Regel löschen');
+		rm.title = 'Sub-Regel löschen';
+		rm.textContent = '×';
+		ctrlTd.appendChild(rm);
+		tr.appendChild(ctrlTd);
+	} else if (r.last_error) {
+		const errTd = document.createElement('td');
+		errTd.className = 'mp-error-hint';
+		errTd.title = r.last_error;
+		errTd.textContent = '⚠';
+		tr.appendChild(errTd);
+	}
+
+	return tr;
+}
+
+async function addAutoSortSubRule() {
+	const pick   = document.getElementById('autosort-sub-pick');
+	const folder = document.getElementById('autosort-sub-folder');
+	const value  = pick?.value || '';
+	if (!value) return;
+	const [label, subName] = value.split('|');
+	const folderName = folder?.value.trim() || `MailPilot/${labelText(label)}/${subName}`;
+	try {
+		await api.settings.updateAutoSort([
+			{ label, sub_label: subName, enabled: true, folder_name: folderName },
+		]);
+		if (folder) folder.value = '';
+		pick.value = '';
+		loadSettings();
+		showToast(`Sub-Regel ${labelText(label)} / ${subName} angelegt`, 'success', 3000);
+	} catch (err) { handleError(err); }
 }
 
 async function applyAutoSortNow() {
@@ -1048,22 +1289,37 @@ async function applyAutoSortNow() {
 }
 
 async function saveAutoSort() {
-	const tbody = document.getElementById('autosort-rows');
+	const tbody     = document.getElementById('autosort-rows');
+	const subTbody  = document.getElementById('autosort-sub-rows');
 	if (!tbody) return;
-	const rules = Array.from(tbody.querySelectorAll('tr')).map((tr) => ({
-		label:       tr.dataset.label,
-		enabled:     tr.querySelector('.autosort-enabled').checked,
-		folder_name: tr.querySelector('.autosort-folder').value.trim(),
-	}));
+
+	const collectFrom = (root, withSub) => Array.from(root.querySelectorAll('tr'))
+		// the "no sub-rules yet" placeholder has no .autosort-enabled — skip it.
+		.filter((tr) => tr.querySelector('.autosort-enabled'))
+		.map((tr) => {
+			const rule = {
+				label:       tr.dataset.label,
+				enabled:     tr.querySelector('.autosort-enabled').checked,
+				folder_name: tr.querySelector('.autosort-folder').value.trim(),
+			};
+			if (withSub && tr.dataset.subLabel) rule.sub_label = tr.dataset.subLabel;
+			return rule;
+		});
+
+	const rules = [
+		...collectFrom(tbody, false),
+		...(subTbody ? collectFrom(subTbody, true) : []),
+	];
+
 	const status = document.getElementById('autosort-status');
-	status.textContent = 'Speichere…';
+	if (status) status.textContent = 'Speichere…';
 	try {
 		const res = await api.settings.updateAutoSort(rules);
 		renderAutoSortRules(res.rules ?? []);
-		status.textContent = `${res.updated ?? 0} Regeln gespeichert.`;
+		if (status) status.textContent = `${res.updated ?? 0} Regeln gespeichert.`;
 		showToast('Auto-Sort gespeichert', 'success', 3000);
 	} catch (err) {
-		status.textContent = '';
+		if (status) status.textContent = '';
 		handleError(err);
 	}
 }
