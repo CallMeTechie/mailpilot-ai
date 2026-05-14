@@ -771,3 +771,17 @@ textarea {
 	border-style: solid;
 }
 #alias-suggestions[data-hidden="true"] { display: none; }
+
+/* Sprint 6b: KI-Vorschlag-Badge an Sub-Label-Auto-Sort-Rules. */
+.mp-badge-ki {
+	display: inline-block;
+	margin-left: 4px;
+	padding: 1px 6px;
+	background: #e0e7ff;
+	color: #3730a3;
+	border-radius: 8px;
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	cursor: help;
+}

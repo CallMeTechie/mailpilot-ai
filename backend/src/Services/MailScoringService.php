@@ -407,12 +407,12 @@ final class MailScoringService
 			$mails,
 		);
 
-		// Sprint 6a: System-Prompt segmentiert mit cache_control. Erste
-		// Block enthält den vollen System-Text (admin-editierbar), zweiter
-		// Block die stabile USER_IDENTITY (Aliases + Name). Beide TTL=1h.
-		// USER_SUBLABELS bleibt in dieser Iteration im User-Template;
-		// Migration ins gecachte System-Segment kommt mit USER_TOPICS in 6b/6e.
-		$systemSegments = $this->buildCachedSystemSegments($activePrompt['system_prompt'], $userProfile);
+		// Sprint 6a/6b: System-Prompt segmentiert mit cache_control. Drei
+		// Blöcke mit TTL=1h: (1) System-Text (admin-editierbar), (2)
+		// USER_IDENTITY (Aliases + Name), (3) USER_TOPICS (sub-label-pool).
+		// Bei sub-label-CRUD ändert sich Segment 3 — Anthropic invalidiert
+		// es automatisch über den Inhalt-Hash, kein expliziter Wisch nötig.
+		$systemSegments = $this->buildCachedSystemSegments($activePrompt['system_prompt'], $userProfile, $subLabelMap);
 		$user   = $this->renderUserTemplate($activePrompt['user_template'], $userProfile, $redacted, $subLabelMap);
 		$model  = $activePrompt['model'];
 
@@ -519,34 +519,18 @@ final class MailScoringService
 			}
 		}
 
-		// USER_SUBLABELS-Block (leer wenn Pool leer)
-		// Alle Wortlaute kommen aus system_settings (Phase C) — admin-
-		// editierbar, kein Code-Deploy nötig für Sprach- oder
-		// Strategie-Anpassungen.
+		// USER_SUBLABELS-Block: ab Sprint 6b im gecachten System-Segment 3
+		// (siehe buildCachedSystemSegments). Im User-Template bleibt der
+		// Platzhalter leer, damit nichts dupliziert wird. Schema-Snippet
+		// hängt weiter vom Pool-State ab — bleibt im User-Template, weil
+		// es die JSON-Output-Form pro Call steuert (eines pro Score-Batch,
+		// nicht stabil cacheable).
 		$subLabelsBlock = '';
-		$schemaSubLabel = $this->settings->getString(
-			'prompt.schema_sublabel_with_pool',
-			'"sub_label":"<a topic name OR null>","sub_label_is_new":true|false',
-		);
-		if ($subLabelMap !== []) {
-			$header = $this->settings->getString('prompt.sublabels_header', 'USER_SUBLABELS:');
-			$lines = ['', $header];
-			foreach ($subLabelMap as $parent => $entries) {
-				foreach ($entries as $entry) {
-					$line = '- ' . $parent . ' / ' . $entry['name'];
-					if (!empty($entry['description'])) {
-						$line .= ' — ' . substr((string)$entry['description'], 0, 200);
-					}
-					$lines[] = $line;
-				}
-			}
-			$subLabelsBlock = implode("\n", $lines) . "\n";
-		} else {
-			$schemaSubLabel = $this->settings->getString(
-				'prompt.schema_sublabel_empty_pool',
-				'"sub_label":null,"sub_label_is_new":false',
-			);
-		}
+		$schemaSubLabel = $subLabelMap !== []
+			? $this->settings->getString('prompt.schema_sublabel_with_pool',
+				'"sub_label":"<a topic name OR null>","sub_label_is_new":true|false')
+			: $this->settings->getString('prompt.schema_sublabel_empty_pool',
+				'"sub_label":null,"sub_label_is_new":false');
 
 		// Topic-Discovery-Note (Phase 6b) — admin-editierbar; \n-Tokens
 		// im DB-Wert werden hier zu echten Zeilenumbrüchen aufgelöst,
@@ -754,14 +738,19 @@ final class MailScoringService
 	 * `extended-cache-ttl-2025-04-11`; ohne Beta-Header degradiert es
 	 * silently auf 5min-Ephemeral.
 	 *
-	 * Zwei Segmente: (1) der admin-editierbare System-Prompt, (2) USER_IDENTITY
-	 * aus Aliases+Display-Name. Beide ändern sich selten genug, dass die
-	 * 2× cache_creation-Kosten sich ab dem zweiten Read amortisieren (PRD §5.2).
+	 * Bis zu drei Segmente:
+	 *   1. admin-editierbarer System-Prompt
+	 *   2. USER_IDENTITY (Aliases + Display-Name)
+	 *   3. USER_TOPICS (sub-label-pool mit Description) — nur wenn nicht leer
+	 *
+	 * Mini-Call lässt $subLabelMap=[] weg (er braucht USER_TOPICS nicht),
+	 * dadurch teilt er sich Segment 1+2 als Cache-Prefix mit dem Score-Call.
 	 *
 	 * @param array<string,mixed> $userProfile
+	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
 	 * @return list<array<string,mixed>>
 	 */
-	private function buildCachedSystemSegments(string $systemPrompt, array $userProfile): array
+	private function buildCachedSystemSegments(string $systemPrompt, array $userProfile, array $subLabelMap = []): array
 	{
 		$aliases = is_array($userProfile['aliases'] ?? null) ? $userProfile['aliases'] : [];
 		$displayName = (string)($userProfile['display_name'] ?? '');
@@ -771,7 +760,7 @@ final class MailScoringService
 			$identity .= "\n- aliases: [" . implode(', ', array_map(static fn($a) => (string)$a, $aliases)) . ']';
 		}
 
-		return [
+		$segments = [
 			[
 				'type' => 'text',
 				'text' => $systemPrompt,
@@ -783,6 +772,38 @@ final class MailScoringService
 				'cache_control' => ['type' => 'ephemeral', 'ttl' => '1h'],
 			],
 		];
+
+		// Segment 3 — USER_TOPICS (Sprint 6b). Inhalt-Hash ändert sich bei
+		// sub-label-CRUD ODER bei KI-Discovery; Anthropic invalidiert den
+		// Cache-Eintrag dann automatisch. Nur einbauen wenn nicht leer,
+		// sonst zahlt jeder erste Call cache_creation für einen leeren
+		// Block ohne Spar-Effekt.
+		//
+		// DA-Finding 1: Reihenfolge stabilisieren. Ohne ksort/usort hat
+		// die Discovery-In-Batch-Mutation einen anderen Hash als der
+		// nächste DB-Reload (ORDER BY name) → cache_creation jedes Mal.
+		if ($subLabelMap !== []) {
+			ksort($subLabelMap, SORT_STRING);
+			$header = $this->settings->getString('prompt.sublabels_header', 'USER_SUBLABELS:');
+			$lines = [$header];
+			foreach ($subLabelMap as $parent => $entries) {
+				usort($entries, static fn(array $a, array $b): int => strcmp((string)$a['name'], (string)$b['name']));
+				foreach ($entries as $entry) {
+					$line = '- ' . $parent . ' / ' . $entry['name'];
+					if (!empty($entry['description'])) {
+						$line .= ' — ' . substr((string)$entry['description'], 0, 200);
+					}
+					$lines[] = $line;
+				}
+			}
+			$segments[] = [
+				'type' => 'text',
+				'text' => implode("\n", $lines),
+				'cache_control' => ['type' => 'ephemeral', 'ttl' => '1h'],
+			];
+		}
+
+		return $segments;
 	}
 
 	private function validateLabel(string $label): string
@@ -853,11 +874,15 @@ final class MailScoringService
 				}
 			}
 
-			// 2c) Anlegen: user_sublabels (created_by='ki') + auto_sort_rules
+			// 2c) Anlegen: user_sublabels (created_by='ki') + AutoSort-Rule
+			// als KI-Vorschlag (disabled, created_by='ki'). Sprint 6b §3.1:
+			// kein silent retroactive move — User muss die Rule erst im UI
+			// freischalten. Bestehende Mails landen im Catch-all (Phase 6c
+			// erweitert das um pending_actions für die gekoppelten Moves).
 			try {
 				$this->subLabels->create($tenantId, $userId, $primary, $candidate, null, null, 'ki');
-				// Default-Folder-Pfad wird in upsert() berechnet wenn folder_name leer ist
-				$this->autoSortRules->upsert($tenantId, $userId, $primary, $candidate, true, '');
+				$folderDefault = $this->settings->getString('folder_default.' . $primary, 'MailPilot/' . ucfirst($primary));
+				$this->autoSortRules->suggestKiRule($tenantId, $userId, $primary, $candidate, $folderDefault . '/' . $candidate);
 				$this->logger->info('topic.discovered', [
 					'name'    => $candidate,
 					'primary' => $primary,
@@ -867,11 +892,25 @@ final class MailScoringService
 				$subLabelMap[$primary][] = ['name' => $candidate, 'description' => null];
 				return $candidate;
 			} catch (\Throwable $e) {
-				$this->logger->warning('topic.discovery_failed', [
+				// DA-Finding 2: Race-Loser. Bei parallelem Discover desselben
+				// Topics (Worker + manueller Rescore) wirft create() ggf.
+				// auch wenn ON-DUPLICATE-KEY existiert — z.B. wenn dem
+				// AutoSortRule-Insert ein anderer UNIQUE-Constraint im Weg
+				// steht. Statt NULL zu liefern (verlorene Erst-Klassifizierung)
+				// pruefen wir, ob das Topic JETZT in der DB existiert: wenn
+				// ja, war's nur ein Race, $candidate gewinnt trotzdem.
+				$this->logger->warning('topic.discovery_race_or_failed', [
 					'name'    => $candidate,
 					'primary' => $primary,
 					'err'     => $e->getMessage(),
 				]);
+				foreach ($this->subLabels->listForUser($tenantId, $userId) as $row) {
+					if ($row['parent'] === $primary
+						&& strtolower($row['name']) === strtolower($candidate)) {
+						$subLabelMap[$primary][] = ['name' => $candidate, 'description' => null];
+						return $candidate;
+					}
+				}
 				return null;
 			}
 		}

@@ -1422,6 +1422,17 @@ function buildAutoSortRow(r, isSub) {
 	if (isSub) {
 		const subTd = document.createElement('td');
 		subTd.textContent = r.sub_label;
+		// Sprint 6b: KI-vorgeschlagene Rules bekommen einen Badge.
+		// Klick auf den Enabled-Switch genuegt zum Aktivieren — kein
+		// eigener Approve-Endpoint, der bestehende save-Flow reicht.
+		if (r.created_by === 'ki') {
+			const badge = document.createElement('span');
+			badge.className = 'mp-badge-ki';
+			badge.textContent = 'KI-Vorschlag';
+			badge.title = 'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = automatisch sortieren.';
+			subTd.appendChild(document.createTextNode(' '));
+			subTd.appendChild(badge);
+		}
 		tr.appendChild(subTd);
 	}
 

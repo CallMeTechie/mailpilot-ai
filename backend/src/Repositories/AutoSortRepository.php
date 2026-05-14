@@ -59,7 +59,7 @@ final class AutoSortRepository
 	 */
 	public function listForUser(string $tenantId, string $userId): array
 	{
-		$stmt = $this->db->prepare('SELECT label, sub_label, enabled, folder_name, folder_id, last_error, updated_at
+		$stmt = $this->db->prepare('SELECT label, sub_label, enabled, folder_name, folder_id, last_error, created_by, updated_at
 			FROM auto_sort_rules WHERE tenant_id = :t AND user_id = :u');
 		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
 
@@ -86,6 +86,7 @@ final class AutoSortRepository
 					'folder_name' => $this->defaultFolder($label),
 					'folder_id'   => null,
 					'last_error'  => null,
+					'created_by'  => 'user',
 					'updated_at'  => '',
 				];
 			}
@@ -291,7 +292,52 @@ final class AutoSortRepository
 			'folder_name' => (string)$r['folder_name'],
 			'folder_id'   => $r['folder_id'] !== null ? (string)$r['folder_id'] : null,
 			'last_error'  => $r['last_error'] !== null ? (string)$r['last_error'] : null,
+			'created_by'  => isset($r['created_by']) ? (string)$r['created_by'] : 'user',
 			'updated_at'  => (string)$r['updated_at'],
 		];
+	}
+
+	/**
+	 * Sprint 6b: legt eine KI-vorgeschlagene Rule an, ohne sie zu aktivieren.
+	 *
+	 * Trigger: MailScoringService discovered ein neues sub_label per
+	 * Topic-Discovery (Phase 6b). Damit der User die Idee sieht und mit
+	 * einem Klick aktivieren kann, materialisieren wir die Rule als
+	 * disabled + created_by='ki'. Erscheint in der AutoSort-Liste mit
+	 * KI-Badge im Add-in.
+	 *
+	 * Idempotent: existiert bereits eine Rule (egal welcher origin), wird
+	 * NICHTS gemacht — das schützt vor:
+	 *   (a) Re-Discovery durch denselben Score-Batch
+	 *   (b) Überschreiben einer bereits user-aktivierten Rule
+	 *
+	 * @return bool true wenn neue KI-Rule angelegt wurde
+	 */
+	public function suggestKiRule(
+		string $tenantId,
+		string $userId,
+		string $label,
+		string $subLabel,
+		string $folderName,
+	): bool {
+		if (!in_array($label, self::LABELS, true) || $subLabel === '') {
+			return false;
+		}
+		$existing = $this->findExistingId($tenantId, $userId, $label, $subLabel);
+		if ($existing !== null) {
+			return false;
+		}
+		$this->db->prepare('INSERT INTO auto_sort_rules
+			(id, tenant_id, user_id, label, sub_label, enabled, folder_name, created_by)
+			VALUES (:id, :t, :u, :l, :s, 0, :f, "ki")')
+			->execute([
+				':id' => Uuid::v4(),
+				':t'  => $tenantId,
+				':u'  => $userId,
+				':l'  => $label,
+				':s'  => $subLabel,
+				':f'  => $folderName,
+			]);
+		return true;
 	}
 }
