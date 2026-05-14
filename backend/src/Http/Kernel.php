@@ -175,6 +175,7 @@ class Kernel
 				(int)$this->config['limits']['max_body_bytes'],
 				$this->get(Logger::class),
 				$this->get(PendingActionRepository::class),
+				$this->get(AutoSortCorrectionRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

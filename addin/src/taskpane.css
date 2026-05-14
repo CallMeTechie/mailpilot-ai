@@ -772,6 +772,49 @@ textarea {
 }
 #alias-suggestions[data-hidden="true"] { display: none; }
 
+/* Sprint 6e — „MailPilot Heute"-Dashboard */
+.mp-today-head {
+	display: flex; justify-content: space-between; align-items: center;
+	margin-bottom: 12px;
+}
+.mp-today-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.mp-today-range { display: inline-flex; gap: 2px; background: var(--mp-bg); padding: 3px; border-radius: 6px; }
+.mp-today-range-btn {
+	padding: 4px 10px; font-size: 12px;
+	background: transparent; border: 1px solid transparent;
+	color: var(--mp-text-muted); border-radius: 4px; cursor: pointer;
+}
+.mp-today-range-btn.is-active {
+	background: var(--mp-surface); color: var(--mp-text);
+	border-color: var(--mp-border);
+}
+.mp-today-section { margin-bottom: 12px; }
+.mp-today-section > summary {
+	cursor: pointer; padding: 6px 0; font-size: 14px;
+	display: flex; align-items: center; gap: 8px;
+}
+.mp-today-count {
+	display: inline-block; min-width: 20px; padding: 1px 6px;
+	background: var(--mp-surface-hover); color: var(--mp-text);
+	border-radius: 9px; font-size: 11px; font-weight: 500; text-align: center;
+}
+.mp-today-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.mp-today-card {
+	padding: 10px; border: 1px solid var(--mp-border); border-radius: 6px;
+	background: var(--mp-bg); display: flex; flex-direction: column; gap: 4px;
+}
+.mp-today-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mp-today-card-from { font-size: 11px; }
+.mp-today-card-summary { font-size: 12px; color: var(--mp-text-muted); line-height: 1.4; }
+.mp-prio-pill {
+	display: inline-block; padding: 1px 6px; border-radius: 4px;
+	font-size: 10px; font-weight: 600; background: var(--mp-surface-hover);
+	color: var(--mp-text);
+}
+.mp-prio-pill[data-priority="5"] { background: #fee2e2; color: #991b1b; }
+.mp-prio-pill[data-priority="4"] { background: #fef3c7; color: #92400e; }
+.mp-prio-pill[data-priority="3"] { background: #dbeafe; color: #1e40af; }
+
 /* Sprint 6c: Pending-Tab + Modi-Tab */
 .mp-subtab-count {
 	display: inline-block; min-width: 18px; padding: 0 6px;

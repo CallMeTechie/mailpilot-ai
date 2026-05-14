@@ -10,6 +10,7 @@ use MailPilot\Controllers\MeController;
 use MailPilot\Controllers\PendingController;
 use MailPilot\Controllers\SettingsController;
 use MailPilot\Controllers\SyncController;
+use MailPilot\Controllers\TodayController;
 use MailPilot\Http\Exceptions\HttpException;
 
 /**
@@ -97,6 +98,7 @@ final class Router
 			'SettingsController' => SettingsController::class,
 			'MeController'       => MeController::class,
 			'PendingController'  => PendingController::class,
+			'TodayController'    => TodayController::class,
 			default              => throw new \RuntimeException("Unknown controller: {$controllerName}"),
 		};
 

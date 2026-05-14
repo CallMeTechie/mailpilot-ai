@@ -106,4 +106,40 @@ final class CorrectionRepository
 			'reasoning'          => $r['reasoning'] !== null ? (string)$r['reasoning'] : null,
 		], $rows);
 	}
+
+	/**
+	 * Sprint 6e DA-Finding 2: stable Few-Shot-Reihenfolge für Cache-
+	 * Segment-Hash. ORDER BY ASC sortiert älteste first → neue Korrekturen
+	 * landen am Ende, der Top-Block bleibt stabil → Anthropic-Cache-Read
+	 * greift. 30d-Window verhindert, dass uralte Korrekturen ewig bleiben.
+	 *
+	 * @return list<array<string,mixed>>
+	 */
+	public function forFewShotPrompt(string $tenantId, string $userId, int $limit, int $windowDays = 30): array
+	{
+		$stmt = $this->db->prepare('SELECT m.from_email, m.subject,
+				c.original_label, c.original_priority,
+				c.corrected_label, c.corrected_priority, c.corrected_action, c.reasoning
+			FROM mail_score_corrections c
+			INNER JOIN mails m ON m.id = c.mail_id
+			WHERE c.tenant_id = :t AND c.user_id = :u
+			  AND c.created_at >= (UTC_TIMESTAMP(3) - INTERVAL :w DAY)
+			ORDER BY c.created_at ASC, c.id ASC
+			LIMIT :lim');
+		$stmt->bindValue(':t', $tenantId);
+		$stmt->bindValue(':u', $userId);
+		$stmt->bindValue(':w',   max(1, $windowDays), PDO::PARAM_INT);
+		$stmt->bindValue(':lim', max(1, $limit),      PDO::PARAM_INT);
+		$stmt->execute();
+		return array_map(static fn(array $r): array => [
+			'from_email'         => (string)($r['from_email'] ?? ''),
+			'subject'            => (string)($r['subject'] ?? ''),
+			'original_label'     => $r['original_label'] !== null ? (string)$r['original_label'] : null,
+			'original_priority'  => $r['original_priority'] !== null ? (int)$r['original_priority'] : null,
+			'corrected_label'    => (string)$r['corrected_label'],
+			'corrected_priority' => (int)$r['corrected_priority'],
+			'corrected_action'   => (bool)$r['corrected_action'],
+			'reasoning'          => $r['reasoning'] !== null ? (string)$r['reasoning'] : null,
+		], $stmt->fetchAll(PDO::FETCH_ASSOC));
+	}
 }

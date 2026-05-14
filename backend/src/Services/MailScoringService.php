@@ -52,6 +52,10 @@ final class MailScoringService
 		// auf den enabled=0-Rule-only-Pfad zurück (kein pending_action-
 		// Eintrag im Tab, aber Rule erscheint im AutoSort-Tab mit Badge).
 		private readonly ?\MailPilot\Repositories\PendingActionRepository $pendingActions = null,
+		// Sprint 6e: optional, damit Score-Bestandstests ohne Wiring laufen.
+		// Wenn null, ist der AutoSort-Few-Shot-Block leer (Score-
+		// Korrekturen aus 3e funktionieren weiter).
+		private readonly ?\MailPilot\Repositories\AutoSortCorrectionRepository $autoSortCorrections = null,
 	) {
 	}
 
@@ -541,28 +545,10 @@ final class MailScoringService
 			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
 		);
 
-		// Few-Shot-Korrekturen (leer wenn keine)
+		// Sprint 6e DA-Finding 2: Few-Shot-Korrekturen ziehen ins
+		// gecachte System-Segment 4 (buildCachedSystemSegments).
+		// User-Template-Platzhalter bleibt leer.
 		$correctionsBlock = '';
-		$tenantId = (string)($userProfile['tenant_id'] ?? '');
-		$userId   = (string)($userProfile['user_id']   ?? '');
-		if ($tenantId !== '' && $userId !== '') {
-			$recent = $this->corrections->recentForUser($tenantId, $userId, 10);
-			if ($recent !== []) {
-				$lines = ['', $this->settings->getString('prompt.corrections_header', 'PRIOR_USER_CORRECTIONS:')];
-				foreach ($recent as $c) {
-					$from = substr($c['from_email'], 0, 60);
-					$subj = substr($c['subject'], 0, 60);
-					$ki = ($c['original_label'] ?? '?') . '/' . ($c['original_priority'] ?? '?');
-					$human = $c['corrected_label'] . '/' . $c['corrected_priority']
-						. ($c['corrected_action'] ? ' (action)' : '');
-					$reason = $c['reasoning'] !== null && $c['reasoning'] !== ''
-						? ' — Grund: ' . substr($c['reasoning'], 0, 200)
-						: '';
-					$lines[] = "- From: {$from} | Subject: {$subj} | KI: {$ki} → Human: {$human}{$reason}";
-				}
-				$correctionsBlock = implode("\n", $lines) . "\n";
-			}
-		}
 
 		// USER_SUBLABELS-Block: ab Sprint 6b im gecachten System-Segment 3
 		// (siehe buildCachedSystemSegments). Im User-Template bleibt der
@@ -848,7 +834,72 @@ final class MailScoringService
 			];
 		}
 
+		// Segment 4 — combined User-Korrekturen (Score + AutoSort).
+		// Sprint 6e DA-Finding 2: stable ORDER BY ASC + 30d-Window via
+		// forFewShotPrompt(). Bei wachsendem Korrektur-Pool ändert sich
+		// Top-Block nur sprunghaft (nach 30d-Aging), nicht jeden Call.
+		$tenantId = (string)($userProfile['tenant_id'] ?? '');
+		$userId   = (string)($userProfile['user_id']   ?? '');
+		if ($tenantId !== '' && $userId !== '') {
+			$corrLines = $this->renderCorrectionsBlockLines($tenantId, $userId);
+			if ($corrLines !== []) {
+				$segments[] = [
+					'type' => 'text',
+					'text' => implode("\n", $corrLines),
+					'cache_control' => ['type' => 'ephemeral', 'ttl' => '1h'],
+				];
+			}
+		}
+
 		return $segments;
+	}
+
+	/**
+	 * Sprint 6e DA-Finding 2: rendert beide Korrektur-Pools (Score-
+	 * Korrekturen aus Sprint 3e + Move-Korrekturen aus Sprint 6d) als
+	 * deterministisch sortierten Few-Shot-Block.
+	 *
+	 * @return list<string>
+	 */
+	private function renderCorrectionsBlockLines(string $tenantId, string $userId): array
+	{
+		$scoreLimit    = max(0, $this->settings->getInt('learning.score_corrections_limit', 10));
+		$autosortLimit = max(0, $this->settings->getInt('learning.autosort_corrections_limit', 10));
+		$out = [];
+
+		if ($scoreLimit > 0) {
+			$score = $this->corrections->forFewShotPrompt($tenantId, $userId, $scoreLimit, 30);
+			if ($score !== []) {
+				$out[] = $this->settings->getString('prompt.corrections_header', 'PRIOR_USER_CORRECTIONS:');
+				foreach ($score as $c) {
+					$from = substr($c['from_email'], 0, 60);
+					$subj = substr($c['subject'],    0, 60);
+					$ki   = ($c['original_label']   ?? '?') . '/' . ($c['original_priority'] ?? '?');
+					$hum  = $c['corrected_label'] . '/' . $c['corrected_priority']
+						. ($c['corrected_action'] ? ' (action)' : '');
+					$rsn  = ($c['reasoning'] ?? '') !== '' ? ' — Grund: ' . substr((string)$c['reasoning'], 0, 200) : '';
+					$out[] = "- From: {$from} | Subject: {$subj} | KI: {$ki} → Human: {$hum}{$rsn}";
+				}
+			}
+		}
+
+		if ($autosortLimit > 0 && $this->autoSortCorrections !== null) {
+			$moves = $this->autoSortCorrections->forFewShotPrompt($tenantId, $userId, $autosortLimit, 30);
+			if ($moves !== []) {
+				if ($out !== []) $out[] = ''; // Visueller Abstand zwischen Blöcken
+				$out[] = $this->settings->getString(
+					'prompt.autosort_corrections_header',
+					'PRIOR_AUTOSORT_CORRECTIONS:',
+				);
+				foreach ($moves as $m) {
+					$from = $m['original_sub_label']  ?? '(catch-all)';
+					$to   = $m['suggested_sub_label'] ?? '(catch-all)';
+					$rsn  = ($m['user_reason'] ?? '') !== '' ? ' — Grund: ' . substr((string)$m['user_reason'], 0, 200) : '';
+					$out[] = "- {$from} → {$to}{$rsn}";
+				}
+			}
+		}
+		return $out;
 	}
 
 	private function validateLabel(string $label): string

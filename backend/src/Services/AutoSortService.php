@@ -154,8 +154,13 @@ final class AutoSortService
 			}
 			$this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
 			// Mark so the background backfill query doesn't try to
-			// move it again on the next sweep.
-			$this->db->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3)
+			// move it again on the next sweep. cleared_at (Sprint 6e
+			// DA-Finding 1) markiert die Mail als „weg aus der Inbox"
+			// für die TodayController-Done-Sektion — egal ob auto-
+			// sorted oder später user-moved.
+			$this->db->prepare('UPDATE mail_scores
+				SET auto_sorted_at = UTC_TIMESTAMP(3),
+				    cleared_at = UTC_TIMESTAMP(3)
 				WHERE mail_id = :m AND tenant_id = :t')
 				->execute([':m' => $mail['id'], ':t' => $tenantId]);
 			$this->logger->info('autosort.moved', [

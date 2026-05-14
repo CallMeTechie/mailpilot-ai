@@ -20,10 +20,13 @@ final class ScoreRepository
 			return;
 		}
 
-		// IF(user_corrected_at IS NOT NULL, …, …): a user-flagged score
-		// is sticky — Claude can still refresh summary/reasoning, but
-		// label/sub_label/priority/action_required stay frozen until
-		// the user re-corrects.
+		// Sprint 6e DA-Finding 3: Per-Feld-Sticky via user_corrected_fields.
+		// FIND_IN_SET(field, user_corrected_fields) > 0 → User hat genau
+		// dieses Feld korrigiert, keep it. Sonst Claude refresh ok.
+		// summary/reasoning bleiben immer Claude-refreshbar (kein Sticky).
+		// user_corrected_at-Pfad legacy für Score-Korrekturen aus Sprint 3e:
+		// wenn user_corrected_fields NULL aber user_corrected_at gesetzt,
+		// behandeln wir die klassische sticky-Semantik (alle vier Felder).
 		$sql = 'INSERT INTO mail_scores
 			(id, tenant_id, mail_id, label, sub_label, action_required,
 			 action_owner, action_owner_confidence, action_owner_source,
@@ -32,13 +35,13 @@ final class ScoreRepository
 			 :action_owner, :action_owner_confidence, :action_owner_source,
 			 :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
-				label                   = IF(user_corrected_at IS NULL, VALUES(label),                   label),
-				sub_label               = IF(user_corrected_at IS NULL, VALUES(sub_label),               sub_label),
-				action_required         = IF(user_corrected_at IS NULL, VALUES(action_required),         action_required),
-				action_owner            = IF(user_corrected_at IS NULL, VALUES(action_owner),            action_owner),
-				action_owner_confidence = IF(user_corrected_at IS NULL, VALUES(action_owner_confidence), action_owner_confidence),
-				action_owner_source     = IF(user_corrected_at IS NULL, VALUES(action_owner_source),     action_owner_source),
-				priority                = IF(user_corrected_at IS NULL, VALUES(priority),                priority),
+				label                   = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),                label,                   VALUES(label)),
+				sub_label               = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("sub_label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),            sub_label,               VALUES(sub_label)),
+				action_required         = IF(user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL,                                                                                                          action_required,         VALUES(action_required)),
+				action_owner            = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("action_owner", user_corrected_fields)),                                                                              action_owner,            VALUES(action_owner)),
+				action_owner_confidence = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("action_owner", user_corrected_fields)),                                                                              action_owner_confidence, VALUES(action_owner_confidence)),
+				action_owner_source     = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("action_owner", user_corrected_fields)),                                                                              action_owner_source,     VALUES(action_owner_source)),
+				priority                = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("priority", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),             priority,                VALUES(priority)),
 				summary         = VALUES(summary),
 				reasoning       = VALUES(reasoning),
 				prompt_version  = VALUES(prompt_version),

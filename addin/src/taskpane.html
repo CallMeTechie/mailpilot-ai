@@ -13,6 +13,7 @@
 	<header class="mp-header">
 		<nav class="mp-tabs" role="tablist">
 			<button class="mp-tab is-active" data-tab="briefing" role="tab">Briefing</button>
+			<button class="mp-tab" data-tab="today"    role="tab">Heute</button>
 			<button class="mp-tab" data-tab="current" role="tab">Diese Mail</button>
 		</nav>
 		<button class="mp-header-icon" id="btn-sync" aria-label="Jetzt aktualisieren" title="Jetzt aktualisieren">
@@ -104,6 +105,48 @@
 				<p>Noch kein Postfach verbunden.</p>
 				<button class="mp-btn mp-btn-primary" id="btn-connect">Mit Microsoft-Konto anmelden</button>
 			</div>
+		</section>
+
+		<!-- ===================== HEUTE (Sprint 6e) ===================== -->
+		<section class="mp-panel" data-panel="today">
+			<div class="mp-today-head">
+				<h1>MailPilot Heute</h1>
+				<nav class="mp-today-range" role="tablist" aria-label="Zeitfenster">
+					<button class="mp-today-range-btn is-active" data-range="today">Heute</button>
+					<button class="mp-today-range-btn"           data-range="week">Woche</button>
+					<button class="mp-today-range-btn"           data-range="all">Alles</button>
+				</nav>
+			</div>
+
+			<div id="today-loader" class="mp-loader" data-hidden="true">
+				<div class="mp-spinner"></div>
+				<p>Lade Heute-Übersicht…</p>
+			</div>
+
+			<details class="mp-today-section" data-section="important" open>
+				<summary>
+					<strong>Wichtig</strong>
+					<span class="mp-today-count" id="today-count-important">0</span>
+				</summary>
+				<ul class="mp-today-list" id="today-list-important"></ul>
+			</details>
+
+			<details class="mp-today-section" data-section="unclear" open>
+				<summary>
+					<strong>Unklar</strong>
+					<span class="mp-today-count" id="today-count-unclear">0</span>
+				</summary>
+				<p class="mp-muted">Die KI war sich nicht sicher, wer reagieren muss. Klick auf „Nicht meins" wenn es nicht deine Action ist.</p>
+				<ul class="mp-today-list" id="today-list-unclear"></ul>
+			</details>
+
+			<details class="mp-today-section" data-section="done">
+				<summary>
+					<strong>Erledigt</strong>
+					<span class="mp-today-count" id="today-count-done">0</span>
+				</summary>
+				<ul class="mp-today-list" id="today-list-done"></ul>
+			</details>
 		</section>
 
 		<!-- ===================== CURRENT MAIL ===================== -->

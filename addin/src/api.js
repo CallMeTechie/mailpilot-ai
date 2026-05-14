@@ -155,6 +155,7 @@ export const api = {
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
 		correctScore:  (id, payload) => request('POST', `/mails/${id}/correct-score`, payload),
+		correctOwner:  (id, owner)   => request('POST', `/mails/${id}/correct-owner`, { action_owner: owner }),
 		bulkAction:    (action, label, since) => request('POST',
 			`/mails/bulk/${encodeURIComponent(action)}`,
 			{ label, since: since ?? null }),
@@ -197,6 +198,16 @@ export const api = {
 	modes: {
 		get:    ()       => request('GET',  '/settings/modes'),
 		save:   (modes)  => request('POST', '/settings/modes', modes),
+	},
+	today: {
+		fetch: (range = 'today', cursors = {}) => {
+			const q = new URLSearchParams();
+			q.set('range', range);
+			for (const [k, v] of Object.entries(cursors)) {
+				if (v) q.set(`cursor_${k}`, v);
+			}
+			return request('GET', `/today?${q.toString()}`);
+		},
 	},
 	pending: {
 		list:         (kind = null, afterId = null, limit = 50) => {

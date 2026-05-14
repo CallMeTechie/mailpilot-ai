@@ -76,4 +76,8 @@ $router->post('/api/v1/settings/modes',              'SettingsController@saveMod
 // Sprint 6d — Reason-Capture für Move-Korrekturen (Privacy-gated)
 $router->post('/api/v1/me/auto-sort-corrections/{id}/reason', 'MeController@setCorrectionReason');
 
+// Sprint 6e — „MailPilot Heute"-Dashboard
+$router->get ('/api/v1/today',                       'TodayController@today');
+$router->post('/api/v1/mails/{id}/correct-owner',    'TodayController@correctOwner');
+
 $router->dispatch();

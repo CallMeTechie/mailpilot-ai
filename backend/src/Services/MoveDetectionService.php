@@ -92,6 +92,14 @@ final class MoveDetectionService
 			$score['sub_label'] !== null ? (string)$score['sub_label'] : null,
 			$target['sub_label'],
 		);
+
+		// Sprint 6e DA-Finding 1: User-Move ist auch „erledigt" aus
+		// Dashboard-Sicht. cleared_at markiert dafür den Zeitpunkt.
+		$this->db->prepare('UPDATE mail_scores
+			SET cleared_at = UTC_TIMESTAMP(3)
+			WHERE tenant_id = :t AND mail_id = :m AND cleared_at IS NULL')
+			->execute([':t' => $tenantId, ':m' => $mailId]);
+
 		$this->logger->info('move_detection.correction_logged', [
 			'mail' => $mailId,
 			'from' => $score['folder_name'],

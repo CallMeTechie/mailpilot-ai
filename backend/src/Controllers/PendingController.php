@@ -189,8 +189,13 @@ final class PendingController extends BaseController
 
 		$mailId = (string)($payload['mail_id'] ?? '');
 		if ($mailId !== '') {
+			// Sprint 6e DA-Finding 1: cleared_at als single source of truth
+			// für „weg aus der Inbox". Pending-Move-Approve = user hat aktiv
+			// zugestimmt → analog zum AutoSort-Auto-Pfad.
 			$this->kernel->get(PDO::class)
-				->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3)
+				->prepare('UPDATE mail_scores
+					SET auto_sorted_at = UTC_TIMESTAMP(3),
+					    cleared_at = UTC_TIMESTAMP(3)
 					WHERE mail_id = :m AND tenant_id = :t')
 				->execute([':m' => $mailId, ':t' => $tenantId]);
 		}

@@ -173,6 +173,40 @@ final class AutoSortCorrectionRepository
 	}
 
 	/**
+	 * Sprint 6e DA-Finding 2: stable Few-Shot-Reihenfolge für Cache.
+	 * Nur stabilisierte Korrekturen, ORDER BY stabilized_at ASC →
+	 * älteste first, neue hängen hinten an, Segment-Hash bleibt stabil.
+	 *
+	 * @return list<array{original_sub_label:?string, suggested_sub_label:?string,
+	 *                   user_reason:?string, original_folder_path:string,
+	 *                   corrected_folder_path:string}>
+	 */
+	public function forFewShotPrompt(string $tenantId, string $userId, int $limit, int $windowDays = 30): array
+	{
+		$stmt = $this->db->prepare('SELECT original_sub_label, suggested_sub_label,
+				user_reason, original_folder_path, corrected_folder_path
+			FROM auto_sort_corrections
+			WHERE tenant_id = :t AND user_id = :u
+			  AND stabilized_at IS NOT NULL
+			  AND deleted_at IS NULL
+			  AND created_at >= (UTC_TIMESTAMP(3) - INTERVAL :w DAY)
+			ORDER BY stabilized_at ASC, id ASC
+			LIMIT :lim');
+		$stmt->bindValue(':t', $tenantId);
+		$stmt->bindValue(':u', $userId);
+		$stmt->bindValue(':w',   max(1, $windowDays), PDO::PARAM_INT);
+		$stmt->bindValue(':lim', max(1, $limit),      PDO::PARAM_INT);
+		$stmt->execute();
+		return array_map(static fn(array $r): array => [
+			'original_sub_label'    => $r['original_sub_label']    !== null ? (string)$r['original_sub_label']    : null,
+			'suggested_sub_label'   => $r['suggested_sub_label']   !== null ? (string)$r['suggested_sub_label']   : null,
+			'user_reason'           => $r['user_reason']           !== null ? (string)$r['user_reason']           : null,
+			'original_folder_path'  => (string)$r['original_folder_path'],
+			'corrected_folder_path' => (string)$r['corrected_folder_path'],
+		], $stmt->fetchAll(PDO::FETCH_ASSOC));
+	}
+
+	/**
 	 * Soft-Delete-Purge älter als $days Tage (PRD §6c: 90d-Retention).
 	 *
 	 * @return int Anzahl gelöschter Rows

@@ -151,6 +151,7 @@ Office.onReady((info) => {
 
 	initTabs();
 	initBriefing();
+	initToday();
 	initCurrentMail();
 	initSettings();
 	initSettingsOverlay();
@@ -222,12 +223,130 @@ function initTabs() {
 				// counts can change anytime as the worker keeps scoring.
 				loadBriefing();
 			}
+			if (name === 'today') {
+				loadToday();
+			}
 			if (name === 'current') {
 				// Re-evaluate the currently-open mail when user opens this tab.
 				onItemChanged();
 			}
 		});
 	});
+}
+
+// ============================================================
+// Sprint 6e — "MailPilot Heute"-Dashboard
+// ============================================================
+const todayState = { range: 'today' };
+
+function initToday() {
+	document.querySelectorAll('.mp-today-range-btn').forEach((btn) => {
+		btn.addEventListener('click', () => {
+			document.querySelectorAll('.mp-today-range-btn').forEach(b => b.classList.remove('is-active'));
+			btn.classList.add('is-active');
+			todayState.range = btn.dataset.range || 'today';
+			loadToday();
+		});
+	});
+}
+
+async function loadToday() {
+	const loader = document.getElementById('today-loader');
+	if (loader) loader.dataset.hidden = 'false';
+	try {
+		const res = await api.today.fetch(todayState.range);
+		renderTodaySection('important', res.important);
+		renderTodaySection('unclear',   res.unclear);
+		renderTodaySection('done',      res.done);
+	} catch (err) {
+		if (err instanceof ApiError && err.status === 401) return bounceToLogin();
+		handleError(err);
+	} finally {
+		if (loader) loader.dataset.hidden = 'true';
+	}
+}
+
+function renderTodaySection(name, section) {
+	const items = section?.items ?? [];
+	const ul = document.getElementById(`today-list-${name}`);
+	const count = document.getElementById(`today-count-${name}`);
+	if (count) count.textContent = String(items.length);
+	if (!ul) return;
+	ul.replaceChildren();
+	if (items.length === 0) {
+		const li = document.createElement('li');
+		li.className = 'mp-muted';
+		li.textContent = 'Keine Einträge in diesem Zeitraum.';
+		ul.appendChild(li);
+		return;
+	}
+	for (const item of items) {
+		ul.appendChild(buildTodayCard(item, name));
+	}
+}
+
+function buildTodayCard(item, section) {
+	const li = document.createElement('li');
+	li.className = 'mp-today-card';
+	li.dataset.label = item.label;
+
+	const headLine = document.createElement('div');
+	headLine.className = 'mp-today-card-head';
+	const subj = document.createElement('strong');
+	subj.textContent = item.subject || '(ohne Betreff)';
+	headLine.appendChild(subj);
+	const prio = document.createElement('span');
+	prio.className = 'mp-prio-pill';
+	prio.dataset.priority = String(item.priority ?? 2);
+	prio.textContent = 'P' + (item.priority ?? '?');
+	headLine.appendChild(prio);
+	li.appendChild(headLine);
+
+	const from = document.createElement('div');
+	from.className = 'mp-muted mp-today-card-from';
+	from.textContent = item.from_name ? `${item.from_name} <${item.from_email}>` : (item.from_email || '');
+	li.appendChild(from);
+
+	if (item.summary) {
+		const sm = document.createElement('div');
+		sm.className = 'mp-today-card-summary';
+		sm.textContent = item.summary;
+		li.appendChild(sm);
+	}
+
+	const actions = document.createElement('div');
+	actions.className = 'mp-actions';
+	if (section === 'unclear') {
+		const notMine = document.createElement('button');
+		notMine.className = 'mp-btn mp-btn-secondary';
+		notMine.textContent = 'Nicht meins';
+		notMine.addEventListener('click', () => correctOwnerInline(item.mail_id, 'other', li));
+		actions.appendChild(notMine);
+	}
+	const open = document.createElement('button');
+	open.className = 'mp-btn mp-btn-ghost';
+	open.textContent = 'Öffnen';
+	open.addEventListener('click', () => openMailInCurrentTab(item.mail_id));
+	actions.appendChild(open);
+	li.appendChild(actions);
+
+	return li;
+}
+
+async function correctOwnerInline(mailId, owner, cardEl) {
+	try {
+		await api.mails.correctOwner(mailId, owner);
+		cardEl?.remove();
+		setStatus('Owner-Korrektur gespeichert.');
+	} catch (err) { handleError(err); }
+}
+
+function openMailInCurrentTab(mailId) {
+	// Schaltet auf den „Diese Mail"-Tab um. Wir können nicht direkt aus
+	// dem Add-in heraus eine andere Mail in Outlook öffnen — der User
+	// muss sie im Outlook-Hauptfenster anwählen. Wir geben den Hinweis.
+	document.querySelector('.mp-tab[data-tab="current"]')?.click();
+	setStatus('Wähle die Mail in Outlook aus, dann erscheint sie hier.');
 }
 
 // Sprint 0.3: Settings sind nicht mehr Tab, sondern Vollbild-Overlay,
