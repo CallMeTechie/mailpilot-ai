@@ -61,10 +61,11 @@ final class BriefingController extends BaseController
 		$workerOk   = false;
 		if ($lastSeen !== '') {
 			$age = time() - strtotime($lastSeen);
-			// 5-minute grace: a single Score-Batch with full Anthropic
-			// latency can take 30-60s; 5min covers bulk-rescore-storms
-			// without flashing "Worker offline" at the user.
-			$workerOk = $age >= 0 && $age < 300;
+			// Schwelle via Admin-Panel editierbar (Migration 0014):
+			// worker.heartbeat_threshold_seconds. Default 300s deckt
+			// einen Score-Batch mit Anthropic-Latenz ab.
+			$threshold = max(60, $settings->getInt('worker.heartbeat_threshold_seconds', 300));
+			$workerOk = $age >= 0 && $age < $threshold;
 		}
 
 		Response::json([

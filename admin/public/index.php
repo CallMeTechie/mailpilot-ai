@@ -20,6 +20,7 @@ use MailPilot\Admin\Controllers\PromptController;
 use MailPilot\Admin\Controllers\AuditController;
 use MailPilot\Admin\Controllers\CacheController;
 use MailPilot\Admin\Controllers\SyncJobsController;
+use MailPilot\Admin\Controllers\SystemSettingsController;
 use MailPilot\Admin\Kernel as AdminKernel;
 
 session_start();
@@ -79,6 +80,11 @@ $routes = [
 	['POST', '#^/admin/settings/budgets$#',               BudgetController::class, 'saveBudgets'],
 	['POST', '#^/admin/settings/budgets/pricing$#',       BudgetController::class, 'savePricing'],
 	['POST', '#^/admin/settings/budgets/prompt-tokens$#', BudgetController::class, 'savePromptTokens'],
+
+	['GET',  '#^/admin/settings/system$#',                SystemSettingsController::class, 'show'],
+	['POST', '#^/admin/settings/system/snippets$#',       SystemSettingsController::class, 'saveSnippets'],
+	['POST', '#^/admin/settings/system/tuning$#',         SystemSettingsController::class, 'saveTuning'],
+	['POST', '#^/admin/settings/system/folders$#',        SystemSettingsController::class, 'saveFolders'],
 ];
 
 foreach ($routes as [$m, $pattern, $class, $action]) {

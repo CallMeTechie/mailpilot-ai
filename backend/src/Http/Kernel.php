@@ -100,7 +100,10 @@ class Kernel
 				$this->get(PDO::class),
 				(int)$this->config['limits']['cache_ttl_days'],
 			),
-			AutoSortRepository::class => new AutoSortRepository($this->get(PDO::class)),
+			AutoSortRepository::class => new AutoSortRepository(
+				$this->get(PDO::class),
+				$this->get(SettingsRepository::class),
+			),
 			CorrectionRepository::class => new CorrectionRepository($this->get(PDO::class)),
 			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
@@ -118,6 +121,7 @@ class Kernel
 				$this->get(AutoSortRepository::class),
 				$this->get(PDO::class),
 				$this->get(Logger::class),
+				$this->get(SettingsRepository::class),
 			),
 			RedactionService::class   => new RedactionService(),
 			JwtService::class         => new JwtService(
@@ -143,6 +147,7 @@ class Kernel
 				$this->get(SubLabelRepository::class),
 				$this->get(AutoSortRepository::class),
 				$this->get(PromptRepository::class),
+				$this->get(SettingsRepository::class),
 				(int)$this->config['limits']['scoring_batch_size'],
 				(int)$this->config['limits']['max_body_bytes'],
 				$this->get(Logger::class),

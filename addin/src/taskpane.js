@@ -153,6 +153,7 @@ Office.onReady((info) => {
 	initBriefing();
 	initCurrentMail();
 	initSettings();
+	initSettingsOverlay();
 	startAutoRefresh();
 
 	// If we already have a JWT in storage (page reload after login),
@@ -225,9 +226,36 @@ function initTabs() {
 				// Re-evaluate the currently-open mail when user opens this tab.
 				onItemChanged();
 			}
-			if (name === 'settings') {
-				loadSettings();
-			}
+		});
+	});
+}
+
+// Sprint 0.3: Settings sind nicht mehr Tab, sondern Vollbild-Overlay,
+// das per Zahnrad-Icon im Header geöffnet wird. Sub-Tabs gruppieren die
+// fünf Bereiche (Profil&Filter / Topics / Auto-Sort / Wartung / Daten);
+// loadSettings() läuft beim Öffnen (wie zuvor beim Tab-Wechsel).
+function initSettingsOverlay() {
+	const overlay = document.getElementById('mp-settings-overlay');
+	const open    = document.getElementById('btn-open-settings');
+	const close   = document.getElementById('btn-close-settings');
+	if (!overlay || !open || !close) return;
+
+	const openOverlay  = () => { overlay.dataset.hidden = 'false'; loadSettings(); };
+	const closeOverlay = () => { overlay.dataset.hidden = 'true'; };
+
+	open.addEventListener('click',  openOverlay);
+	close.addEventListener('click', closeOverlay);
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && overlay.dataset.hidden === 'false') closeOverlay();
+	});
+
+	document.querySelectorAll('.mp-subtab').forEach((tab) => {
+		tab.addEventListener('click', () => {
+			const name = tab.dataset.subtab;
+			document.querySelectorAll('.mp-subtab').forEach(t => t.classList.remove('is-active'));
+			document.querySelectorAll('.mp-subpanel').forEach(p => p.classList.remove('is-active'));
+			tab.classList.add('is-active');
+			document.querySelector(`.mp-subpanel[data-subpanel="${name}"]`)?.classList.add('is-active');
 		});
 	});
 }
@@ -799,6 +827,12 @@ function handleCurrentMailError(err) {
 }
 
 function bounceToLogin() {
+	// Sprint 0.3: Settings-Overlay schließen, sonst versteckt es den
+	// Login-Empty-State darunter — User sähe noch Settings und würde
+	// in 401-Schleifen klicken.
+	const overlay = document.getElementById('mp-settings-overlay');
+	if (overlay) overlay.dataset.hidden = 'true';
+
 	toggle('current-header', false);
 	toggle('current-empty', true);
 	document.querySelector('.mp-tab[data-tab="briefing"]')?.click();
@@ -1070,7 +1104,13 @@ function initSettings() {
 	});
 }
 
+// Generation token gegen Race beim Schnell-Reopen oder bei internen
+// Re-Loads (CRUD-Handler rufen loadSettings selbst auf). Späte Response
+// einer abgelösten Pipeline darf das frische Render nicht überschreiben.
+let settingsGen = 0;
+
 async function loadSettings() {
+	const myGen = ++settingsGen;
 	try {
 		const [vip, red, autosort, subs] = await Promise.all([
 			api.settings.listVip(),
@@ -1078,11 +1118,18 @@ async function loadSettings() {
 			api.settings.listAutoSort(),
 			api.settings.listSubLabels(),
 		]);
+		if (myGen !== settingsGen) return;
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
 		renderList('red-list', red.items ?? [], (r) => `<code>${escape(r.pattern)}</code> — ${escape(r.description ?? '')}`, 'deleteRedaction');
 		renderSubLabels(subs.items ?? []);
 		renderAutoSortRules(autosort.rules ?? []);
 	} catch (err) {
+		// 401 darf nicht stumm im Overlay versanden — bounceToLogin
+		// schließt das Overlay (siehe Sprint 0.3-Fix) und führt den
+		// User zurück auf den Briefing-Empty-State.
+		if (err instanceof ApiError && err.status === 401) {
+			return bounceToLogin();
+		}
 		handleError(err);
 	}
 }

@@ -22,7 +22,11 @@ final class AutoSortRepository
 {
 	public const LABELS = ['direct', 'action', 'cc', 'newsletter', 'auto', 'noise'];
 
-	private const DEFAULT_FOLDER = [
+	// Hardcoded Fallback — die echten Defaults stehen seit Migration 0014
+	// in system_settings (folder_default.<label>) und werden vom optional
+	// injizierten SettingsRepository gelesen. Settings-Repo bleibt optional,
+	// damit Tests und Migrations-Setup ohne DI-Wiring laufen.
+	private const FALLBACK_FOLDER = [
 		'direct'     => 'MailPilot/Direct',
 		'action'     => 'MailPilot/Aktion',
 		'cc'         => 'MailPilot/CC',
@@ -31,8 +35,19 @@ final class AutoSortRepository
 		'noise'      => 'MailPilot/Noise',
 	];
 
-	public function __construct(private readonly PDO $db)
+	public function __construct(
+		private readonly PDO $db,
+		private readonly ?SettingsRepository $settings = null,
+	) {
+	}
+
+	private function defaultFolder(string $label): string
 	{
+		if ($this->settings !== null) {
+			$v = $this->settings->getString('folder_default.' . $label, '');
+			if ($v !== '') return $v;
+		}
+		return self::FALLBACK_FOLDER[$label] ?? 'MailPilot';
 	}
 
 	/**
@@ -68,7 +83,7 @@ final class AutoSortRepository
 					'label'       => $label,
 					'sub_label'   => null,
 					'enabled'     => false,
-					'folder_name' => self::DEFAULT_FOLDER[$label],
+					'folder_name' => $this->defaultFolder($label),
 					'folder_id'   => null,
 					'last_error'  => null,
 					'updated_at'  => '',
@@ -140,8 +155,8 @@ final class AutoSortRepository
 		$folderName = trim($folderName);
 		if ($folderName === '') {
 			$folderName = $subLabel === null
-				? self::DEFAULT_FOLDER[$label]
-				: self::DEFAULT_FOLDER[$label] . '/' . $subLabel;
+				? $this->defaultFolder($label)
+				: $this->defaultFolder($label) . '/' . $subLabel;
 		}
 
 		// MariaDB's UNIQUE on (tenant, user, label, sub_label) treats two

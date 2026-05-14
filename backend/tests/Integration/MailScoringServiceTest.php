@@ -49,6 +49,7 @@ final class MailScoringServiceTest extends TestCase
 			new SubLabelRepository($pdo),
 			new AutoSortRepository($pdo),
 			new PromptRepository($pdo),
+			new SettingsRepository($pdo),
 			20,
 			2048,
 			$this->logger(),

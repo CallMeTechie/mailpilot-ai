@@ -238,3 +238,22 @@ dd { margin: 0; }
 .pill-info { background: #dbeafe; color: #1e40af; }
 .pill-ok   { background: var(--success-bg); color: var(--success); }
 .error-text { font-size: 11px; cursor: help; word-break: break-word; }
+
+/* System-Settings page: long-text snippets vs. short tuning fields */
+.form-stack { display: flex; flex-direction: column; gap: 16px; }
+.settings-field { display: flex; flex-direction: column; gap: 4px; }
+.settings-key { font-size: 12px; color: var(--muted); }
+.settings-field input[type=text],
+.settings-field input[type=number],
+.settings-field textarea {
+	width: 100%; box-sizing: border-box;
+	padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+	background: var(--surface); font-size: 13px; font-family: inherit;
+}
+.settings-field textarea {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px; line-height: 1.45; resize: vertical;
+}
+.settings-field input:focus, .settings-field textarea:focus {
+	outline: 2px solid var(--primary); outline-offset: -1px;
+}

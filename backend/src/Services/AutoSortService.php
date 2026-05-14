@@ -5,6 +5,7 @@ namespace MailPilot\Services;
 
 use MailPilot\Graph\GraphClient;
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\SettingsRepository;
 use PDO;
 
 /**
@@ -28,6 +29,7 @@ final class AutoSortService
 		private readonly AutoSortRepository $rules,
 		private readonly PDO $db,
 		private readonly \Psr\Log\LoggerInterface $logger,
+		private readonly ?SettingsRepository $settings = null,
 	) {
 	}
 
@@ -145,6 +147,10 @@ final class AutoSortService
 			// skippen. Ohne Cap hat die Frontend-Schleife dieselbe Mail
 			// 40+ mal wiederversucht — siehe „2000 verarbeitet / 300
 			// Fehler"-Symptom.
+			// Retry-Cap aus Migration 0014, default 3.
+			$retryCap = $this->settings !== null
+				? max(1, $this->settings->getInt('autosort.retry_cap', 3))
+				: 3;
 			$this->db->prepare('UPDATE mail_scores
 				SET auto_sort_attempts = auto_sort_attempts + 1
 				WHERE mail_id = :m AND tenant_id = :t')
@@ -152,9 +158,9 @@ final class AutoSortService
 			$this->db->prepare('UPDATE mail_scores
 				SET auto_sorted_at = UTC_TIMESTAMP(3)
 				WHERE mail_id = :m AND tenant_id = :t
-				  AND auto_sort_attempts >= 3
+				  AND auto_sort_attempts >= :cap
 				  AND auto_sorted_at IS NULL')
-				->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				->execute([':m' => $mail['id'], ':t' => $tenantId, ':cap' => $retryCap]);
 
 			return ['moved' => false, 'reason' => 'graph_error'];
 		}

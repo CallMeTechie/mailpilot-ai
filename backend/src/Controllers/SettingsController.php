@@ -192,11 +192,13 @@ final class SettingsController extends BaseController
 		// die schon dreimal gescheitert sind — siehe AutoSortService.
 		$pdo = $this->kernel->get(\PDO::class);
 
+		$retryCap = max(1, $this->kernel->get(\MailPilot\Repositories\SettingsRepository::class)
+			->getInt('autosort.retry_cap', 3));
 		$where = "m.tenant_id = :t
 			AND m.deleted_at IS NULL
 			AND NOT (s.label IN ('direct','action') AND s.priority >= 4)
 			AND s.auto_sorted_at IS NULL
-			AND s.auto_sort_attempts < 3
+			AND s.auto_sort_attempts < {$retryCap}
 			AND EXISTS (
 				SELECT 1 FROM auto_sort_rules r
 				WHERE r.tenant_id = m.tenant_id

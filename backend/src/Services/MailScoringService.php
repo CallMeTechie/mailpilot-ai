@@ -10,6 +10,7 @@ use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\CacheRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Util\Uuid;
 
@@ -42,6 +43,7 @@ final class MailScoringService
 		private readonly SubLabelRepository $subLabels,
 		private readonly AutoSortRepository $autoSortRules,
 		private readonly PromptRepository $prompts,
+		private readonly SettingsRepository $settings,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
 		private readonly \Psr\Log\LoggerInterface $logger,
@@ -280,7 +282,7 @@ final class MailScoringService
 		if ($tenantId !== '' && $userId !== '') {
 			$recent = $this->corrections->recentForUser($tenantId, $userId, 10);
 			if ($recent !== []) {
-				$lines = ['', 'PRIOR_USER_CORRECTIONS (the human overruled the model — apply the same reasoning):'];
+				$lines = ['', $this->settings->getString('prompt.corrections_header', 'PRIOR_USER_CORRECTIONS:')];
 				foreach ($recent as $c) {
 					$from = substr($c['from_email'], 0, 60);
 					$subj = substr($c['subject'], 0, 60);
@@ -297,10 +299,17 @@ final class MailScoringService
 		}
 
 		// USER_SUBLABELS-Block (leer wenn Pool leer)
+		// Alle Wortlaute kommen aus system_settings (Phase C) — admin-
+		// editierbar, kein Code-Deploy nötig für Sprach- oder
+		// Strategie-Anpassungen.
 		$subLabelsBlock = '';
-		$schemaSubLabel = '"sub_label":"<a topic name OR null>","sub_label_is_new":true|false';
+		$schemaSubLabel = $this->settings->getString(
+			'prompt.schema_sublabel_with_pool',
+			'"sub_label":"<a topic name OR null>","sub_label_is_new":true|false',
+		);
 		if ($subLabelMap !== []) {
-			$lines = ['', 'USER_SUBLABELS (existing buckets; prefer these when the mail clearly fits one):'];
+			$header = $this->settings->getString('prompt.sublabels_header', 'USER_SUBLABELS:');
+			$lines = ['', $header];
 			foreach ($subLabelMap as $parent => $entries) {
 				foreach ($entries as $entry) {
 					$line = '- ' . $parent . ' / ' . $entry['name'];
@@ -311,17 +320,20 @@ final class MailScoringService
 				}
 			}
 			$subLabelsBlock = implode("\n", $lines) . "\n";
+		} else {
+			$schemaSubLabel = $this->settings->getString(
+				'prompt.schema_sublabel_empty_pool',
+				'"sub_label":null,"sub_label_is_new":false',
+			);
 		}
 
-		// Topic-Discovery-Note (Phase 6b) — immer eingesetzt, kann
-		// im Admin-Panel-Template aber per Weglassen des Platzhalters
-		// deaktiviert werden.
-		$discoveryNote = "\nTOPIC_DISCOVERY (Phase 6b):"
-			. "\n- If the mail clearly belongs to a recurring category that USER_SUBLABELS does NOT yet cover, you MAY propose a NEW short topic name (max 30 chars, Title Case, e.g. \"Stripe Payments\", \"GitHub CI\", \"Bestellung\")."
-			. "\n- Only propose a new topic when you can identify a clear recurring sender or pattern. Do NOT invent topics for one-off mails."
-			. "\n- Set \"sub_label_is_new\":true exactly when you propose a NEW topic that is NOT in USER_SUBLABELS."
-			. "\n- If a USER_SUBLABEL matches, return its existing name verbatim and set \"sub_label_is_new\":false."
-			. "\n- If neither fits (truly unique mail), return \"sub_label\":null and \"sub_label_is_new\":false.\n";
+		// Topic-Discovery-Note (Phase 6b) — admin-editierbar; \n-Tokens
+		// im DB-Wert werden hier zu echten Zeilenumbrüchen aufgelöst,
+		// da SQL-Editor keine echten Newlines im String-Literal hat.
+		$discoveryNote = "\n" . str_replace('\\n', "\n", $this->settings->getString(
+			'prompt.topic_discovery_note',
+			'TOPIC_DISCOVERY: propose new topics if no existing bucket fits.',
+		)) . "\n";
 
 		return str_replace([
 			'{{user_email}}',
@@ -467,9 +479,11 @@ final class MailScoringService
 			}
 
 			// 2b) Fuzzy-Merge gegen existing names (lowercase) — vermeidet
-			// "GitHub CI" + "GitHub Actions" + "CI Pipeline" Drift
+			// "GitHub CI" + "GitHub Actions" + "CI Pipeline" Drift.
+			// Schwelle aus Migration 0014, admin-editierbar.
+			$mergeMax = max(0, $this->settings->getInt('topics.fuzzy_merge_levenshtein_max', 3));
 			foreach ($names as $existing) {
-				if (levenshtein(strtolower($candidate), strtolower($existing)) <= 3) {
+				if (levenshtein(strtolower($candidate), strtolower($existing)) <= $mergeMax) {
 					$this->logger->info('topic.merged_to_existing', [
 						'proposed' => $candidate,
 						'matched'  => $existing,

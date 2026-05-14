@@ -14,10 +14,12 @@
 		<nav class="mp-tabs" role="tablist">
 			<button class="mp-tab is-active" data-tab="briefing" role="tab">Briefing</button>
 			<button class="mp-tab" data-tab="current" role="tab">Diese Mail</button>
-			<button class="mp-tab" data-tab="settings" role="tab">Einstellungen</button>
 		</nav>
 		<button class="mp-header-icon" id="btn-sync" aria-label="Jetzt aktualisieren" title="Jetzt aktualisieren">
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+		</button>
+		<button class="mp-header-icon" id="btn-open-settings" aria-label="Einstellungen öffnen" title="Einstellungen">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.13.66.36.88.66.22.3.34.66.34 1.03a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
 		</button>
 	</header>
 
@@ -211,105 +213,141 @@
 			</div>
 		</section>
 
-		<!-- ===================== SETTINGS ===================== -->
-		<section class="mp-panel" data-panel="settings">
-			<div class="mp-section">
-				<h2>VIP-Absender</h2>
-				<p class="mp-muted">Mails von diesen Adressen werden nie als Newsletter oder Noise klassifiziert.</p>
-				<div class="mp-field">
-					<input type="email" id="vip-email" placeholder="name@example.com">
-					<button class="mp-btn mp-btn-secondary" id="btn-add-vip">Hinzufügen</button>
-				</div>
-				<ul class="mp-list" id="vip-list"></ul>
-			</div>
-
-			<div class="mp-section">
-				<h2>Projekt-Stichworte</h2>
-				<p class="mp-muted">Mails, die diese Stichworte enthalten, werden prioritär behandelt.</p>
-				<div class="mp-field">
-					<input type="text" id="kw-input" placeholder="z. B. Ori:Dev, SocialPilot">
-					<button class="mp-btn mp-btn-secondary" id="btn-add-kw">Hinzufügen</button>
-				</div>
-				<ul class="mp-list" id="kw-list"></ul>
-			</div>
-
-			<div class="mp-section">
-				<h2>Redaktions-Regeln</h2>
-				<p class="mp-muted">Regex-Muster, die vor dem Versand an Claude aus Mail-Inhalten entfernt werden.</p>
-				<div class="mp-field">
-					<input type="text" id="red-pattern" placeholder="regex pattern">
-					<input type="text" id="red-desc" placeholder="Beschreibung">
-					<button class="mp-btn mp-btn-secondary" id="btn-add-red">Hinzufügen</button>
-				</div>
-				<ul class="mp-list" id="red-list"></ul>
-			</div>
-
-			<div class="mp-section">
-				<h2>Unter-Kategorien</h2>
-				<p class="mp-muted">Eigene Buckets unter den sechs Klassen. Die KI bekommt diese Liste mit und kann eine passende auswählen — z. B. <code>auto → GitHub CI</code> oder <code>auto → Bestellung</code>. Optional.</p>
-				<div class="mp-field mp-field-row">
-					<select id="sub-parent">
-						<option value="direct">Direkt</option>
-						<option value="action">Aktion</option>
-						<option value="cc">CC</option>
-						<option value="newsletter">Newsletter</option>
-						<option value="auto" selected>Auto</option>
-						<option value="noise">Noise</option>
-					</select>
-					<input type="text" id="sub-name" placeholder="z. B. GitHub CI" maxlength="50">
-					<input type="text" id="sub-desc" placeholder="Beschreibung (optional)" maxlength="200">
-					<button class="mp-btn mp-btn-secondary" id="btn-add-sub">Hinzufügen</button>
-				</div>
-				<ul class="mp-list" id="sub-list"></ul>
-			</div>
-
-			<div class="mp-section">
-				<h2>Auto-Sort</h2>
-				<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
-				<table class="mp-autosort-table" id="autosort-table">
-					<thead>
-						<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
-					</thead>
-					<tbody id="autosort-rows"><!-- catch-all-Zeilen, gefüllt durch initSettings() --></tbody>
-				</table>
-
-				<h3>Sub-Regeln</h3>
-				<p class="mp-muted">Genauere Routen für Unter-Kategorien — schlagen die Catch-all-Regel oben, wenn die KI diese Sub-Kategorie wählt.</p>
-				<table class="mp-autosort-table" id="autosort-sub-table">
-					<thead>
-						<tr><th>Label</th><th>Sub</th><th>Aktiv</th><th>Ordner</th><th></th></tr>
-					</thead>
-					<tbody id="autosort-sub-rows"><!-- gefüllt durch initSettings() --></tbody>
-				</table>
-				<div class="mp-field mp-field-row">
-					<select id="autosort-sub-pick" disabled>
-						<option value="">— Unter-Kategorie wählen —</option>
-					</select>
-					<input type="text" id="autosort-sub-folder" placeholder="MailPilot/Auto/CI">
-					<button class="mp-btn mp-btn-secondary" id="btn-add-autosort-sub" disabled>Sub-Regel hinzufügen</button>
-				</div>
-
-				<div class="mp-actions">
-					<button class="mp-btn mp-btn-primary" id="btn-save-autosort">Speichern</button>
-					<button class="mp-btn mp-btn-secondary" id="btn-apply-autosort-now">Regeln jetzt anwenden</button>
-				</div>
-				<p class="mp-muted" id="autosort-status"></p>
-			</div>
-
-			<div class="mp-section">
-				<h2>Wartung</h2>
-				<p class="mp-muted">Wenn du gerade neue Unter-Kategorien angelegt hast und alte Mails noch nicht passend einsortiert sind — hier den Re-Score erzwingen. Die KI bewertet alle nicht-korrigierten Mails neu mit deinem aktuellen Pool.</p>
-				<button class="mp-btn mp-btn-secondary" id="btn-rescore-all">Mails neu klassifizieren</button>
-				<p class="mp-muted" id="rescore-status"></p>
-			</div>
-
-			<div class="mp-section mp-danger">
-				<h2>Daten</h2>
-				<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
-				<button class="mp-btn mp-btn-danger" id="btn-delete">Account + alle Daten löschen</button>
-			</div>
-		</section>
 	</main>
+
+	<!-- ===================== SETTINGS OVERLAY (Sprint 0.3) =====================
+	     Tab aus der Bottom-Navigation entfernt: Settings öffnen jetzt über das
+	     Zahnrad-Icon im Header. Vollbild-Overlay mit fünf Sub-Tabs, geschlossen
+	     per X-Button oder Escape. Inhalte sind unverändert — nur neu gruppiert. -->
+	<div id="mp-settings-overlay" class="mp-settings-overlay" data-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mp-settings-title">
+		<header class="mp-settings-head">
+			<h2 id="mp-settings-title" class="mp-settings-title">Einstellungen</h2>
+			<button type="button" class="mp-header-icon" id="btn-close-settings" aria-label="Schließen" title="Schließen">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+			</button>
+		</header>
+
+		<nav class="mp-settings-subtabs" role="tablist">
+			<button class="mp-subtab is-active" data-subtab="profile"  role="tab">Profil &amp; Filter</button>
+			<button class="mp-subtab"           data-subtab="topics"   role="tab">Topics</button>
+			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
+			<button class="mp-subtab"           data-subtab="maint"    role="tab">Wartung</button>
+			<button class="mp-subtab"           data-subtab="data"     role="tab">Daten</button>
+		</nav>
+
+		<div class="mp-settings-content">
+			<!-- Profil & Filter: VIP, Stichworte, Redaktion -->
+			<section class="mp-subpanel is-active" data-subpanel="profile">
+				<div class="mp-section">
+					<h2>VIP-Absender</h2>
+					<p class="mp-muted">Mails von diesen Adressen werden nie als Newsletter oder Noise klassifiziert.</p>
+					<div class="mp-field">
+						<input type="email" id="vip-email" placeholder="name@example.com">
+						<button class="mp-btn mp-btn-secondary" id="btn-add-vip">Hinzufügen</button>
+					</div>
+					<ul class="mp-list" id="vip-list"></ul>
+				</div>
+
+				<div class="mp-section">
+					<h2>Projekt-Stichworte</h2>
+					<p class="mp-muted">Mails, die diese Stichworte enthalten, werden prioritär behandelt.</p>
+					<div class="mp-field">
+						<input type="text" id="kw-input" placeholder="z. B. Ori:Dev, SocialPilot">
+						<button class="mp-btn mp-btn-secondary" id="btn-add-kw">Hinzufügen</button>
+					</div>
+					<ul class="mp-list" id="kw-list"></ul>
+				</div>
+
+				<div class="mp-section">
+					<h2>Redaktions-Regeln</h2>
+					<p class="mp-muted">Regex-Muster, die vor dem Versand an Claude aus Mail-Inhalten entfernt werden.</p>
+					<div class="mp-field">
+						<input type="text" id="red-pattern" placeholder="regex pattern">
+						<input type="text" id="red-desc" placeholder="Beschreibung">
+						<button class="mp-btn mp-btn-secondary" id="btn-add-red">Hinzufügen</button>
+					</div>
+					<ul class="mp-list" id="red-list"></ul>
+				</div>
+			</section>
+
+			<!-- Topics: Unter-Kategorien -->
+			<section class="mp-subpanel" data-subpanel="topics">
+				<div class="mp-section">
+					<h2>Unter-Kategorien</h2>
+					<p class="mp-muted">Eigene Buckets unter den sechs Klassen. Die KI bekommt diese Liste mit und kann eine passende auswählen — z. B. <code>auto → GitHub CI</code> oder <code>auto → Bestellung</code>. Optional.</p>
+					<div class="mp-field mp-field-row">
+						<select id="sub-parent">
+							<option value="direct">Direkt</option>
+							<option value="action">Aktion</option>
+							<option value="cc">CC</option>
+							<option value="newsletter">Newsletter</option>
+							<option value="auto" selected>Auto</option>
+							<option value="noise">Noise</option>
+						</select>
+						<input type="text" id="sub-name" placeholder="z. B. GitHub CI" maxlength="50">
+						<input type="text" id="sub-desc" placeholder="Beschreibung (optional)" maxlength="200">
+						<button class="mp-btn mp-btn-secondary" id="btn-add-sub">Hinzufügen</button>
+					</div>
+					<ul class="mp-list" id="sub-list"></ul>
+				</div>
+			</section>
+
+			<!-- Auto-Sort: Catch-all + Sub-Regeln + Apply -->
+			<section class="mp-subpanel" data-subpanel="autosort">
+				<div class="mp-section">
+					<h2>Auto-Sort</h2>
+					<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
+					<table class="mp-autosort-table" id="autosort-table">
+						<thead>
+							<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
+						</thead>
+						<tbody id="autosort-rows"><!-- catch-all-Zeilen, gefüllt durch initSettings() --></tbody>
+					</table>
+
+					<h3>Sub-Regeln</h3>
+					<p class="mp-muted">Genauere Routen für Unter-Kategorien — schlagen die Catch-all-Regel oben, wenn die KI diese Sub-Kategorie wählt.</p>
+					<table class="mp-autosort-table" id="autosort-sub-table">
+						<thead>
+							<tr><th>Label</th><th>Sub</th><th>Aktiv</th><th>Ordner</th><th></th></tr>
+						</thead>
+						<tbody id="autosort-sub-rows"><!-- gefüllt durch initSettings() --></tbody>
+					</table>
+					<div class="mp-field mp-field-row">
+						<select id="autosort-sub-pick" disabled>
+							<option value="">— Unter-Kategorie wählen —</option>
+						</select>
+						<input type="text" id="autosort-sub-folder" placeholder="MailPilot/Auto/CI">
+						<button class="mp-btn mp-btn-secondary" id="btn-add-autosort-sub" disabled>Sub-Regel hinzufügen</button>
+					</div>
+
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary" id="btn-save-autosort">Speichern</button>
+						<button class="mp-btn mp-btn-secondary" id="btn-apply-autosort-now">Regeln jetzt anwenden</button>
+					</div>
+					<p class="mp-muted" id="autosort-status"></p>
+				</div>
+			</section>
+
+			<!-- Wartung: Re-Score -->
+			<section class="mp-subpanel" data-subpanel="maint">
+				<div class="mp-section">
+					<h2>Wartung</h2>
+					<p class="mp-muted">Wenn du gerade neue Unter-Kategorien angelegt hast und alte Mails noch nicht passend einsortiert sind — hier den Re-Score erzwingen. Die KI bewertet alle nicht-korrigierten Mails neu mit deinem aktuellen Pool.</p>
+					<button class="mp-btn mp-btn-secondary" id="btn-rescore-all">Mails neu klassifizieren</button>
+					<p class="mp-muted" id="rescore-status"></p>
+				</div>
+			</section>
+
+			<!-- Daten: Export + Account-Delete -->
+			<section class="mp-subpanel" data-subpanel="data">
+				<div class="mp-section mp-danger">
+					<h2>Daten</h2>
+					<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
+					<button class="mp-btn mp-btn-danger" id="btn-delete">Account + alle Daten löschen</button>
+				</div>
+			</section>
+		</div>
+	</div>
 
 	<footer class="mp-footer">
 		<span id="status-text" class="mp-muted">Bereit</span>
