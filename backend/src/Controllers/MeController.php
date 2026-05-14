@@ -117,8 +117,10 @@ final class MeController extends BaseController
 				FROM project_keywords WHERE user_id = :u AND deleted_at IS NULL', [':u' => $u]),
 			'redaction_rules'  => $fetch('SELECT pattern, description, enabled, created_at
 				FROM redaction_rules WHERE user_id = :u AND deleted_at IS NULL', [':u' => $u]),
-			'user_sublabels'   => $fetch('SELECT parent_label, name, description, created_by, created_at
-				FROM user_sublabels WHERE user_id = :u AND deleted_at IS NULL', [':u' => $u]),
+			// user_sublabels hat KEIN deleted_at (Schema 0009) und KEIN parent_label
+			// — die Spalte heißt 'parent'. Marc-Bug 2026-05-14.
+			'user_sublabels'   => $fetch('SELECT parent, name, description, created_by, created_at
+				FROM user_sublabels WHERE user_id = :u', [':u' => $u]),
 			'auto_sort_rules'  => $fetch('SELECT label, sub_label, folder_name, enabled, created_at
 				FROM auto_sort_rules WHERE user_id = :u', [':u' => $u]),
 			'mail_score_corrections' => $fetch('SELECT mail_id, original_label, corrected_label,
@@ -183,7 +185,9 @@ final class MeController extends BaseController
 			$pdo->prepare("UPDATE vip_senders            SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			$pdo->prepare("UPDATE project_keywords       SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			$pdo->prepare("UPDATE redaction_rules        SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
-			$pdo->prepare("UPDATE user_sublabels         SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
+			// user_sublabels hat KEIN deleted_at — Hard-DELETE statt Soft.
+			// FK ON DELETE CASCADE räumt verknüpfte auto_sort_rules ohnehin.
+			$pdo->prepare('DELETE FROM user_sublabels WHERE user_id = :u')->execute([':u' => $u]);
 			$pdo->prepare("UPDATE mail_score_corrections SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			$pdo->prepare("UPDATE auto_sort_corrections  SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			// auto_sort_rules hat kein deleted_at — Hard-Delete der Regeln ist

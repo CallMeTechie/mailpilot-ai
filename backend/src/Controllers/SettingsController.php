@@ -21,13 +21,25 @@ final class SettingsController extends BaseController
 	public function getUser(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();
-		$stmt = $this->kernel->get(\PDO::class)->prepare(
+		$pdo = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare(
 			'SELECT id, email, display_name, language, timezone, briefing_hour
 			 FROM users WHERE id = :id LIMIT 1'
 		);
 		$stmt->execute([':id' => $ctx['user_id']]);
 		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
-		Response::json($row === false ? [] : $row);
+		if ($row === false) {
+			Response::json([]);
+			return;
+		}
+		// project_keywords mitliefern, damit das Add-in die Liste beim
+		// Settings-Load anzeigen kann (Marc-Bug 2026-05-14: Add-in hatte
+		// HTML-Button + Input ohne Lade-Pfad).
+		$kw = $pdo->prepare('SELECT keyword FROM project_keywords
+			WHERE user_id = :u AND deleted_at IS NULL ORDER BY keyword');
+		$kw->execute([':u' => $ctx['user_id']]);
+		$row['project_keywords'] = array_map('strval', $kw->fetchAll(\PDO::FETCH_COLUMN));
+		Response::json($row);
 	}
 
 	public function updateUser(array $params, array $body): void

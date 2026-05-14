@@ -20,25 +20,25 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 
 		<label>
 			<span>Global pro Tag</span>
-			<input type="number" name="budget.global.daily_tokens" min="0" value="<?= $h($budgets['budget.global.daily_tokens']) ?>">
+			<input type="number" name="budget_global_daily_tokens" min="0" value="<?= $h($budgets['budget.global.daily_tokens']) ?>">
 			<small class="muted">System-weit, über alle Mandanten</small>
 		</label>
 
 		<label>
 			<span>Mandant pro Tag</span>
-			<input type="number" name="budget.tenant.daily_tokens" min="0" value="<?= $h($budgets['budget.tenant.daily_tokens']) ?>">
+			<input type="number" name="budget_tenant_daily_tokens" min="0" value="<?= $h($budgets['budget.tenant.daily_tokens']) ?>">
 			<small class="muted">Pro Mandant, Default-Wert</small>
 		</label>
 
 		<label>
 			<span>User pro Tag</span>
-			<input type="number" name="budget.user.daily_tokens" min="0" value="<?= $h($budgets['budget.user.daily_tokens']) ?>">
+			<input type="number" name="budget_user_daily_tokens" min="0" value="<?= $h($budgets['budget.user.daily_tokens']) ?>">
 			<small class="muted">Pro Benutzer, Default-Wert</small>
 		</label>
 
 		<label>
 			<span>Enforcement-Modus</span>
-			<select name="budget.enforcement_mode">
+			<select name="budget_enforcement_mode">
 				<?php $m = $budgets['budget.enforcement_mode']; ?>
 				<option value="enforce"  <?= $m === 'enforce'  ? 'selected' : '' ?>>enforce — blockiert bei Überschreitung</option>
 				<option value="log_only" <?= $m === 'log_only' ? 'selected' : '' ?>>log_only — nur loggen, kein Block</option>

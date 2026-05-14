@@ -14,6 +14,25 @@ use PDO;
  */
 final class BudgetController extends BaseController
 {
+	/**
+	 * Mapping HTML-Field-Name → system_settings-Key.
+	 *
+	 * Hintergrund: PHP wandelt Punkte in $_POST-Keys automatisch zu Unterstrichen
+	 * um ("budget.global.daily_tokens" → unerreichbar via $_POST). Wir nutzen
+	 * daher Form-seitig den Underscore-Namen und mappen hier auf den echten
+	 * Setting-Key. Marc-Bug 2026-05-14: bisher leerer audit_log + Werte nicht
+	 * gespeichert, weil isset($_POST['budget.global.daily_tokens']) immer false.
+	 *
+	 * @var array<string,string>
+	 */
+	private const BUDGET_FIELD_MAP = [
+		'budget_global_daily_tokens' => 'budget.global.daily_tokens',
+		'budget_tenant_daily_tokens' => 'budget.tenant.daily_tokens',
+		'budget_user_daily_tokens'   => 'budget.user.daily_tokens',
+		'budget_enforcement_mode'    => 'budget.enforcement_mode',
+	];
+
+	/** @var list<string> */
 	private const BUDGET_KEYS = [
 		'budget.global.daily_tokens',
 		'budget.tenant.daily_tokens',
@@ -49,22 +68,24 @@ final class BudgetController extends BaseController
 		$this->verifyCsrf();
 		$settings = $this->kernel->get(SettingsRepository::class);
 
-		foreach (self::BUDGET_KEYS as $k) {
-			if (!isset($_POST[$k])) continue;
-			$raw = trim((string)$_POST[$k]);
-			if ($k === 'budget.enforcement_mode') {
+		$applied = [];
+		foreach (self::BUDGET_FIELD_MAP as $field => $settingKey) {
+			if (!isset($_POST[$field])) continue;
+			$raw = trim((string)$_POST[$field]);
+			if ($settingKey === 'budget.enforcement_mode') {
 				$raw = in_array($raw, ['enforce', 'log_only'], true) ? $raw : 'enforce';
 			} else {
 				$raw = (string)max(0, (int)$raw);
 			}
-			$settings->set($k, $raw);
+			$settings->set($settingKey, $raw);
+			$applied[$settingKey] = $raw;
 		}
 
 		$this->kernel->get(PDO::class)
 			->prepare('INSERT INTO audit_log (event, entity, meta_json) VALUES ("admin.budget.update", "settings", :m)')
-			->execute([':m' => json_encode(array_intersect_key($_POST, array_flip(self::BUDGET_KEYS)))]);
+			->execute([':m' => json_encode($applied, JSON_UNESCAPED_UNICODE)]);
 
-		$this->flash('success', 'Budgets aktualisiert');
+		$this->flash('success', count($applied) . ' Budget-Einstellungen aktualisiert');
 		$this->redirect('/admin/settings/budgets');
 	}
 
@@ -76,17 +97,24 @@ final class BudgetController extends BaseController
 		$rows = $_POST['pricing'] ?? [];
 		if (!is_array($rows)) { $rows = []; }
 		$count = 0;
+		$applied = [];
 		foreach ($rows as $row) {
 			if (!is_array($row) || empty($row['model'])) continue;
-			$pricing->upsert(
-				(string)$row['model'],
-				(float)str_replace(',', '.', (string)($row['input']        ?? '0')),
-				(float)str_replace(',', '.', (string)($row['output']       ?? '0')),
-				$row['cache_read']     === '' || $row['cache_read']     === null ? null : (float)str_replace(',', '.', (string)$row['cache_read']),
-				$row['cache_creation'] === '' || $row['cache_creation'] === null ? null : (float)str_replace(',', '.', (string)$row['cache_creation']),
-			);
+			$model = (string)$row['model'];
+			$entry = [
+				'input'          => (float)str_replace(',', '.', (string)($row['input']        ?? '0')),
+				'output'         => (float)str_replace(',', '.', (string)($row['output']       ?? '0')),
+				'cache_read'     => $row['cache_read']     === '' || $row['cache_read']     === null ? null : (float)str_replace(',', '.', (string)$row['cache_read']),
+				'cache_creation' => $row['cache_creation'] === '' || $row['cache_creation'] === null ? null : (float)str_replace(',', '.', (string)$row['cache_creation']),
+			];
+			$pricing->upsert($model, $entry['input'], $entry['output'], $entry['cache_read'], $entry['cache_creation']);
+			$applied[$model] = $entry;
 			$count++;
 		}
+
+		$this->kernel->get(PDO::class)
+			->prepare('INSERT INTO audit_log (event, entity, meta_json) VALUES ("admin.pricing.update", "model_pricing", :m)')
+			->execute([':m' => json_encode($applied, JSON_UNESCAPED_UNICODE)]);
 
 		$this->flash('success', "{$count} Modell-Preise aktualisiert");
 		$this->redirect('/admin/settings/budgets');
@@ -99,13 +127,19 @@ final class BudgetController extends BaseController
 		$rows = $_POST['prompt_max_tokens'] ?? [];
 		if (!is_array($rows)) { $rows = []; }
 		$count = 0;
+		$applied = [];
 		$stmt = $pdo->prepare('UPDATE prompt_versions SET max_tokens = :mt WHERE id = :id');
 		foreach ($rows as $id => $mt) {
 			$mt = max(0, (int)$mt);
 			if ($mt === 0) continue;
 			$stmt->execute([':mt' => $mt, ':id' => (string)$id]);
+			$applied[(string)$id] = $mt;
 			$count++;
 		}
+
+		$pdo->prepare('INSERT INTO audit_log (event, entity, meta_json) VALUES ("admin.prompt_tokens.update", "prompt_versions", :m)')
+			->execute([':m' => json_encode($applied, JSON_UNESCAPED_UNICODE)]);
+
 		$this->flash('success', "{$count} Prompt-Tokenlimits aktualisiert");
 		$this->redirect('/admin/settings/budgets');
 	}

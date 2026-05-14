@@ -166,6 +166,9 @@ export const api = {
 	settings: {
 		getUser:       ()      => request('GET',  '/settings/user'),
 		updateUser:    (p)     => request('PATCH','/settings/user', p),
+		// project_keywords nutzt Replace-Pattern via updateUser — Backend
+		// ersetzt die ganze Liste auf jeden Call (siehe SettingsController.updateUser).
+		replaceKeywords: (list) => request('PATCH', '/settings/user', { project_keywords: list }),
 		listVip:       ()      => request('GET',  '/settings/vip'),
 		addVip:        (e, n)  => request('POST', '/settings/vip', { email: e, name: n }),
 		deleteVip:     (id)    => request('DELETE', `/settings/vip/${id}`),

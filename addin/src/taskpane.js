@@ -1243,6 +1243,43 @@ let autoSortRulesCache = [];
 // pro User zu zeigen.
 const aliasState = { local: [], privacyAck: null };
 
+// Projekt-Stichworte (Marc-Bug-Fix 2026-05-14). Replace-Pattern,
+// gespeichert via PATCH /settings/user mit project_keywords-Array.
+const keywordState = { local: [] };
+
+function renderKeywordChips() {
+	const ul = document.getElementById('kw-list');
+	if (!ul) return;
+	ul.innerHTML = '';
+	keywordState.local.forEach((kw, idx) => {
+		const li = document.createElement('li');
+		li.className = 'mp-chip';
+		li.textContent = kw;
+		const btn = document.createElement('button');
+		btn.className = 'mp-chip-remove';
+		btn.setAttribute('aria-label', `${kw} entfernen`);
+		btn.textContent = '×';
+		btn.addEventListener('click', () => {
+			persistKeywords(keywordState.local.filter((_, i) => i !== idx));
+		});
+		li.appendChild(btn);
+		ul.appendChild(li);
+	});
+}
+
+async function persistKeywords(next) {
+	const previous = [...keywordState.local];
+	try {
+		await api.settings.replaceKeywords(next);
+		keywordState.local = next;
+		renderKeywordChips();
+	} catch (err) {
+		keywordState.local = previous;
+		renderKeywordChips();
+		handleError(err);
+	}
+}
+
 function renderAliasChips() {
 	const ul = document.getElementById('alias-chips');
 	if (!ul) return;
@@ -1360,6 +1397,23 @@ function initSettings() {
 			document.getElementById('vip-email').value = '';
 			loadSettings();
 		} catch (err) { handleError(err); }
+	});
+
+	// Projekt-Stichworte (Marc-Bug 2026-05-14: bisher toter Code, kein
+	// Handler und kein API-Call). Replace-Pattern wie Aliases.
+	document.getElementById('btn-add-kw')?.addEventListener('click', async () => {
+		const inp = document.getElementById('kw-input');
+		const v = (inp?.value ?? '').trim();
+		if (!v) return;
+		const next = [...keywordState.local];
+		if (!next.some(k => k.toLowerCase() === v.toLowerCase())) {
+			next.push(v);
+		}
+		await persistKeywords(next);
+		if (inp) inp.value = '';
+	});
+	document.getElementById('kw-input')?.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-add-kw').click(); }
 	});
 
 	document.getElementById('btn-add-red').addEventListener('click', async () => {
@@ -1480,12 +1534,13 @@ let settingsGen = 0;
 async function loadSettings() {
 	const myGen = ++settingsGen;
 	try {
-		const [vip, red, autosort, subs, profile] = await Promise.all([
+		const [vip, red, autosort, subs, profile, userProfile] = await Promise.all([
 			api.settings.listVip(),
 			api.settings.listRedaction(),
 			api.settings.listAutoSort(),
 			api.settings.listSubLabels(),
 			api.me.profile(),
+			api.settings.getUser(),
 		]);
 		if (myGen !== settingsGen) return;
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
@@ -1498,6 +1553,12 @@ async function loadSettings() {
 		aliasState.local = Array.isArray(user.aliases) ? [...user.aliases] : [];
 		aliasState.privacyAck = user.privacy_acknowledged_at ?? null;
 		renderAliasChips();
+
+		// Marc-Bug-Fix 2026-05-14: Projekt-Stichworte aus /settings/user hydrieren.
+		keywordState.local = Array.isArray(userProfile?.project_keywords)
+			? [...userProfile.project_keywords]
+			: [];
+		renderKeywordChips();
 	} catch (err) {
 		// 401 darf nicht stumm im Overlay versanden — bounceToLogin
 		// schließt das Overlay (siehe Sprint 0.3-Fix) und führt den
