@@ -9,6 +9,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\RedactionRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
