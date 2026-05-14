@@ -42,8 +42,8 @@ final class TodayDashboardTest extends TestCase
 
 	public function testPerFieldStickyKeepsActionOwnerButRefreshesLabel(): void
 	{
-		[$tenantId] = $this->insertTenantAndUser();
-		$mailboxId = $this->insertMailbox($tenantId, Uuid::v4());
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
 		$mailId = $this->insertMail($tenantId, $mailboxId, ['from_email' => 'kunde@x.de']);
 
 		// Initial KI-Score

@@ -67,7 +67,13 @@ abstract class TestCase extends BaseTestCase
 			// 0007_mail_score_corrections — per-mail corrections
 			'mail_score_corrections',
 			// 0009_sub_labels — per-user free-form sub labels
-			'user_sublabels'];
+			'user_sublabels',
+			// 0018 + 0020: Sprint-6c/6d-Tabellen. FOREIGN_KEY_CHECKS=0
+			// während TRUNCATE verhindert ON-DELETE-CASCADE, also müssen
+			// wir die explizit wischen, sonst bleiben stale tenant_id-Rows
+			// und der nächste FK-Check beim Test-Insert/Update kracht.
+			'pending_actions',
+			'auto_sort_corrections'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}
