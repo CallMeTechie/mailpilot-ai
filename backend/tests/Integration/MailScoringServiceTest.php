@@ -420,11 +420,14 @@ final class MailScoringServiceTest extends TestCase
 		$this->assertSame('auto', $subs[0]['parent']);
 		$this->assertSame('ki', $subs[0]['created_by']);
 
-		// auto_sort_rules: passende Sub-Rule angelegt
+		// auto_sort_rules: passende Sub-Rule angelegt — Sprint 6b: disabled
+		// + created_by='ki' (User muss in den Settings erst aktivieren).
+		// Vorher (Mini-6b) war enabled=true; PRD §3.1 fordert „kein silent
+		// retroactive move", also disabled bis Approve.
 		$rule = (new AutoSortRepository($this->pdo()))
 			->findRule($tenantId, $userId, 'auto', 'Stripe Payments');
 		$this->assertNotNull($rule);
-		$this->assertTrue($rule['enabled']);
+		$this->assertFalse($rule['enabled'], 'KI-Discovery erzeugt disabled Rule (Sprint 6b)');
 		$this->assertStringContainsString('Stripe Payments', $rule['folder_name']);
 	}
 
