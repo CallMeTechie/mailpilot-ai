@@ -29,6 +29,13 @@ final class FakeGraphClient extends GraphClient
 	private ?\Throwable $nextEnsureError = null;
 	private ?\Throwable $nextMoveError   = null;
 
+	/** @var array<string, array{id:string,displayName:string,parentFolderId:?string}> folder_id → folder-meta */
+	public array $folderMeta = [];
+	/** @var array<string, \Throwable> folder_id → Throwable (für 503-/throttle-Tests) */
+	public array $folderErrors = [];
+	/** @var list<string> abgefragte folder_ids */
+	public array $getFolderCalls = [];
+
 	public function __construct()
 	{
 		parent::__construct('fake-client', 'fake-secret', 'https://fake/cb', 'common', 'Mail.Read', new NullLogger());
@@ -76,5 +83,26 @@ final class FakeGraphClient extends GraphClient
 			$this->nextMoveError = null;
 			throw $e;
 		}
+	}
+
+	public function scriptFolderMeta(string $folderId, string $displayName, ?string $parentFolderId = null): void
+	{
+		$this->folderMeta[$folderId] = [
+			'id' => $folderId, 'displayName' => $displayName, 'parentFolderId' => $parentFolderId,
+		];
+	}
+
+	public function scriptFolderError(string $folderId, \Throwable $e): void
+	{
+		$this->folderErrors[$folderId] = $e;
+	}
+
+	public function getFolder(string $accessToken, string $folderId): ?array
+	{
+		$this->getFolderCalls[] = $folderId;
+		if (isset($this->folderErrors[$folderId])) {
+			throw $this->folderErrors[$folderId];
+		}
+		return $this->folderMeta[$folderId] ?? null;
 	}
 }

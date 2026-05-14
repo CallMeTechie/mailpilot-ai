@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace MailPilot\Controllers;
 
+use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
+use MailPilot\Repositories\AutoSortCorrectionRepository;
 use MailPilot\Repositories\UserRepository;
 
 /**
@@ -33,6 +35,7 @@ final class MeController extends BaseController
 			'redaction_rules',
 			'user_sublabels',
 			'auto_sort_rules',
+			'auto_sort_corrections',
 			'mail_score_corrections',
 			'mail_scores',
 			'mail_summaries',
@@ -61,6 +64,7 @@ final class MeController extends BaseController
 			'redaction_rules',
 			'user_sublabels',
 			'auto_sort_rules',
+			'auto_sort_corrections',
 			'mail_score_corrections',
 			'api_usage',
 			'usage_daily',
@@ -120,6 +124,11 @@ final class MeController extends BaseController
 			'mail_score_corrections' => $fetch('SELECT mail_id, original_label, corrected_label,
 					user_reason, created_at
 				FROM mail_score_corrections WHERE user_id = :u AND deleted_at IS NULL', [':u' => $u]),
+			'auto_sort_corrections' => $fetch('SELECT mail_id, original_folder_path, corrected_folder_path,
+					original_sub_label, suggested_sub_label, user_reason,
+					stabilized_at, created_at
+				FROM auto_sort_corrections WHERE user_id = :u AND deleted_at IS NULL
+				ORDER BY created_at DESC LIMIT 500', [':u' => $u]),
 			'mail_scores_last_30d' => $fetch('SELECT m.subject, m.from_email, m.received_at,
 					s.label, s.sub_label, s.action_required, s.action_owner, s.action_owner_confidence,
 					s.priority, s.summary, s.scored_at
@@ -176,6 +185,7 @@ final class MeController extends BaseController
 			$pdo->prepare("UPDATE redaction_rules        SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			$pdo->prepare("UPDATE user_sublabels         SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			$pdo->prepare("UPDATE mail_score_corrections SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
+			$pdo->prepare("UPDATE auto_sort_corrections  SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 			// auto_sort_rules hat kein deleted_at — Hard-Delete der Regeln ist
 			// OK, weil keine fremden FKs daran hängen und der User die Regeln
 			// jederzeit neu anlegen kann.
@@ -308,6 +318,41 @@ final class MeController extends BaseController
 	{
 		$ctx = $this->requireAuth();
 		$this->kernel->get(UserRepository::class)->acknowledgePrivacy($ctx['user_id']);
+		Response::json(['ok' => true]);
+	}
+
+	/**
+	 * Sprint 6d (DA-Impl Finding 1) — POST /api/v1/me/auto-sort-corrections/{id}/reason
+	 *
+	 * Setzt user_reason für eine bestehende Move-Korrektur. Reasons können
+	 * Namen Dritter enthalten („Klaus war eingeladen") → PRD §10.3 Privacy-
+	 * Disclaimer muss vor dem ersten Save akzeptiert worden sein. Wenn
+	 * users.privacy_acknowledged_at IS NULL → HTTP 412 PRECONDITION_FAILED.
+	 *
+	 * Body: { "reason": "max 500 chars" }
+	 */
+	public function setCorrectionReason(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$id  = (string)($params['id'] ?? '');
+		$reason = trim((string)($body['reason'] ?? ''));
+		if ($reason === '') {
+			throw HttpException::badRequest('REASON_EMPTY', 'reason darf nicht leer sein');
+		}
+
+		// Privacy-Gate: User muss den DSGVO-Disclaimer einmal akzeptiert
+		// haben, bevor er Texte mit Namen Dritter speichern darf.
+		$user = $this->kernel->get(UserRepository::class)->findById($ctx['user_id']);
+		if ($user === null || ($user['privacy_acknowledged_at'] ?? null) === null) {
+			throw HttpException::preconditionFailed('PRIVACY_NOT_ACKNOWLEDGED',
+				'Bitte erst den Datenschutz-Hinweis akzeptieren (POST /me/privacy-acknowledge)');
+		}
+
+		$ok = $this->kernel->get(AutoSortCorrectionRepository::class)
+			->setUserReason($ctx['tenant_id'], $ctx['user_id'], $id, $reason);
+		if (!$ok) {
+			throw HttpException::notFound('CORRECTION_NOT_FOUND', 'Korrektur nicht gefunden');
+		}
 		Response::json(['ok' => true]);
 	}
 }

@@ -22,12 +22,14 @@ require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/wait_for_db.php';
 
 use MailPilot\Http\Kernel;
+use MailPilot\Repositories\AutoSortCorrectionRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\JwtService;
+use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\SyncService;
 
 $config = require __DIR__ . '/../config/config.php';
@@ -103,19 +105,36 @@ while (true) {
 
 			$purgedUsage = $kernel->get(UsageRepository::class)->purgeOlderThan(30);
 
-			// Sprint 6c: Pending-Age-Out (PRD §6c). created_under_mode wird
-			// vom Caller (UI/Service) honored — wir markieren hier nur die
-			// alten als aged_out. Schwelle aus system_settings, min. 7 Tage.
+			// Sprint 6c: Pending-Age-Out (PRD §6c).
 			$pendingRetention = max(7,
 				$kernel->get(SettingsRepository::class)->getInt('pending.retention_days', 30));
 			$agedOutPending = $kernel->get(PendingActionRepository::class)->ageOut($pendingRetention);
 
+			// Sprint 6d: Move-Korrekturen reifen lassen + alte purgen.
+			$settings = $kernel->get(SettingsRepository::class);
+			$quietMin    = max(5,  $settings->getInt('autosort.correction_quiet_window_minutes', 60));
+			$corrRetDays = max(7,  $settings->getInt('autosort.correction_retention_days', 90));
+			$promoted = $kernel->get(AutoSortCorrectionRepository::class)->promoteStable($quietMin);
+			$purgedCorrs = $kernel->get(AutoSortCorrectionRepository::class)->purgeOlderThan($corrRetDays);
+
+			// Sprint 6d: Folder-Reconciliation (PRD §9). Best-Effort —
+			// Graph-Fehler im Loop laufen pro Rule, brechen nicht alles.
+			$reconStats = ['processed' => 0, 'drift' => 0, 'gone' => 0, 'errors' => 0, 'first_touch' => 0, 'unchanged' => 0];
+			try {
+				$reconStats = $kernel->get(ReconciliationService::class)->reconcileAll();
+			} catch (\Throwable $e) {
+				$log->warning('worker.reconciliation_failed', ['err' => $e->getMessage()]);
+			}
+
 			$log->info('worker.housekeeping', [
-				'bodies'        => $purgedBodies,
-				'oauth_states'  => $purgedStates,
-				'jwt_blacklist' => $purgedBlacklist,
-				'api_usage'     => $purgedUsage,
-				'pending_aged'  => $agedOutPending,
+				'bodies'             => $purgedBodies,
+				'oauth_states'       => $purgedStates,
+				'jwt_blacklist'      => $purgedBlacklist,
+				'api_usage'          => $purgedUsage,
+				'pending_aged'       => $agedOutPending,
+				'corrections_stable' => $promoted,
+				'corrections_purged' => $purgedCorrs,
+				'reconciliation'     => $reconStats,
 			]);
 			$lastHousekeepingDay = $today;
 		}

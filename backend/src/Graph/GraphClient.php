@@ -171,6 +171,32 @@ class GraphClient
 		$this->postJson($accessToken, $url, ['destinationId' => $folderId]);
 	}
 
+	/**
+	 * Sprint 6d — liest eine einzelne MailFolder-Row aus Graph. Returns
+	 * null bei 404 (Folder wurde gelöscht). ReconciliationService nutzt
+	 * displayName + parentFolderId für die Drift-Erkennung.
+	 *
+	 * @return array{id:string, displayName:string, parentFolderId:?string}|null
+	 */
+	public function getFolder(string $accessToken, string $folderId): ?array
+	{
+		$url = self::GRAPH_BASE . '/me/mailFolders/' . rawurlencode($folderId)
+			. '?$select=id,displayName,parentFolderId';
+		try {
+			$res = $this->get($accessToken, $url);
+		} catch (\Throwable $e) {
+			if (preg_match('/\b404\b|ErrorFolderNotFound/i', $e->getMessage())) {
+				return null;
+			}
+			throw $e;
+		}
+		return [
+			'id'             => (string)($res['id'] ?? $folderId),
+			'displayName'    => (string)($res['displayName'] ?? ''),
+			'parentFolderId' => isset($res['parentFolderId']) ? (string)$res['parentFolderId'] : null,
+		];
+	}
+
 	public function deleteMessage(string $accessToken, string $messageId): void
 	{
 		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId);

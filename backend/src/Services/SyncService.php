@@ -37,6 +37,9 @@ final class SyncService
 		private readonly TokenService $tokens,
 		private readonly AutoSortService $autoSort,
 		private readonly \Psr\Log\LoggerInterface $logger,
+		// Sprint 6d: optional, damit Tests ohne Wiring laufen. Wenn null,
+		// wird die Move-Detection still übersprungen.
+		private readonly ?MoveDetectionService $moveDetection = null,
 	) {
 	}
 
@@ -71,6 +74,12 @@ final class SyncService
 			if ($this->isTombstone($msg)) {
 				continue;
 			}
+			// Sprint 6d: Move-Detection läuft VOR dem Upsert — sonst
+			// wäre der "alte" DB-Wert schon überschrieben und der Vergleich
+			// liefe leer. userId kommt aus dem $userProfile.
+			$this->moveDetection?->evaluate(
+				$tenantId, $mailboxId, (string)($userProfile['user_id'] ?? ''), $msg,
+			);
 			$this->mails->upsertFromGraph($tenantId, $mailboxId, $msg);
 			$processed++;
 		}

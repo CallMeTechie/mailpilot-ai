@@ -73,4 +73,7 @@ $router->post('/api/v1/pending/{id}/reject',         'PendingController@reject')
 $router->get ('/api/v1/settings/modes',              'SettingsController@getModes');
 $router->post('/api/v1/settings/modes',              'SettingsController@saveModes');
 
+// Sprint 6d — Reason-Capture für Move-Korrekturen (Privacy-gated)
+$router->post('/api/v1/me/auto-sort-corrections/{id}/reason', 'MeController@setCorrectionReason');
+
 $router->dispatch();

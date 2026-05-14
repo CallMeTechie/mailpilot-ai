@@ -116,15 +116,23 @@ final class MailRepository
 			? gmdate('Y-m-d H:i:s.000', strtotime((string)$msg['receivedDateTime']))
 			: gmdate('Y-m-d H:i:s.000');
 
+		// Sprint 6d Move-Detection: parent_folder_id ist Graph's
+		// parentFolderId-Pointer. Bei jedem Sync wird er aktualisiert;
+		// MoveDetectionService vergleicht den ALTEN DB-Wert gegen den
+		// NEUEN Graph-Wert (via SyncService-Hook vor dem Upsert).
+		$parentFolderId = (string)($msg['parentFolderId'] ?? '');
+		$parentFolderId = $parentFolderId !== '' ? $parentFolderId : null;
+
 		$sql = 'INSERT INTO mails
-			(id, tenant_id, mailbox_id, ms_message_id, conversation_id, internet_msg_id,
+			(id, tenant_id, mailbox_id, parent_folder_id, ms_message_id, conversation_id, internet_msg_id,
 			 from_email, from_name, to_json, cc_json, subject, body_preview, body_text,
 			 has_attachment, is_reply, list_unsubscribe, received_at)
 			VALUES
-			(:id, :t, :mb, :msid, :cid, :imid,
+			(:id, :t, :mb, :pf, :msid, :cid, :imid,
 			 :fe, :fn, :toj, :ccj, :sub, :prev, :body,
 			 :att, :rep, :lu, :rcv)
 			ON DUPLICATE KEY UPDATE
+				parent_folder_id = VALUES(parent_folder_id),
 				subject = VALUES(subject),
 				body_preview = VALUES(body_preview),
 				body_text = VALUES(body_text),
@@ -136,6 +144,7 @@ final class MailRepository
 			':id'   => $id,
 			':t'    => $tenantId,
 			':mb'   => $mailboxId,
+			':pf'   => $parentFolderId,
 			':msid' => (string)($msg['id'] ?? ''),
 			':cid'  => (string)($msg['conversationId'] ?? ''),
 			':imid' => (string)($msg['internetMessageId'] ?? ''),
@@ -152,6 +161,28 @@ final class MailRepository
 			':rcv'  => $receivedAt,
 		]);
 		return $id;
+	}
+
+	/**
+	 * Sprint 6d — liefert (mail_id, parent_folder_id) der zuletzt
+	 * gespeicherten Version, damit der MoveDetectionService den
+	 * VOR-Sync-Stand vor dem Upsert lesen kann. Mail-ID-Lookup via
+	 * (tenant, mailbox, ms_message_id) wie UNIQUE-Key.
+	 *
+	 * @return array{id:string, parent_folder_id:?string}|null
+	 */
+	public function findIdAndParentByMsId(string $tenantId, string $mailboxId, string $msMessageId): ?array
+	{
+		$stmt = $this->db->prepare('SELECT id, parent_folder_id FROM mails
+			WHERE tenant_id = :t AND mailbox_id = :mb AND ms_message_id = :ms
+			LIMIT 1');
+		$stmt->execute([':t' => $tenantId, ':mb' => $mailboxId, ':ms' => $msMessageId]);
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+		if ($row === false) return null;
+		return [
+			'id' => (string)$row['id'],
+			'parent_folder_id' => $row['parent_folder_id'] !== null ? (string)$row['parent_folder_id'] : null,
+		];
 	}
 
 	/**

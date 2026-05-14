@@ -7,6 +7,7 @@ use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Claude\ProviderFactory;
 use MailPilot\Graph\GraphClient;
+use MailPilot\Repositories\AutoSortCorrectionRepository;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
@@ -29,7 +30,9 @@ use MailPilot\Services\BudgetService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
+use MailPilot\Services\MoveDetectionService;
 use MailPilot\Services\RedactionService;
+use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
 use MailPilot\Services\SyncService;
 use MailPilot\Services\TokenService;
@@ -110,6 +113,23 @@ class Kernel
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
+			AutoSortCorrectionRepository::class => new AutoSortCorrectionRepository($this->get(PDO::class)),
+			MoveDetectionService::class => new MoveDetectionService(
+				$this->get(MailRepository::class),
+				$this->get(ScoreRepository::class),
+				$this->get(AutoSortRepository::class),
+				$this->get(AutoSortCorrectionRepository::class),
+				$this->get(PDO::class),
+				$this->get(Logger::class),
+			),
+			ReconciliationService::class => new ReconciliationService(
+				$this->get(PDO::class),
+				$this->get(GraphClient::class),
+				$this->get(TokenService::class),
+				$this->get(MailboxRepository::class),
+				$this->get(SettingsRepository::class),
+				$this->get(Logger::class),
+			),
 			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
 			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
 			BudgetService::class      => new BudgetService(
@@ -181,6 +201,7 @@ class Kernel
 				$this->get(TokenService::class),
 				$this->get(AutoSortService::class),
 				$this->get(Logger::class),
+				$this->get(MoveDetectionService::class),
 			),
 			default => throw new \RuntimeException("No factory for service: {$id}"),
 		};
