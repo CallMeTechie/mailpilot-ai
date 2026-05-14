@@ -159,10 +159,31 @@ final class AutoSortService
 			// — der „Öffnen"-Button im Heute-Tab wäre für jede gesortete
 			// Mail tot.
 			if ($newMsId !== null && $newMsId !== $msMessageId) {
-				$this->db->prepare('UPDATE mails
-					SET ms_message_id = :new
-					WHERE id = :id AND tenant_id = :t')
-					->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
+				try {
+					$this->db->prepare('UPDATE mails
+						SET ms_message_id = :new
+						WHERE id = :id AND tenant_id = :t')
+						->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
+				} catch (\PDOException $e) {
+					// SQLSTATE 23000 / 1062 = uq_mail-Verstoss: ein paralleler
+					// Sync hat die Mail mit der neuen ID bereits als eigene
+					// Row geupserted. Die NEUE Row ist korrekt; wir markieren
+					// die alte Row als gelöscht, damit nichts doppelt im UI
+					// auftaucht. Move in Outlook ist trotzdem schon passiert.
+					if ($e->getCode() === '23000') {
+						$this->db->prepare('UPDATE mails
+							SET deleted_at = UTC_TIMESTAMP(3)
+							WHERE id = :id AND tenant_id = :t AND deleted_at IS NULL')
+							->execute([':id' => $mail['id'], ':t' => $tenantId]);
+						$this->logger->info('autosort.id_refresh_conflict_resolved', [
+							'mail_id' => $mail['id'],
+							'old_ms_id' => substr($msMessageId, 0, 20) . '...',
+							'new_ms_id' => substr($newMsId, 0, 20) . '...',
+						]);
+					} else {
+						throw $e;
+					}
+				}
 			}
 			// Mark so the background backfill query doesn't try to
 			// move it again on the next sweep. cleared_at (Sprint 6e
