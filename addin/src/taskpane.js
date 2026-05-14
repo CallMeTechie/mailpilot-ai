@@ -222,6 +222,9 @@ function initTabs() {
 				// Always refresh when the user opens the briefing tab — the
 				// counts can change anytime as the worker keeps scoring.
 				loadBriefing();
+				// Refresh pending badge silently so the count is current
+				// even when the user never opens the pending tab itself.
+				loadPending().catch(() => { /* badge stays stale, harmless */ });
 			}
 			if (name === 'today') {
 				loadToday();
@@ -229,6 +232,9 @@ function initTabs() {
 			if (name === 'current') {
 				// Re-evaluate the currently-open mail when user opens this tab.
 				onItemChanged();
+			}
+			if (name === 'pending') {
+				loadPending();
 			}
 		});
 	});
@@ -375,7 +381,6 @@ function initSettingsOverlay() {
 
 			// Sprint 6c: Lazy-Load der Tab-Daten beim Wechsel.
 			if (name === 'modes')   loadModes();
-			if (name === 'pending') loadPending();
 		});
 	});
 
@@ -833,6 +838,8 @@ function startAutoRefresh() {
 		if (activeTab !== 'briefing') return;
 		if (!localStorage.getItem('mp_jwt')) return;
 		loadBriefing();
+		// Keep the pending-tab badge fresh while the user is on briefing.
+		loadPending().catch(() => { /* silent */ });
 	}, 60 * 1000);
 }
 

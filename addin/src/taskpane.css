@@ -97,6 +97,10 @@ input:focus, textarea:focus {
 	display: flex;
 	align-items: center;
 	gap: var(--mp-sp-2);
+	/* Container-Query-Anchor: erlaubt der Tab-Bar, sich anhand der
+	   eigenen Breite (= Task-Pane-Breite) auf Icon-only zu schrumpfen,
+	   unabhängig vom Outlook-Fenster-Viewport. */
+	container-type: inline-size;
 }
 
 .mp-tabs {
@@ -122,9 +126,13 @@ input:focus, textarea:focus {
 .mp-header-icon:hover { background: var(--mp-surface-hover); color: var(--mp-text); }
 .mp-header-icon.is-spinning svg { animation: mp-spin 800ms linear infinite; }
 .mp-tab {
+	position: relative;
 	flex: 1;
-	padding: 6px var(--mp-sp-3);
-	font-size: 13px; font-weight: 500;
+	min-width: 0;
+	display: inline-flex; align-items: center; justify-content: center;
+	gap: 4px;
+	padding: 6px var(--mp-sp-2);
+	font-size: 12px; font-weight: 500;
 	color: var(--mp-text-muted);
 	border-radius: var(--mp-radius-sm);
 	transition: all 0.15s ease;
@@ -134,6 +142,35 @@ input:focus, textarea:focus {
 	background: var(--mp-surface);
 	color: var(--mp-text);
 	box-shadow: var(--mp-shadow-sm);
+}
+
+.mp-tab-icon {
+	width: 14px; height: 14px;
+	flex-shrink: 0;
+}
+.mp-tab-label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mp-tab-badge {
+	background: var(--mp-danger, #dc2626);
+	color: #fff;
+	font-size: 10px; font-weight: 700;
+	padding: 1px 5px;
+	border-radius: 9px;
+	min-width: 14px;
+	text-align: center;
+	line-height: 1.2;
+}
+.mp-tab-badge[data-hidden="true"] { display: none; }
+
+/* Schmaler Modus: nur Icons. Tooltip via `title=""` deckt die Bedeutung
+   ab. Schwellwert 340px deckt die typische Task-Pane-Default-Breite
+   in Outlook Desktop (320px) und Web (350-360px) ab. */
+@container (max-width: 340px) {
+	.mp-tab-label { display: none; }
+	.mp-tab { padding: 6px; }
 }
 
 .mp-main {
