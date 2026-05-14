@@ -1319,11 +1319,16 @@ function renderAliasSuggestions(list) {
 	list.forEach((s) => {
 		const li = document.createElement('li');
 		li.className = 'mp-chip mp-chip-suggest';
-		li.textContent = `${s.name} · ${s.count}×`;
+		// Plus-Icon vor dem Namen macht klar, dass Klick = Hinzufügen
+		// (Marc-UX-Hinweis 2026-05-14: Bisher war nicht erkennbar, dass
+		//  die Vorschläge erst durch Klick übernommen werden).
+		li.textContent = `+ ${s.name} · ${s.count}×`;
+		li.title = `Klick übernimmt „${s.name}" in die Alias-Liste`;
 		li.addEventListener('click', () => {
 			if (!aliasState.local.some(a => a.toLowerCase() === s.name.toLowerCase())
 				&& aliasState.local.length < 30) {
 				persistAliases([...aliasState.local, s.name]);
+				setStatus(`„${s.name}" als Alias übernommen.`);
 			}
 			li.remove();
 		});
