@@ -109,7 +109,7 @@ final class TodayController extends BaseController
 	 */
 	private function fetchSection(PDO $pdo, string $tenantId, string $userId, string $where, string $sinceClause, ?string $afterMailId): array
 	{
-		$sql = "SELECT m.id AS mail_id, m.subject, m.from_email, m.from_name,
+		$sql = "SELECT m.id AS mail_id, m.ms_message_id, m.subject, m.from_email, m.from_name,
 				m.received_at,
 				s.label, s.sub_label, s.priority, s.action_required,
 				s.action_owner, s.action_owner_confidence, s.action_owner_source,

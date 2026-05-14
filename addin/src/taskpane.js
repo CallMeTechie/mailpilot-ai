@@ -326,7 +326,12 @@ function buildTodayCard(item, section) {
 	const open = document.createElement('button');
 	open.className = 'mp-btn mp-btn-ghost';
 	open.textContent = 'Öffnen';
-	open.addEventListener('click', () => openMailInCurrentTab(item.mail_id));
+	// Marc-Bug-Fix 2026-05-14: Heute-Tab nutzt jetzt die echte Office.js-
+	// API zum Öffnen einer anderen Mail (wie Briefing-Top-Priority), statt
+	// nur den Tab zu wechseln. ms_message_id ist die REST-ID die
+	// displayMessageFormAsync erwartet; bei stale-Payload mit UUID gibt
+	// openMailInOutlook einen erklärenden Toast.
+	open.addEventListener('click', () => openMailInOutlook(item.ms_message_id || item.mail_id));
 	actions.appendChild(open);
 	li.appendChild(actions);
 
@@ -339,14 +344,6 @@ async function correctOwnerInline(mailId, owner, cardEl) {
 		cardEl?.remove();
 		setStatus('Owner-Korrektur gespeichert.');
 	} catch (err) { handleError(err); }
-}
-
-function openMailInCurrentTab(mailId) {
-	// Schaltet auf den „Diese Mail"-Tab um. Wir können nicht direkt aus
-	// dem Add-in heraus eine andere Mail in Outlook öffnen — der User
-	// muss sie im Outlook-Hauptfenster anwählen. Wir geben den Hinweis.
-	document.querySelector('.mp-tab[data-tab="current"]')?.click();
-	setStatus('Wähle die Mail in Outlook aus, dann erscheint sie hier.');
 }
 
 // Sprint 0.3: Settings sind nicht mehr Tab, sondern Vollbild-Overlay,
@@ -2356,6 +2353,28 @@ function labelText(label) {
 	}[label] ?? '—';
 }
 
+/**
+ * Öffnet eine Mail in Outlook (separates Lese-Fenster).
+ *
+ * Office.js erwartet eine REST-ID (AAMk...) oder EWS-ID, je nach Outlook-
+ * Build. Unsere ms_message_id ist die REST-ID. Wenn der Parameter
+ * unbrauchbar ist (alte Payload mit interner UUID, oder Mail wurde
+ * gelöscht), failed displayMessageFormAsync silent — daher Callback
+ * + Toast, sonst denkt der User „Button macht nichts".
+ */
 function openMailInOutlook(mailId) {
-	Office.context.mailbox.displayMessageFormAsync?.(mailId);
+	if (!mailId || typeof mailId !== 'string' || !mailId.startsWith('AAMk')) {
+		setStatus('Mail-ID nicht verfügbar — vielleicht zu alt oder noch nicht synchronisiert.');
+		return;
+	}
+	const api = Office?.context?.mailbox?.displayMessageFormAsync;
+	if (typeof api !== 'function') {
+		setStatus('Dieser Outlook-Build kann externe Mails nicht öffnen. Bitte direkt in Outlook anklicken.');
+		return;
+	}
+	api.call(Office.context.mailbox, mailId, (res) => {
+		if (res?.status === Office.AsyncResultStatus?.Failed) {
+			setStatus(`Konnte Mail nicht öffnen: ${res.error?.message || 'unbekannt'}`);
+		}
+	});
 }
