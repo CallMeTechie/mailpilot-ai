@@ -73,8 +73,13 @@ final class ActionOwnerTest extends TestCase
 			->execute([':id' => $userId, ':e' => 'marc@example.de']);
 		$this->pdo()->prepare('INSERT INTO tenant_user (tenant_id, user_id, role) VALUES (:t, :u, "owner")')
 			->execute([':t' => $tenantId, ':u' => $userId]);
-		$this->pdo()->prepare('INSERT INTO mailboxes (id, tenant_id, user_id, ms_user_id, ms_tenant_id, email)
-			VALUES (:id, :t, :u, "msuser", "mstenant", "marc@example.de")')
+		// mailboxes.refresh_token_enc / .scopes sind NOT NULL ohne Default —
+		// für Tests reichen Dummy-Bytes bzw. ein leerer Scope-String.
+		$this->pdo()->prepare('INSERT INTO mailboxes
+			(id, tenant_id, user_id, ms_user_id, ms_tenant_id, email,
+			 refresh_token_enc, scopes)
+			VALUES (:id, :t, :u, "msuser", "mstenant", "marc@example.de",
+			 "fake-enc", "Mail.Read")')
 			->execute([':id' => $mailboxId, ':t' => $tenantId, ':u' => $userId]);
 		return [$tenantId, $userId, $mailboxId];
 	}

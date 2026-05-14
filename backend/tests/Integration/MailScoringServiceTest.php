@@ -156,14 +156,26 @@ final class MailScoringServiceTest extends TestCase
 		$service->scoreBatch($tenantId, $profile, $first);
 		$this->assertSame(1, $claude->callCount());
 
-		// Second batch: another mail with identical content — must hit cache,
-		// must NOT trigger a new Claude call.
+		// Second batch: another mail with identical content — must hit cache
+		// for the SCORE, but Sprint 6a fires a separate Mini-Call for
+		// action_owner (post-cache). Score-Klassifizierung kommt aus dem
+		// Cache (cached=1), und exakt EIN zusätzlicher Mini-Call läuft.
 		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'x@a.de', 'subject' => 'Same', 'body_text' => 'Same body']);
 		$second = $repo->findUnscoredForMailbox($tenantId, $mailboxId);
 		$this->assertCount(1, $second, 'Only the new unscored mail should remain');
 
+		// Mini-Call-Antwort scripten — sonst krasht FakeClaudeClient (no
+		// scripted response). Antwort enthält action_owner, damit der
+		// Service ihn auch persistieren kann.
+		$claude->scriptJson(['results' => [[
+			'mail_id' => $second[0]['id'],
+			'action_owner' => 'user',
+			'confidence' => 75,
+		]]]);
+
 		$scores = $service->scoreBatch($tenantId, $profile, $second);
-		$this->assertSame(1, $claude->callCount(), 'Second mail must hit cache, not Claude');
+		$this->assertSame(2, $claude->callCount(),
+			'Score kommt aus dem Cache; Mini-Call für action_owner zählt als zweiter Call (Sprint 6a)');
 		$this->assertCount(1, $scores);
 		$this->assertSame(1, (int)$scores[0]['cached']);
 	}

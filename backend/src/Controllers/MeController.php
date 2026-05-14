@@ -61,6 +61,8 @@ final class MeController extends BaseController
 			'user_sublabels',
 			'auto_sort_rules',
 			'mail_score_corrections',
+			'api_usage',
+			'usage_daily',
 		];
 	}
 
@@ -171,6 +173,11 @@ final class MeController extends BaseController
 			// OK, weil keine fremden FKs daran hängen und der User die Regeln
 			// jederzeit neu anlegen kann.
 			$pdo->prepare('DELETE FROM auto_sort_rules WHERE user_id = :u')->execute([':u' => $u]);
+			// api_usage + usage_daily: Token-Cost-Aggregate. DSGVO Art. 17
+			// verlangt Löschung; Compliance-Forensik bleibt über audit_log +
+			// Backups erhalten. Hard-Delete weil keine deleted_at-Spalte.
+			$pdo->prepare('DELETE FROM api_usage   WHERE user_id = :u')->execute([':u' => $u]);
+			$pdo->prepare('DELETE FROM usage_daily WHERE user_id = :u')->execute([':u' => $u]);
 
 			$pdo->prepare('INSERT INTO audit_log (tenant_id, user_id, event, entity, entity_id, meta_json)
 				VALUES (:t, :u, "user.delete_request", "user", :id, NULL)')
