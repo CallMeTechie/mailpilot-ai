@@ -71,7 +71,7 @@ final class FakeGraphClient extends GraphClient
 		return $this->folderIds[$path] ??= 'fake-folder-' . substr(md5($path), 0, 8);
 	}
 
-	public function moveToFolder(string $accessToken, string $messageId, string $folderId): void
+	public function moveToFolder(string $accessToken, string $messageId, string $folderId): ?string
 	{
 		$this->moveCalls[] = [
 			'access_token' => $accessToken,
@@ -83,6 +83,10 @@ final class FakeGraphClient extends GraphClient
 			$this->nextMoveError = null;
 			throw $e;
 		}
+		// Graph returnt das verschobene Item mit NEUER id. Fake simuliert
+		// das mit einem deterministischen Suffix, damit Tests
+		// verifizieren können dass AutoSortService die DB updated.
+		return $messageId . '-moved-to-' . $folderId;
 	}
 
 	public function scriptFolderMeta(string $folderId, string $displayName, ?string $parentFolderId = null): void

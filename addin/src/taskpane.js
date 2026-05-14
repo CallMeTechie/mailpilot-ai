@@ -2379,7 +2379,16 @@ function openMailInOutlook(mailId) {
 	}
 	api.call(Office.context.mailbox, mailId, (res) => {
 		if (res?.status === Office.AsyncResultStatus?.Failed) {
-			setStatus(`Konnte Mail nicht öffnen: ${res.error?.message || 'unbekannt'}`);
+			const msg = res.error?.message || 'unbekannt';
+			// Marc's Inbox hat AQMk-IDs (nicht stabil über Moves). Eine Mail
+			// die vor dem ms-id-refresh-Fix verschoben wurde, hat in der DB
+			// noch die alte ID — Graph antwortet ErrorItemNotFound. Klare
+			// Botschaft statt MS-Originaltext.
+			if (/notfound|nicht vorhanden|nicht erstellt/i.test(msg)) {
+				setStatus('Mail liegt nicht mehr unter dieser ID — vermutlich von MailPilot verschoben. In Outlook bitte nach dem Betreff suchen.');
+			} else {
+				setStatus(`Konnte Mail nicht öffnen: ${msg}`);
+			}
 		}
 	});
 }

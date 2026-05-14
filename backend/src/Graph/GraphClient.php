@@ -165,10 +165,23 @@ class GraphClient
 		$this->patch($accessToken, $url, ['isRead' => true]);
 	}
 
-	public function moveToFolder(string $accessToken, string $messageId, string $folderId): void
+	/**
+	 * Verschiebt eine Mail in einen anderen Folder.
+	 *
+	 * Returnt die NEUE message id aus der Graph-Response. Marc's Mailbox
+	 * hat AQMk-IDs (EWS-konvertierte REST-IDs), die sind NICHT stabil
+	 * über Move-Operationen — die alte ID liefert danach
+	 * ErrorItemNotFound, „Öffnen"-Button im Heute-Tab scheitert. Caller
+	 * (AutoSortService) muss das Resultat in mails.ms_message_id schreiben.
+	 */
+	public function moveToFolder(string $accessToken, string $messageId, string $folderId): ?string
 	{
 		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId) . '/move';
-		$this->postJson($accessToken, $url, ['destinationId' => $folderId]);
+		$resp = $this->postJson($accessToken, $url, ['destinationId' => $folderId]);
+		if ($resp !== null && isset($resp['id']) && is_string($resp['id']) && $resp['id'] !== '') {
+			return $resp['id'];
+		}
+		return null;
 	}
 
 	/**
@@ -354,7 +367,13 @@ class GraphClient
 		}
 	}
 
-	private function postJson(string $accessToken, string $url, array $payload): void
+	/**
+	 * @return array<string,mixed>|null Decoded response body, or null when
+	 *         Graph returned 204 / empty body. The /move endpoint returns
+	 *         the moved item with its new id; createChildFolder returns
+	 *         the new folder. Throwing-away the body was a latent bug.
+	 */
+	private function postJson(string $accessToken, string $url, array $payload): ?array
 	{
 		$ch = curl_init($url);
 		curl_setopt_array($ch, [
@@ -385,6 +404,14 @@ class GraphClient
 			} catch (\JsonException) { /* keine strukturierte Antwort */ }
 			throw new RuntimeException("Graph POST failed: {$status}{$code}");
 		}
+
+		if ($body === '') return null;
+		try {
+			$decoded = json_decode($body, true, 32, JSON_THROW_ON_ERROR);
+		} catch (\JsonException) {
+			return null;
+		}
+		return is_array($decoded) ? $decoded : null;
 	}
 
 	private function del(string $accessToken, string $url): void

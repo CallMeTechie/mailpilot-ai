@@ -152,7 +152,18 @@ final class AutoSortService
 				$folderId = $this->graph->ensureFolderPath($accessToken, $rule['folder_name']);
 				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, $folderId);
 			}
-			$this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
+			$newMsId = $this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
+			// AQMk-IDs ändern sich nach Move (im Gegensatz zu echten
+			// Immutable-IDs). Ohne diesen Update lieferte
+			// displayMessageFormAsync im Add-in danach ErrorItemNotFound
+			// — der „Öffnen"-Button im Heute-Tab wäre für jede gesortete
+			// Mail tot.
+			if ($newMsId !== null && $newMsId !== $msMessageId) {
+				$this->db->prepare('UPDATE mails
+					SET ms_message_id = :new
+					WHERE id = :id AND tenant_id = :t')
+					->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
+			}
 			// Mark so the background backfill query doesn't try to
 			// move it again on the next sweep. cleared_at (Sprint 6e
 			// DA-Finding 1) markiert die Mail als „weg aus der Inbox"
