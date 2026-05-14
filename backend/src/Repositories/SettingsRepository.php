@@ -9,14 +9,22 @@ use PDO;
  * Key/value store backed by the system_settings table.
  *
  * Settings are read often (every Claude call needs budget limits) and
- * rarely written (admin form submits). Per-request in-memory cache;
+ * rarely written (admin form submits). In-memory cache with short TTL;
  * wrap this class with Redis if reads ever get hot enough.
+ *
+ * TTL exists because the worker process lives for days. Without it,
+ * a value loaded at worker.start would stick forever and any admin-
+ * panel edit (e.g. autosort_move_mode suggest→auto) would only take
+ * effect after a container restart — which contradicts the product
+ * mandate "alles über das Admin Panel anpassbar".
  */
 final class SettingsRepository
 {
+	private const CACHE_TTL_SECONDS = 30;
+
 	/** @var array<string, string> */
 	private array $cache = [];
-	private bool $cacheLoaded = false;
+	private int $loadedAt = 0;
 
 	public function __construct(private readonly PDO $db)
 	{
@@ -77,11 +85,16 @@ final class SettingsRepository
 
 	private function load(): void
 	{
-		if ($this->cacheLoaded) return;
+		$now = time();
+		if ($this->loadedAt !== 0 && ($now - $this->loadedAt) < self::CACHE_TTL_SECONDS) {
+			return;
+		}
 		$rows = $this->db->query('SELECT `key`, `value` FROM system_settings')->fetchAll(PDO::FETCH_ASSOC);
+		// Full reload, not merge — drops keys that were deleted in DB.
+		$this->cache = [];
 		foreach ($rows as $r) {
 			$this->cache[(string)$r['key']] = (string)$r['value'];
 		}
-		$this->cacheLoaded = true;
+		$this->loadedAt = $now;
 	}
 }
