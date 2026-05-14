@@ -31,18 +31,28 @@ final class ReconciliationServiceTest extends TestCase
 		$this->truncateAll();
 	}
 
+	private const ENCRYPT_KEY = '0000000000000000000000000000000000000000000000000000000000000001';
+
 	private function makeService(FakeGraphClient $graph): ReconciliationService
 	{
 		$pdo = $this->pdo();
 		return new ReconciliationService(
 			$pdo,
 			$graph,
-			new TokenService($graph, new MailboxRepository($pdo),
-				'0000000000000000000000000000000000000000000000000000000000000001'),
+			new TokenService($graph, new MailboxRepository($pdo), self::ENCRYPT_KEY),
 			new MailboxRepository($pdo),
 			new SettingsRepository($pdo),
 			new NullLogger(),
 		);
+	}
+
+	private function encryptedToken(): string
+	{
+		// TokenService.encrypt mit derselben Key, damit decrypt im
+		// reconcileAll-Loop nicht failt.
+		$svc = new TokenService(new FakeGraphClient(),
+			new MailboxRepository($this->pdo()), self::ENCRYPT_KEY);
+		return $svc->encrypt('fake-access-token');
 	}
 
 	private function seedRule(array $opts = []): array
@@ -61,8 +71,12 @@ final class ReconciliationServiceTest extends TestCase
 			(id, tenant_id, user_id, ms_user_id, ms_tenant_id, email,
 			 refresh_token_enc, access_token_enc, access_token_expires, scopes)
 			VALUES (:id, :t, :u, "msu", "mst", "marc@example.de",
-			        "fake-refresh", "fake-access", (UTC_TIMESTAMP(3) + INTERVAL 1 HOUR), "Mail.Read")')
-			->execute([':id' => $mailboxId, ':t' => $tenantId, ':u' => $userId]);
+			        :rt, :at, (UTC_TIMESTAMP(3) + INTERVAL 1 HOUR), "Mail.Read")')
+			->execute([
+				':id' => $mailboxId, ':t' => $tenantId, ':u' => $userId,
+				':rt' => $this->encryptedToken(),
+				':at' => $this->encryptedToken(),
+			]);
 
 		$pdo->prepare('INSERT INTO auto_sort_rules
 			(id, tenant_id, user_id, label, enabled, folder_name, folder_id,
