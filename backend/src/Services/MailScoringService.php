@@ -167,8 +167,39 @@ final class MailScoringService
 	private function resolveActionOwnersForCacheHits(array $userProfile, array $cacheHits, array &$scored): void
 	{
 		$userEmail = strtolower((string)($userProfile['email'] ?? ''));
-		$payload = [];
+
+		// Carry-Over DA-Impl 6a-4: Pre-Filter unsignificante Cache-Hits.
+		// Mails ohne recipients (Newsletter ohne explizite Empfänger oder
+		// BCC-only) plus group-Prefix-From haben ohnehin keinen Claude-
+		// Lerngehalt. Wir routen sie direkt durch den deterministischen
+		// Fallback und sparen Mini-Call-Tokens (~30-40% bei Newsletter-
+		// lastigen Mailboxen). Nur ambiguous Mails kommen zum Mini-Call.
+		$miniHits = [];
+		$fallbackHits = [];
 		foreach ($cacheHits as $hit) {
+			$mail = $hit['mail'];
+			$rec  = $this->buildRecipients($mail, $userEmail);
+			$fromLocal = strtolower(strstr((string)($mail['from_email'] ?? ''), '@', true) ?: '');
+			$groupFrom = in_array($fromLocal, ['info','support','no-reply','noreply','newsletter','team','service','notifications','kontakt'], true);
+			$noUserSignal = $rec === [] || !array_filter($rec, static fn($r) => !empty($r['is_user']));
+			if ($noUserSignal && $groupFrom) {
+				$fallbackHits[] = $hit;
+			} else {
+				$miniHits[] = $hit;
+			}
+		}
+
+		if ($fallbackHits !== []) {
+			$this->applyActionOwnerFallback($userProfile, $fallbackHits, $scored);
+			$this->logger->info('action_owner.prefilter_to_fallback', ['n' => count($fallbackHits)]);
+		}
+
+		if ($miniHits === []) {
+			return; // alles via Fallback geroutet, kein Mini-Call nötig
+		}
+
+		$payload = [];
+		foreach ($miniHits as $hit) {
 			$mail = $hit['mail'];
 			$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');
 			$payload[] = [
@@ -183,7 +214,7 @@ final class MailScoringService
 			$results = $this->callMiniActionOwner($userProfile, $payload);
 		} catch (\Throwable $e) {
 			$this->logger->warning('action_owner.mini_call_failed', ['err' => $e->getMessage(), 'n' => count($payload)]);
-			$this->applyActionOwnerFallback($userProfile, $cacheHits, $scored);
+			$this->applyActionOwnerFallback($userProfile, $miniHits, $scored);
 			return;
 		}
 
@@ -197,7 +228,7 @@ final class MailScoringService
 		}
 
 		$missing = [];
-		foreach ($cacheHits as $hit) {
+		foreach ($miniHits as $hit) {
 			$mailId = (string)$hit['mail']['id'];
 			$r = $byMailId[$mailId] ?? null;
 			if ($r === null) {
@@ -226,38 +257,47 @@ final class MailScoringService
 	 */
 	private function callMiniActionOwner(array $userProfile, array $payload): array
 	{
+		// Carry-Over DA-Impl 6a-3: Mini-Call ist jetzt eine eigene Prompt-
+		// Version (P-SCORE-MINI). Admin kann sie unabhängig versionieren,
+		// Model swappen, Token-Budget setzen. usage_daily.prompt_version
+		// joined sauber zu prompt_versions.
+		$activeMini = $this->prompts->getActive('P-SCORE-MINI');
 		$rules = "\n" . str_replace('\\n', "\n", $this->settings->getString(
 			'prompt.action_owner_rules',
 			'ACTION_OWNER_RULES: bei Anrede-Ambiguität immer action_owner=unsure.',
 		)) . "\n";
 
-		// Der System-Block ist hier kompakter als der Score-System-Prompt,
-		// teilt sich aber das USER_IDENTITY-Segment via buildCachedSystem-
-		// Segments (PRD §5.1: „Mini-Call enthält USER_IDENTITY-Segment und
-		// profitiert vom Prompt-Cache").
+		// USER_IDENTITY-Segment via gemeinsamen Prompt-Cache mit dem
+		// Score-Call (PRD §5.1).
 		$systemSegments = $this->buildCachedSystemSegments(
-			'Du bist MailPilot, action_owner-Reasoner. Du antwortest AUSSCHLIESSLICH in gültigem JSON nach dem vorgegebenen Schema. Kein Prosa, keine Markdown-Codefences.',
+			$activeMini['system_prompt'],
 			$userProfile,
 		);
 
-		$user = "{$rules}\nMAILS:\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n\nGib exakt ein JSON-Objekt zurück:\n{\"results\":[{\"mail_id\":\"<id>\",\"action_owner\":\"user|other|group|unsure\",\"confidence\":0-100}]}\n\nAnzahl results = Anzahl MAILS, in derselben Reihenfolge.";
+		$user = str_replace(
+			['{{action_owner_rules}}', '{{mails_json}}'],
+			[$rules, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)],
+			$activeMini['user_template'],
+		);
 
-		$tenantId = (string)($userProfile['tenant_id'] ?? '');
-		$userId   = (string)($userProfile['user_id']   ?? '') ?: null;
-		$model    = 'claude-haiku-4-5-20251001';
-		$promptTag = 'P-SCORE@mini-action-owner+code' . self::SCHEMA_CODE_REVISION;
+		$tenantId  = (string)($userProfile['tenant_id'] ?? '');
+		$userId    = (string)($userProfile['user_id']   ?? '') ?: null;
+		$model     = $activeMini['model'];
+		$promptTag = $this->prompts->cacheVersionTag(
+			$activeMini['key_name'],
+			$activeMini['version'] . '+code' . self::SCHEMA_CODE_REVISION,
+		);
+		$maxTokens = max((int)$activeMini['max_tokens'], count($payload) * 40 + 200);
 
 		$start = microtime(true);
 		try {
 			$response = $this->claude->messages([
 				'model'      => $model,
-				'max_tokens' => max(200, count($payload) * 40 + 200),
+				'max_tokens' => $maxTokens,
 				'system'     => $systemSegments,
 				'messages'   => [['role' => 'user', 'content' => $user]],
 			]);
 		} catch (\Throwable $e) {
-			// Budget-Tracking auch im Error-Pfad, damit gescheiterte Mini-
-			// Calls in usage_daily auftauchen (Latenz + Status).
 			$this->recordCall($tenantId, $userId, null, null, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage(), $promptTag, $model);
 			throw $e;
 		}
@@ -909,17 +949,20 @@ final class MailScoringService
 					// nächsten Score-Pass automatisch.
 					$this->autoSortRules->upsert($tenantId, $userId, $primary, $candidate, true, $folderPath);
 				} else {
-					// Suggest-Modus: KI-Rule disabled + pending_action(create_topic)
-					// damit der User im Pending-Tab UND im Auto-Sort-Tab den
-					// Vorschlag sieht. DA-Impl-Finding 1: fail-closed wenn
-					// kein PendingRepo injiziert (Sprint-6c-Vertrag).
+					// Suggest-Modus: KI-Rule disabled + pending_action(create_topic).
+					// Carry-Over DA-Impl 6b-3: folder_name=NULL → wird beim
+					// User-Aktivieren oder beim Lookup lazy aus aktuellem
+					// folder_default.<primary> + sub_label resolved.
 					if ($this->pendingActions === null) {
 						throw new \RuntimeException('MailScoringService: suggest-mode benötigt PendingActionRepository');
 					}
-					$this->autoSortRules->suggestKiRule($tenantId, $userId, $primary, $candidate, $folderPath);
+					$this->autoSortRules->suggestKiRule($tenantId, $userId, $primary, $candidate, '');
 					$this->pendingActions->create($tenantId, $userId, 'create_topic', [
 						'primary'     => $primary,
 						'sub_label'   => $candidate,
+						// folder_path bleibt im Payload als „aktueller Default"
+						// hinterlegt — UI kann ihn als Vorschau anzeigen,
+						// AutoSortRepository resolved aber neu.
 						'folder_path' => $folderPath,
 						'reason'      => 'auto-discovery',
 					], 'suggest');

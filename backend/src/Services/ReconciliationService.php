@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MailPilot\Services;
 
 use MailPilot\Graph\GraphClient;
+use MailPilot\Graph\GraphThrottledException;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\SettingsRepository;
 use PDO;
@@ -81,6 +82,18 @@ final class ReconciliationService
 
 				$status = $this->reconcileOne($r, $accessToken);
 				$counts[$status] = ($counts[$status] ?? 0) + 1;
+			} catch (GraphThrottledException $e) {
+				// Carry-Over DA-Impl 6d-3: Graph hat den User durchgebremst.
+				// Restliche Rules dieses Users skippen (alle würden den
+				// gleichen Bucket treffen), token-cache als 'throttled'
+				// markieren damit der Loop diesen User nicht wieder
+				// versucht. Counter „throttled" macht das im Worker-Log
+				// sichtbar.
+				$counts['throttled'] = ($counts['throttled'] ?? 0) + 1;
+				$accessTokenByUser[$userId] = null;
+				$this->logger->warning('reconciliation.throttled', [
+					'user' => $userId, 'retry_after' => $e->retryAfterSeconds,
+				]);
 			} catch (\Throwable $e) {
 				$counts['errors']++;
 				$this->logger->warning('reconciliation.failed', [

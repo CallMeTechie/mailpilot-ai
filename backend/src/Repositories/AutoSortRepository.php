@@ -113,9 +113,14 @@ final class AutoSortRepository
 			$stmt->execute([':t' => $tenantId, ':u' => $userId, ':l' => $label, ':s' => $subLabel]);
 			$r = $stmt->fetch(PDO::FETCH_ASSOC);
 			if ($r !== false) {
+				// Carry DA-Impl 6b-3: NULL → lazy default. AutoSortService
+				// nutzt das Ergebnis als Folder-Pfad für ensureFolderPath.
+				$fn = $r['folder_name'] !== null && (string)$r['folder_name'] !== ''
+					? (string)$r['folder_name']
+					: $this->resolveDefaultFolderName($label, (string)$r['sub_label']);
 				return [
 					'enabled'     => (bool)$r['enabled'],
-					'folder_name' => (string)$r['folder_name'],
+					'folder_name' => $fn,
 					'folder_id'   => $r['folder_id'] !== null ? (string)$r['folder_id'] : null,
 					'sub_label'   => (string)$r['sub_label'],
 				];
@@ -130,9 +135,12 @@ final class AutoSortRepository
 		if ($r === false) {
 			return null;
 		}
+		$fn = $r['folder_name'] !== null && (string)$r['folder_name'] !== ''
+			? (string)$r['folder_name']
+			: $this->resolveDefaultFolderName($label, null);
 		return [
 			'enabled'     => (bool)$r['enabled'],
-			'folder_name' => (string)$r['folder_name'],
+			'folder_name' => $fn,
 			'folder_id'   => $r['folder_id'] !== null ? (string)$r['folder_id'] : null,
 			'sub_label'   => null,
 		];
@@ -285,11 +293,19 @@ final class AutoSortRepository
 	 */
 	private function hydrate(array $r): array
 	{
+		$label    = (string)$r['label'];
+		$subLabel = $r['sub_label'] !== null ? (string)$r['sub_label'] : null;
+		// Carry-Over DA-Impl 6b-3: folder_name NULL → lazy resolve aus
+		// aktuellem folder_default.<label>-Setting. So zeigen KI-Vorschläge
+		// immer den Pfad, der bei Aktivierung tatsächlich angewendet wird.
+		$folderName = $r['folder_name'] !== null && (string)$r['folder_name'] !== ''
+			? (string)$r['folder_name']
+			: $this->resolveDefaultFolderName($label, $subLabel);
 		return [
-			'label'       => (string)$r['label'],
-			'sub_label'   => $r['sub_label'] !== null ? (string)$r['sub_label'] : null,
+			'label'       => $label,
+			'sub_label'   => $subLabel,
 			'enabled'     => (bool)$r['enabled'],
-			'folder_name' => (string)$r['folder_name'],
+			'folder_name' => $folderName,
 			'folder_id'   => $r['folder_id'] !== null ? (string)$r['folder_id'] : null,
 			'last_error'  => $r['last_error'] !== null ? (string)$r['last_error'] : null,
 			'created_by'  => isset($r['created_by']) ? (string)$r['created_by'] : 'user',
@@ -327,6 +343,8 @@ final class AutoSortRepository
 		if ($existing !== null) {
 			return false;
 		}
+		// Carry-Over DA-Impl 6b-3: leerer folder_name wird als NULL gespeichert,
+		// damit folder_default.<label> beim Read/Aktivieren lazy resolved wird.
 		$this->db->prepare('INSERT INTO auto_sort_rules
 			(id, tenant_id, user_id, label, sub_label, enabled, folder_name, created_by)
 			VALUES (:id, :t, :u, :l, :s, 0, :f, "ki")')
@@ -336,8 +354,18 @@ final class AutoSortRepository
 				':u'  => $userId,
 				':l'  => $label,
 				':s'  => $subLabel,
-				':f'  => $folderName,
+				':f'  => $folderName !== '' ? $folderName : null,
 			]);
 		return true;
+	}
+
+	/**
+	 * Resolved den aktuellen Default-Pfad für eine (label, sub_label)-Rule.
+	 * Wird genutzt wenn `folder_name` NULL ist (KI-Vorschlag mit lazy-resolve).
+	 */
+	private function resolveDefaultFolderName(string $label, ?string $subLabel): string
+	{
+		$base = $this->defaultFolder($label);
+		return $subLabel !== null && $subLabel !== '' ? $base . '/' . $subLabel : $base;
 	}
 }

@@ -289,26 +289,47 @@ class GraphClient
 	 */
 	private function get(string $accessToken, string $url): array
 	{
-		$ch = curl_init($url);
-		curl_setopt_array($ch, [
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_TIMEOUT        => 30,
-			CURLOPT_HTTPHEADER     => [
-				'Authorization: Bearer ' . $accessToken,
-				// REST-ID (the default) is what Office.js convertToRestId()
-				// returns — keeping the on-disk format and the add-in's
-				// identifier in sync. ImmutableId would survive folder moves
-				// but is unreachable from Office.js.
-			],
-		]);
-		$body = curl_exec($ch);
-		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-		curl_close($ch);
+		// Carry-Over DA-Impl 6d-3: 429 mit Retry-After-Header → einmal
+		// kurz sleepen (max 5s, größere Retries blockieren den Worker
+		// zu lange), dann retry. Bei zweitem 429 → GraphThrottledException
+		// damit ReconciliationService den User-Loop abbrechen kann statt
+		// hart zu sterben.
+		for ($attempt = 1; $attempt <= 2; $attempt++) {
+			$retryAfter = 0;
+			$ch = curl_init($url);
+			curl_setopt_array($ch, [
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_TIMEOUT        => 30,
+				CURLOPT_HTTPHEADER     => [
+					'Authorization: Bearer ' . $accessToken,
+				],
+				CURLOPT_HEADERFUNCTION => function ($_, string $header) use (&$retryAfter): int {
+					if (preg_match('/^Retry-After:\s*(\d+)/i', $header, $m)) {
+						$retryAfter = (int)$m[1];
+					}
+					return strlen($header);
+				},
+			]);
+			$body = curl_exec($ch);
+			$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+			curl_close($ch);
 
-		if ($status < 200 || $status >= 300 || !is_string($body)) {
+			if ($status >= 200 && $status < 300 && is_string($body)) {
+				return json_decode($body, true, 32, JSON_THROW_ON_ERROR);
+			}
+
+			if ($status === 429 && $attempt === 1) {
+				$sleepSecs = max(1, min(5, $retryAfter ?: 1));
+				sleep($sleepSecs);
+				continue;
+			}
+			if ($status === 429) {
+				throw new GraphThrottledException($url, max(1, $retryAfter ?: 60));
+			}
 			throw new RuntimeException("Graph GET failed: {$status}");
 		}
-		return json_decode($body, true, 32, JSON_THROW_ON_ERROR);
+		// Unreachable, aber für static analysis
+		throw new RuntimeException("Graph GET failed: unreachable");
 	}
 
 	private function patch(string $accessToken, string $url, array $payload): void

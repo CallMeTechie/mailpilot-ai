@@ -809,16 +809,34 @@ textarea {
 .mp-pending-title { font-size: 13px; }
 .mp-error-text { color: #b91c1c; font-size: 11px; }
 
-/* Sprint 6b: KI-Vorschlag-Badge an Sub-Label-Auto-Sort-Rules. */
+/* Sprint 6b: KI-Vorschlag-Badge an Sub-Label-Auto-Sort-Rules.
+   Carry-Over DA-Impl 6b-4: button-Element + on-click toggle, damit
+   Touch-Devices das Tooltip ebenfalls erreichen. */
 .mp-badge-ki {
 	display: inline-block;
 	margin-left: 4px;
 	padding: 1px 6px;
 	background: #e0e7ff;
 	color: #3730a3;
+	border: none;
 	border-radius: 8px;
 	font-size: 10px;
 	font-weight: 500;
 	letter-spacing: 0.02em;
-	cursor: help;
+	cursor: pointer;
+	font-family: inherit;
 }
+.mp-badge-ki:hover { background: #c7d2fe; }
+
+.mp-badge-tip {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 4px 8px;
+	background: #1e1b4b;
+	color: #e0e7ff;
+	border-radius: 6px;
+	font-size: 11px;
+	max-width: 280px;
+	line-height: 1.4;
+}
+.mp-badge-tip[data-hidden="true"] { display: none; }

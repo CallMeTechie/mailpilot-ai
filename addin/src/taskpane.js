@@ -1743,15 +1743,30 @@ function buildAutoSortRow(r, isSub) {
 		const subTd = document.createElement('td');
 		subTd.textContent = r.sub_label;
 		// Sprint 6b: KI-vorgeschlagene Rules bekommen einen Badge.
-		// Klick auf den Enabled-Switch genuegt zum Aktivieren — kein
-		// eigener Approve-Endpoint, der bestehende save-Flow reicht.
+		// Carry-Over DA-Impl 6b-4: Touch-Devices zeigen kein title-
+		// Tooltip. Statt cursor:help nutzen wir on-click ein Inline-
+		// Popover (mp-badge-tip), das auf jedem Device erreichbar ist.
 		if (r.created_by === 'ki') {
-			const badge = document.createElement('span');
+			const badge = document.createElement('button');
+			badge.type = 'button';
 			badge.className = 'mp-badge-ki';
 			badge.textContent = 'KI-Vorschlag';
-			badge.title = 'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = automatisch sortieren.';
+			badge.setAttribute('aria-label',
+				'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = automatisch sortieren.');
+			badge.addEventListener('click', (e) => {
+				e.stopPropagation();
+				const tip = badge.nextElementSibling;
+				if (tip && tip.classList.contains('mp-badge-tip')) {
+					tip.dataset.hidden = tip.dataset.hidden === 'true' ? 'false' : 'true';
+				}
+			});
+			const tip = document.createElement('span');
+			tip.className = 'mp-badge-tip';
+			tip.dataset.hidden = 'true';
+			tip.textContent = 'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = wird ab jetzt automatisch sortiert.';
 			subTd.appendChild(document.createTextNode(' '));
 			subTd.appendChild(badge);
+			subTd.appendChild(tip);
 		}
 		tr.appendChild(subTd);
 	}
