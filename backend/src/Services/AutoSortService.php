@@ -5,6 +5,7 @@ namespace MailPilot\Services;
 
 use MailPilot\Graph\GraphClient;
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\SettingsRepository;
 use PDO;
 
@@ -30,7 +31,23 @@ final class AutoSortService
 		private readonly PDO $db,
 		private readonly \Psr\Log\LoggerInterface $logger,
 		private readonly ?SettingsRepository $settings = null,
+		// Sprint 6c: PendingActionRepository ist optional — alte Tests
+		// rufen ohne; wenn nicht injiziert, falls AutoSortService durch
+		// auf den klassischen auto-Pfad zurück (Default-Modus pre-6c).
+		private readonly ?PendingActionRepository $pending = null,
 	) {
+	}
+
+	/**
+	 * Liest den autosort_move_mode aus den System-Settings. Default
+	 * 'auto' für maximale Backwards-Compat in Tests, wenn weder Settings-
+	 * Repo noch der Seed greift.
+	 */
+	private function moveMode(): string
+	{
+		if ($this->settings === null) return 'auto';
+		$v = $this->settings->getString('autosort_move_mode', 'suggest');
+		return in_array($v, ['off', 'suggest', 'auto'], true) ? $v : 'suggest';
 	}
 
 	/**
@@ -69,6 +86,53 @@ final class AutoSortService
 		$msMessageId = (string)($mail['ms_message_id'] ?? '');
 		if ($msMessageId === '') {
 			return ['moved' => false, 'reason' => 'missing_message_id'];
+		}
+
+		// Sprint 6c Modus-Schalter (PRD §3 Toggle 1). 'off' blockiert
+		// jeden Move; 'suggest' legt eine pending_action an und überlässt
+		// dem User die Entscheidung; 'auto' fällt durch zum bestehenden
+		// Pfad. created_under_mode wird eingefroren (DA-Finding 1), damit
+		// Toggle-Wechsel suggest→auto keine bestehenden Pending mit-flippt.
+		$mode = $this->moveMode();
+		if ($mode === 'off') {
+			return ['moved' => false, 'reason' => 'mode_off'];
+		}
+		if ($mode === 'suggest') {
+			// DA-Impl-Finding 1: fail-closed. Wenn kein PendingRepo injiziert
+			// ist (Test-Bestand vor 6c), würde der Fall-Through silent einen
+			// echten Move ausführen statt einer Pending-Anlage. Lieber laut
+			// throw — Test muss das Repo übergeben (auch wenn null in
+			// auto-Mode-Tests gewünscht ist, dann Mode explizit setzen).
+			if ($this->pending === null) {
+				throw new \RuntimeException('AutoSortService: suggest-mode benötigt PendingActionRepository');
+			}
+			// PRD §3.1: wenn die Rule disabled ist UND es eine offene
+			// create_topic-pending für (label, sub_label) gibt, koppeln
+			// wir den Move via parent_pending_id. Topic-Approval triggert
+			// dann den Bulk-Move-Confirm. Bei aktiver Rule ist die Kopplung
+			// nicht nötig (User hat schon zugestimmt).
+			$parentPid = null;
+			$kind = 'move';
+			if (!$rule['enabled'] && $matchedSub !== null) {
+				$parentPid = $this->pending->findPendingTopicId($tenantId, $userId, $label, $matchedSub);
+				if ($parentPid !== null) {
+					$kind = 'move_to_pending_topic';
+				}
+			}
+			$pid = $this->pending->create($tenantId, $userId, $kind, [
+				'mail_id'       => (string)$mail['id'],
+				'ms_message_id' => $msMessageId,
+				'subject'       => (string)($mail['subject'] ?? ''),
+				'from'          => (string)($mail['from_email'] ?? ''),
+				'label'         => $label,
+				'sub_label'     => $matchedSub,
+				'target_folder' => (string)$rule['folder_name'],
+			], 'suggest', $parentPid);
+			$this->logger->info('autosort.pending', [
+				'user' => $userId, 'label' => $label, 'kind' => $kind,
+				'pid' => $pid, 'parent_pid' => $parentPid,
+			]);
+			return ['moved' => false, 'reason' => 'pending', 'pending_id' => $pid, 'kind' => $kind];
 		}
 
 		// If we already moved this mail once, skip — avoids hammering

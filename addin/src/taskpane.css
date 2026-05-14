@@ -772,6 +772,43 @@ textarea {
 }
 #alias-suggestions[data-hidden="true"] { display: none; }
 
+/* Sprint 6c: Pending-Tab + Modi-Tab */
+.mp-subtab-count {
+	display: inline-block; min-width: 18px; padding: 0 6px;
+	background: var(--mp-primary, #2563eb); color: #fff;
+	border-radius: 9px; font-size: 10px; font-weight: 600;
+	margin-left: 4px; text-align: center;
+}
+.mp-subtab-count[data-hidden="true"] { display: none; }
+
+.mp-modes { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.mp-mode { display: flex; flex-direction: column; gap: 4px; }
+.mp-mode-title { font-weight: 500; font-size: 13px; }
+
+.mp-banner {
+	padding: 8px 12px; border-radius: 6px; font-size: 12px;
+	margin: 8px 0 12px;
+}
+.mp-banner[data-hidden="true"] { display: none; }
+.mp-banner[data-level="info"]    { background: #dbeafe; color: #1e3a8a; }
+.mp-banner[data-level="warning"] { background: #fef3c7; color: #92400e; }
+.mp-banner[data-level="block"]   { background: #fee2e2; color: #991b1b; font-weight: 500; }
+
+.mp-pending-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.mp-pending-card {
+	background: var(--mp-surface-hover); padding: 4px 8px;
+	border-radius: 4px; font-size: 12px;
+}
+.mp-pending-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.mp-pending-item {
+	padding: 10px; border: 1px solid var(--mp-border);
+	border-radius: 6px; background: var(--mp-bg);
+	display: flex; flex-direction: column; gap: 4px;
+}
+.mp-pending-item[data-has-error="true"] { border-color: #fca5a5; background: #fef2f2; }
+.mp-pending-title { font-size: 13px; }
+.mp-error-text { color: #b91c1c; font-size: 11px; }
+
 /* Sprint 6b: KI-Vorschlag-Badge an Sub-Label-Auto-Sort-Rules. */
 .mp-badge-ki {
 	display: inline-block;

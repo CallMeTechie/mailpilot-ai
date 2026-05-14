@@ -492,4 +492,76 @@ final class SettingsController extends BaseController
 			'cache_purged'  => $cachePurged,
 		]);
 	}
+
+	/**
+	 * Sprint 6c — GET /api/v1/settings/modes liefert die drei Toggle-Stufen.
+	 * Defaults greifen wenn der system_settings-Seed (Migration 0018) noch
+	 * nicht durchgelaufen ist (z.B. frischer Test-DB-Setup).
+	 */
+	public function getModes(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$s = $this->kernel->get(SettingsRepository::class);
+		Response::json([
+			'autosort_move_mode'         => $s->getString('autosort_move_mode',         'suggest'),
+			'autosort_create_topic_mode' => $s->getString('autosort_create_topic_mode', 'suggest'),
+			'autosort_reply_mode'        => $s->getString('autosort_reply_mode',        'suggest'),
+		]);
+	}
+
+	/**
+	 * POST /api/v1/settings/modes — speichert die drei Modi.
+	 * Validiert die Toggle-Hierarchie (DA-Finding 3):
+	 *   level(autosort_create_topic_mode) <= level(autosort_move_mode)
+	 * sonst legt die KI Folder an, in die nichts hinkommt. Reply ist
+	 * unabhängig (Drafts hängen an der Mail, egal wo sie liegt).
+	 */
+	public function saveModes(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$allowed = ['off', 'suggest', 'auto'];
+		$level   = ['off' => 0, 'suggest' => 1, 'auto' => 2];
+
+		$move   = isset($body['autosort_move_mode'])         ? (string)$body['autosort_move_mode']         : null;
+		$topic  = isset($body['autosort_create_topic_mode']) ? (string)$body['autosort_create_topic_mode'] : null;
+		$reply  = isset($body['autosort_reply_mode'])        ? (string)$body['autosort_reply_mode']        : null;
+
+		foreach ([$move, $topic, $reply] as $v) {
+			if ($v !== null && !in_array($v, $allowed, true)) {
+				throw HttpException::badRequest('INVALID_MODE', 'Modus muss off/suggest/auto sein');
+			}
+		}
+
+		// Bei Partial-Update fallen wir auf die aktuell gespeicherten Werte
+		// zurück, damit die Hierarchie-Prüfung gegen den NEUEN Zielzustand
+		// läuft, nicht gegen ein willkürliches Default.
+		$s = $this->kernel->get(SettingsRepository::class);
+		$effMove  = $move  ?? $s->getString('autosort_move_mode',         'suggest');
+		$effTopic = $topic ?? $s->getString('autosort_create_topic_mode', 'suggest');
+
+		if ($level[$effTopic] > $level[$effMove]) {
+			throw HttpException::badRequest('TOGGLE_HIERARCHY',
+				"autosort_create_topic_mode ({$effTopic}) darf nicht aggressiver sein als autosort_move_mode ({$effMove})");
+		}
+
+		if ($move  !== null) $s->set('autosort_move_mode',         $move);
+		if ($topic !== null) $s->set('autosort_create_topic_mode', $topic);
+		if ($reply !== null) $s->set('autosort_reply_mode',        $reply);
+
+		// DA-Impl-Finding 3: wenn Modus auf 'auto' wechselt, sind Bestands-
+		// Pending mit created_under_mode='suggest' nicht automatisch
+		// betroffen (PRD-DA-Pre-Impl-Finding 1: kein silent-flip). Wir
+		// liefern die Counts mit, damit das Add-in eine sichtbare Notice
+		// rendern kann („Du hast noch N Vorschläge unter suggest").
+		$pendingCounts = $this->kernel
+			->get(\MailPilot\Repositories\PendingActionRepository::class)
+			->countByKind($ctx['tenant_id'], $ctx['user_id']);
+
+		Response::json([
+			'autosort_move_mode'         => $effMove,
+			'autosort_create_topic_mode' => $effTopic,
+			'autosort_reply_mode'        => $reply ?? $s->getString('autosort_reply_mode', 'suggest'),
+			'existing_pending'           => $pendingCounts,
+		]);
+	}
 }

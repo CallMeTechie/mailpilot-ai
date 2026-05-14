@@ -39,6 +39,7 @@ final class MeController extends BaseController
 			'reply_drafts',
 			'api_usage',
 			'usage_daily',
+			'pending_actions',
 		];
 	}
 
@@ -63,6 +64,7 @@ final class MeController extends BaseController
 			'mail_score_corrections',
 			'api_usage',
 			'usage_daily',
+			'pending_actions',
 		];
 	}
 
@@ -147,6 +149,11 @@ final class MeController extends BaseController
 					input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_eur
 				FROM usage_daily WHERE user_id = :u
 				ORDER BY `date` DESC LIMIT 365', [':u' => $u]),
+			'pending_actions_last_30d' => $fetch('SELECT kind, status, created_under_mode, payload,
+					parent_pending_id, last_error, retry_count, created_at, decided_at
+				FROM pending_actions
+				WHERE user_id = :u AND created_at >= (UTC_TIMESTAMP(3) - INTERVAL 30 DAY)
+				ORDER BY created_at DESC', [':u' => $u]),
 		];
 
 		Response::json($export);
@@ -178,6 +185,10 @@ final class MeController extends BaseController
 			// Backups erhalten. Hard-Delete weil keine deleted_at-Spalte.
 			$pdo->prepare('DELETE FROM api_usage   WHERE user_id = :u')->execute([':u' => $u]);
 			$pdo->prepare('DELETE FROM usage_daily WHERE user_id = :u')->execute([':u' => $u]);
+			// pending_actions: Mail-Subjects + Recipient-Namen im payload-JSON
+			// sind PII. Hard-Delete; FK ON DELETE CASCADE räumt gekoppelte
+			// move_to_pending_topic-Children automatisch ab.
+			$pdo->prepare('DELETE FROM pending_actions WHERE user_id = :u')->execute([':u' => $u]);
 
 			$pdo->prepare('INSERT INTO audit_log (tenant_id, user_id, event, entity, entity_id, meta_json)
 				VALUES (:t, :u, "user.delete_request", "user", :id, NULL)')

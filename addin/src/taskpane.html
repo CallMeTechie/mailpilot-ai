@@ -231,6 +231,8 @@
 			<button class="mp-subtab is-active" data-subtab="profile"  role="tab">Profil &amp; Filter</button>
 			<button class="mp-subtab"           data-subtab="topics"   role="tab">Topics</button>
 			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
+			<button class="mp-subtab"           data-subtab="modes"    role="tab">Modi</button>
+			<button class="mp-subtab"           data-subtab="pending"  role="tab">Pending <span class="mp-subtab-count" id="pending-tab-count" data-hidden="true"></span></button>
 			<button class="mp-subtab"           data-subtab="maint"    role="tab">Wartung</button>
 			<button class="mp-subtab"           data-subtab="data"     role="tab">Daten</button>
 		</nav>
@@ -348,6 +350,76 @@
 			</section>
 
 			<!-- Wartung: Re-Score -->
+			<!-- Modi: 3 Toggles × 3 Stufen (PRD §3) -->
+			<section class="mp-subpanel" data-subpanel="modes">
+				<div class="mp-section">
+					<h2>Wie autonom darf die KI handeln?</h2>
+					<p class="mp-muted">Drei separate Toggles. Default überall „Vorschlag" — die KI schlägt vor, du bestätigst. Schalte einzeln auf „Auto", wenn du dem Verhalten genug vertraust.</p>
+
+					<div class="mp-modes">
+						<label class="mp-mode">
+							<span class="mp-mode-title">Mails verschieben</span>
+							<select id="mode-move">
+								<option value="off">Aus — nichts verschieben</option>
+								<option value="suggest" selected>Vorschlag — Pending-Tab</option>
+								<option value="auto">Auto — sofort verschieben</option>
+							</select>
+							<small class="mp-muted" id="mode-move-hint"></small>
+						</label>
+
+						<label class="mp-mode">
+							<span class="mp-mode-title">Neue Topics anlegen</span>
+							<select id="mode-topic">
+								<option value="off">Aus — keine KI-Discovery</option>
+								<option value="suggest" selected>Vorschlag — User bestätigt</option>
+								<option value="auto">Auto — sofort anlegen</option>
+							</select>
+							<small class="mp-muted" id="mode-topic-hint"></small>
+						</label>
+
+						<label class="mp-mode">
+							<span class="mp-mode-title">Antwort-Entwürfe</span>
+							<select id="mode-reply">
+								<option value="off">Aus — nur auf Klick</option>
+								<option value="suggest" selected>Vorschlag — im Pending-Tab</option>
+								<option value="auto">Auto — als Outlook-Draft (kommt mit 6f)</option>
+							</select>
+							<small class="mp-muted">Reply ist unabhängig von Move/Topic.</small>
+						</label>
+					</div>
+
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary" id="btn-save-modes">Modi speichern</button>
+					</div>
+					<p class="mp-muted" id="modes-status"></p>
+				</div>
+			</section>
+
+			<!-- Pending: vorgeschlagene Aktionen (PRD §3.1, §6c) -->
+			<section class="mp-subpanel" data-subpanel="pending">
+				<div class="mp-section">
+					<h2>Vorschläge der KI</h2>
+					<p class="mp-muted">Hier landen alle Aktionen aus „Vorschlag"-Modi. Bestätigen führt sie aus, Ablehnen verwirft sie. Älter als 30 Tage werden automatisch verworfen.</p>
+
+					<div id="pending-banner" class="mp-banner" data-hidden="true"></div>
+
+					<div class="mp-pending-counts">
+						<span class="mp-pending-card" id="pc-move">Verschieben: <strong>0</strong></span>
+						<span class="mp-pending-card" id="pc-create_topic">Neue Topics: <strong>0</strong></span>
+						<span class="mp-pending-card" id="pc-move_to_pending_topic">… zu pending Topics: <strong>0</strong></span>
+						<span class="mp-pending-card" id="pc-reply_draft">Reply-Drafts: <strong>0</strong></span>
+					</div>
+
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary"   id="btn-pending-approve-all">Alle bestätigen</button>
+						<button class="mp-btn mp-btn-secondary" id="btn-pending-reload">Neu laden</button>
+					</div>
+
+					<ul class="mp-pending-list" id="pending-list"></ul>
+					<p class="mp-muted" id="pending-status"></p>
+				</div>
+			</section>
+
 			<section class="mp-subpanel" data-subpanel="maint">
 				<div class="mp-section">
 					<h2>Wartung</h2>

@@ -256,8 +256,262 @@ function initSettingsOverlay() {
 			document.querySelectorAll('.mp-subpanel').forEach(p => p.classList.remove('is-active'));
 			tab.classList.add('is-active');
 			document.querySelector(`.mp-subpanel[data-subpanel="${name}"]`)?.classList.add('is-active');
+
+			// Sprint 6c: Lazy-Load der Tab-Daten beim Wechsel.
+			if (name === 'modes')   loadModes();
+			if (name === 'pending') loadPending();
 		});
 	});
+
+	// Buttons im neuen Modi-Sub-Tab
+	document.getElementById('btn-save-modes')?.addEventListener('click', saveModes);
+	['mode-move','mode-topic','mode-reply'].forEach((id) => {
+		document.getElementById(id)?.addEventListener('change', refreshModeHints);
+	});
+
+	// Buttons im Pending-Sub-Tab
+	document.getElementById('btn-pending-reload')?.addEventListener('click', () => loadPending());
+	document.getElementById('btn-pending-approve-all')?.addEventListener('click', bulkApproveAllPending);
+}
+
+// ----- Sprint 6c: Modi -----
+async function loadModes() {
+	try {
+		const m = await api.modes.get();
+		document.getElementById('mode-move').value  = m.autosort_move_mode         ?? 'suggest';
+		document.getElementById('mode-topic').value = m.autosort_create_topic_mode ?? 'suggest';
+		document.getElementById('mode-reply').value = m.autosort_reply_mode        ?? 'suggest';
+		refreshModeHints();
+	} catch (err) { handleError(err); }
+}
+
+function refreshModeHints() {
+	const lv = { off: 0, suggest: 1, auto: 2 };
+	const move  = document.getElementById('mode-move').value;
+	const topic = document.getElementById('mode-topic').value;
+	const moveHint  = document.getElementById('mode-move-hint');
+	const topicHint = document.getElementById('mode-topic-hint');
+	if (moveHint) {
+		moveHint.textContent = move === 'off'
+			? 'Mails bleiben im Inbox. KI klassifiziert weiter, verschiebt aber nicht.'
+			: (move === 'suggest' ? 'Jeder Move landet im Pending-Tab.' : 'Mails werden sofort in den Ziel-Ordner verschoben.');
+	}
+	if (topicHint) {
+		if (lv[topic] > lv[move]) {
+			topicHint.textContent = `⚠ ${topic} ist aggressiver als „${move}" für Move — Speichern wird mit 422 abgelehnt. Setze erst Move höher.`;
+			topicHint.style.color = '#b91c1c';
+		} else {
+			topicHint.style.color = '';
+			topicHint.textContent = topic === 'off'
+				? 'Keine KI-Discovery. Sub-Labels nur manuell anlegen.'
+				: (topic === 'suggest' ? 'Discovery erscheint als „KI-Vorschlag" im Auto-Sort-Tab UND im Pending-Tab.' : 'Discovery legt Folder + Rule sofort an, Mails werden ab nächstem Sync sortiert.');
+		}
+	}
+}
+
+async function saveModes() {
+	const status = document.getElementById('modes-status');
+	status.textContent = 'Speichere…';
+	try {
+		const payload = {
+			autosort_move_mode:         document.getElementById('mode-move').value,
+			autosort_create_topic_mode: document.getElementById('mode-topic').value,
+			autosort_reply_mode:        document.getElementById('mode-reply').value,
+		};
+		const res = await api.modes.save(payload);
+		// DA-Impl-Finding 3: Bestands-Pending unter altem Modus sichtbar
+		// machen. Wenn z.B. von suggest auf auto gewechselt wird und 47
+		// pending-suggest-Moves rumliegen, würden sie sonst „verloren" gehen.
+		const ep = res?.existing_pending ?? {};
+		if ((ep.total ?? 0) > 0) {
+			status.textContent = `Gespeichert. Du hast noch ${ep.total} ausstehende Vorschläge unter dem alten Modus — bitte im Pending-Tab sichten.`;
+		} else {
+			status.textContent = 'Gespeichert.';
+			setTimeout(() => { if (status) status.textContent = ''; }, 2000);
+		}
+	} catch (err) {
+		status.textContent = '';
+		handleError(err);
+	}
+}
+
+// ----- Sprint 6c: Pending -----
+let pendingLoading = false;
+
+async function loadPending() {
+	if (pendingLoading) return;
+	pendingLoading = true;
+	const status = document.getElementById('pending-status');
+	status.textContent = 'Lade…';
+	try {
+		const res = await api.pending.list(null, null, 50);
+		renderPending(res);
+		status.textContent = '';
+	} catch (err) {
+		status.textContent = '';
+		handleError(err);
+	} finally {
+		pendingLoading = false;
+	}
+}
+
+function renderPending(res) {
+	const counts = res.counts ?? {};
+	const total  = counts.total ?? 0;
+
+	// Tab-Count-Badge
+	const tabBadge = document.getElementById('pending-tab-count');
+	if (tabBadge) {
+		if (total > 0) {
+			tabBadge.textContent = ' ' + total;
+			tabBadge.dataset.hidden = 'false';
+		} else {
+			tabBadge.textContent = '';
+			tabBadge.dataset.hidden = 'true';
+		}
+	}
+
+	// Per-Kind-Counts
+	['move','create_topic','move_to_pending_topic','reply_draft'].forEach((kind) => {
+		const el = document.getElementById('pc-' + kind);
+		if (el) {
+			const strong = el.querySelector('strong');
+			if (strong) strong.textContent = String(counts[kind] ?? 0);
+		}
+	});
+
+	// Banner
+	const banner = document.getElementById('pending-banner');
+	const b = res.banner ?? { level: 'none', total: 0 };
+	if (b.level === 'none') {
+		banner.dataset.hidden = 'true';
+		banner.textContent = '';
+	} else {
+		banner.dataset.hidden = 'false';
+		banner.dataset.level  = b.level;
+		const msgs = {
+			info:    `Du hast ${b.total} offene Vorschläge — alles im Rahmen.`,
+			warning: `${b.total} offene Vorschläge — älteste werden in wenigen Tagen verworfen, bitte sichten.`,
+			block:   `${b.total} offene Vorschläge — bitte erst bearbeiten oder Modi auf „Aus"/„Auto" setzen.`,
+		};
+		banner.textContent = msgs[b.level] ?? '';
+	}
+
+	const list = document.getElementById('pending-list');
+	list.replaceChildren();
+	for (const item of res.items ?? []) {
+		list.appendChild(buildPendingRow(item));
+	}
+	if ((res.items ?? []).length === 0) {
+		const li = document.createElement('li');
+		li.className = 'mp-muted';
+		li.textContent = 'Keine offenen Vorschläge.';
+		list.appendChild(li);
+	}
+}
+
+function buildPendingRow(item) {
+	const li = document.createElement('li');
+	li.className = 'mp-pending-item';
+	li.dataset.kind = item.kind;
+	if (item.last_error) li.dataset.hasError = 'true';
+
+	const title = document.createElement('div');
+	title.className = 'mp-pending-title';
+	const kindLabel = {
+		move:                   'Verschieben',
+		create_topic:           'Neuer Topic',
+		move_to_pending_topic:  'Verschieben (wartet auf Topic)',
+		reply_draft:            'Reply-Draft',
+	}[item.kind] ?? item.kind;
+	title.textContent = kindLabel + ': ';
+	const subj = document.createElement('strong');
+	subj.textContent = item.payload?.subject || item.payload?.sub_label || item.payload?.mail_id || item.id;
+	title.appendChild(subj);
+	li.appendChild(title);
+
+	if (item.payload?.target_folder || item.payload?.folder_path) {
+		const sub = document.createElement('div');
+		sub.className = 'mp-muted';
+		sub.textContent = '→ ' + (item.payload?.target_folder || item.payload?.folder_path);
+		li.appendChild(sub);
+	}
+
+	if (item.last_error) {
+		const err = document.createElement('div');
+		err.className = 'mp-error-text';
+		err.textContent = 'Fehler: ' + item.last_error;
+		li.appendChild(err);
+	}
+
+	const actions = document.createElement('div');
+	actions.className = 'mp-actions';
+	const ok = document.createElement('button');
+	ok.className = 'mp-btn mp-btn-primary';
+	const childCount = item.children_count ?? 0;
+	if (item.kind === 'create_topic' && childCount > 0) {
+		ok.textContent = `Anlegen + ${childCount} Mail${childCount === 1 ? '' : 's'} verschieben`;
+	} else {
+		ok.textContent = item.last_error ? 'Erneut versuchen' : 'Bestätigen';
+	}
+	ok.addEventListener('click', () => approvePending(item.id, item.kind, childCount));
+	const no = document.createElement('button');
+	no.className = 'mp-btn mp-btn-ghost';
+	no.textContent = 'Ablehnen';
+	no.addEventListener('click', () => rejectPending(item.id));
+	actions.appendChild(ok);
+	actions.appendChild(no);
+	li.appendChild(actions);
+	return li;
+}
+
+async function approvePending(id, kind = null, childrenCount = 0) {
+	// DA-Impl-Finding 2: bei create_topic mit Children Bulk-Move-Confirm
+	// (PRD §3.1). Sonst sieht der User den Mail-Move nicht kommen.
+	if (kind === 'create_topic' && childrenCount > 0) {
+		const ok = await mpConfirm({
+			title: 'Topic anlegen + Mails verschieben?',
+			body: `Es werden ${childrenCount} Mail${childrenCount === 1 ? '' : 's'} in den neuen Topic-Ordner verschoben. Fortfahren?`,
+			okLabel: 'Anlegen + verschieben',
+		});
+		if (!ok) return;
+	}
+	try {
+		const res = await api.pending.approve(id);
+		if (res?.result?.kind === 'create_topic') {
+			const done   = res.result.moves_done   ?? 0;
+			const failed = res.result.moves_failed ?? 0;
+			setStatus(`Topic angelegt. ${done} verschoben, ${failed} Fehler.`);
+		}
+		await loadPending();
+	} catch (err) { handleError(err); }
+}
+
+async function rejectPending(id) {
+	try { await api.pending.reject(id); await loadPending(); }
+	catch (err) { handleError(err); }
+}
+
+async function bulkApproveAllPending() {
+	const status = document.getElementById('pending-status');
+	let totalDone = 0, totalFailed = 0, processed = 0;
+	let cursor = null;
+	try {
+		while (true) {
+			const res = await api.pending.bulkApprove({ after_id: cursor, limit: 25 });
+			processed   += res.processed   ?? 0;
+			totalDone   += res.succeeded   ?? 0;
+			totalFailed += res.failed      ?? 0;
+			status.textContent = `Verarbeite ${processed}…`;
+			cursor = res.next_cursor;
+			if (!cursor || res.processed === 0) break;
+		}
+		status.textContent = `Fertig: ${totalDone} erfolgreich, ${totalFailed} Fehler.`;
+		await loadPending();
+	} catch (err) {
+		status.textContent = '';
+		handleError(err);
+	}
 }
 
 // ============================================================

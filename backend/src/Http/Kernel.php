@@ -13,6 +13,7 @@ use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
+use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\ScoreRepository;
@@ -108,6 +109,7 @@ class Kernel
 			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
+			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
 			PricingRepository::class  => new PricingRepository($this->get(PDO::class)),
 			UsageRepository::class    => new UsageRepository($this->get(PDO::class)),
 			BudgetService::class      => new BudgetService(
@@ -122,6 +124,7 @@ class Kernel
 				$this->get(PDO::class),
 				$this->get(Logger::class),
 				$this->get(SettingsRepository::class),
+				$this->get(PendingActionRepository::class),
 			),
 			RedactionService::class   => new RedactionService(),
 			JwtService::class         => new JwtService(
@@ -151,6 +154,7 @@ class Kernel
 				(int)$this->config['limits']['scoring_batch_size'],
 				(int)$this->config['limits']['max_body_bytes'],
 				$this->get(Logger::class),
+				$this->get(PendingActionRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

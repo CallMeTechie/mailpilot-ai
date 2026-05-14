@@ -47,6 +47,11 @@ final class MailScoringService
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
 		private readonly \Psr\Log\LoggerInterface $logger,
+		// Sprint 6c: optional, damit Tests vor Sprint 6c den Service ohne
+		// Pending-Wiring bauen können. Wenn null, fällt der suggest-Pfad
+		// auf den enabled=0-Rule-only-Pfad zurück (kein pending_action-
+		// Eintrag im Tab, aber Rule erscheint im AutoSort-Tab mit Badge).
+		private readonly ?\MailPilot\Repositories\PendingActionRepository $pendingActions = null,
 	) {
 	}
 
@@ -849,6 +854,18 @@ final class MailScoringService
 
 		// 2) Discovery-Pfad
 		if ($isNew && $userId !== '') {
+			// Sprint 6c: Discovery wird durch autosort_create_topic_mode
+			// gegated. 'off' = keine KI-Discovery, 'suggest'/'auto'
+			// erlauben sie. created_under_mode wird in pending_actions
+			// festgenagelt (DA-Finding 1).
+			$createMode = $this->settings->getString('autosort_create_topic_mode', 'suggest');
+			if (!in_array($createMode, ['suggest', 'auto'], true)) {
+				$this->logger->info('topic.discovery_blocked_by_mode', [
+					'primary' => $primary, 'mode' => $createMode,
+				]);
+				return null;
+			}
+
 			// 2a) Format-Sanity: max 30 chars, only letters/digits/-/_/space/slash
 			if (mb_strlen($candidate) > 30 || !preg_match('/^[\p{L}\p{N}\s\-_\/]+$/u', $candidate)) {
 				$this->logger->info('topic.discovery_rejected', [
@@ -874,18 +891,44 @@ final class MailScoringService
 				}
 			}
 
-			// 2c) Anlegen: user_sublabels (created_by='ki') + AutoSort-Rule
-			// als KI-Vorschlag (disabled, created_by='ki'). Sprint 6b §3.1:
-			// kein silent retroactive move — User muss die Rule erst im UI
-			// freischalten. Bestehende Mails landen im Catch-all (Phase 6c
-			// erweitert das um pending_actions für die gekoppelten Moves).
+			// 2c) Anlegen: user_sublabels (created_by='ki') + AutoSort-Rule.
+			// Sprint 6c: bei autosort_create_topic_mode='auto' wird die
+			// Rule sofort enabled; bei 'suggest' bleibt sie disabled (KI-
+			// Badge im AutoSort-Tab) UND wir legen zusätzlich eine
+			// pending_action(create_topic) an, damit das Pending-Tab sie
+			// als „Neuer Topic vorgeschlagen" zeigt. Die Bulk-Move-
+			// Bestätigung (PRD §3.1) passiert dann beim Approve im UI.
 			try {
 				$this->subLabels->create($tenantId, $userId, $primary, $candidate, null, null, 'ki');
 				$folderDefault = $this->settings->getString('folder_default.' . $primary, 'MailPilot/' . ucfirst($primary));
-				$this->autoSortRules->suggestKiRule($tenantId, $userId, $primary, $candidate, $folderDefault . '/' . $candidate);
+				$folderPath    = $folderDefault . '/' . $candidate;
+
+				if ($createMode === 'auto') {
+					// Auto-Modus: AutoSort-Rule wird direkt enabled angelegt.
+					// AutoSortService.applyToScoredMail moved dann ab dem
+					// nächsten Score-Pass automatisch.
+					$this->autoSortRules->upsert($tenantId, $userId, $primary, $candidate, true, $folderPath);
+				} else {
+					// Suggest-Modus: KI-Rule disabled + pending_action(create_topic)
+					// damit der User im Pending-Tab UND im Auto-Sort-Tab den
+					// Vorschlag sieht. DA-Impl-Finding 1: fail-closed wenn
+					// kein PendingRepo injiziert (Sprint-6c-Vertrag).
+					if ($this->pendingActions === null) {
+						throw new \RuntimeException('MailScoringService: suggest-mode benötigt PendingActionRepository');
+					}
+					$this->autoSortRules->suggestKiRule($tenantId, $userId, $primary, $candidate, $folderPath);
+					$this->pendingActions->create($tenantId, $userId, 'create_topic', [
+						'primary'     => $primary,
+						'sub_label'   => $candidate,
+						'folder_path' => $folderPath,
+						'reason'      => 'auto-discovery',
+					], 'suggest');
+				}
+
 				$this->logger->info('topic.discovered', [
 					'name'    => $candidate,
 					'primary' => $primary,
+					'mode'    => $createMode,
 				]);
 				// Map lokal updaten, damit Folge-Mails im selben Batch
 				// den neuen Topic als "existing" sehen

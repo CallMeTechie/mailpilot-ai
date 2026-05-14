@@ -7,6 +7,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
@@ -27,6 +28,11 @@ final class MailScoringServiceTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		// Sprint 6c: Bestandstests prüfen Auto-Discovery-Verhalten (KI legt
+		// Sub-Label + Rule sofort an). Migration 0018 seedet 'suggest' als
+		// Default — auf 'auto' setzen damit Tests durchgehen.
+		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
+			WHERE `key`='autosort_create_topic_mode'")->execute();
 	}
 
 	private function makeService(FakeClaudeClient $claude): MailScoringService
@@ -47,12 +53,13 @@ final class MailScoringServiceTest extends TestCase
 			$budget,
 			new CorrectionRepository($pdo),
 			new SubLabelRepository($pdo),
-			new AutoSortRepository($pdo),
+			new AutoSortRepository($pdo, new SettingsRepository($pdo)),
 			new PromptRepository($pdo),
 			new SettingsRepository($pdo),
 			20,
 			2048,
 			$this->logger(),
+			new PendingActionRepository($pdo),
 		);
 	}
 
@@ -420,14 +427,14 @@ final class MailScoringServiceTest extends TestCase
 		$this->assertSame('auto', $subs[0]['parent']);
 		$this->assertSame('ki', $subs[0]['created_by']);
 
-		// auto_sort_rules: passende Sub-Rule angelegt — Sprint 6b: disabled
-		// + created_by='ki' (User muss in den Settings erst aktivieren).
-		// Vorher (Mini-6b) war enabled=true; PRD §3.1 fordert „kein silent
-		// retroactive move", also disabled bis Approve.
+		// auto_sort_rules: passende Sub-Rule angelegt. Sprint 6c: das Test-
+		// Setup zwingt autosort_create_topic_mode='auto' → Rule ist enabled.
+		// Im 'suggest'-Modus (Default Production) wäre sie disabled + es
+		// gäbe eine pending_action(create_topic); das pinnt PendingActionsTest.
 		$rule = (new AutoSortRepository($this->pdo()))
 			->findRule($tenantId, $userId, 'auto', 'Stripe Payments');
 		$this->assertNotNull($rule);
-		$this->assertFalse($rule['enabled'], 'KI-Discovery erzeugt disabled Rule (Sprint 6b)');
+		$this->assertTrue($rule['enabled'], 'Auto-Modus enabled die KI-Rule sofort (Sprint 6c)');
 		$this->assertStringContainsString('Stripe Payments', $rule['folder_name']);
 	}
 

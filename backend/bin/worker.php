@@ -24,6 +24,8 @@ require_once __DIR__ . '/wait_for_db.php';
 use MailPilot\Http\Kernel;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\SyncService;
@@ -101,11 +103,19 @@ while (true) {
 
 			$purgedUsage = $kernel->get(UsageRepository::class)->purgeOlderThan(30);
 
+			// Sprint 6c: Pending-Age-Out (PRD §6c). created_under_mode wird
+			// vom Caller (UI/Service) honored — wir markieren hier nur die
+			// alten als aged_out. Schwelle aus system_settings, min. 7 Tage.
+			$pendingRetention = max(7,
+				$kernel->get(SettingsRepository::class)->getInt('pending.retention_days', 30));
+			$agedOutPending = $kernel->get(PendingActionRepository::class)->ageOut($pendingRetention);
+
 			$log->info('worker.housekeeping', [
 				'bodies'        => $purgedBodies,
 				'oauth_states'  => $purgedStates,
 				'jwt_blacklist' => $purgedBlacklist,
 				'api_usage'     => $purgedUsage,
+				'pending_aged'  => $agedOutPending,
 			]);
 			$lastHousekeepingDay = $today;
 		}

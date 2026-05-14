@@ -7,6 +7,7 @@ use MailPilot\Controllers\AuthController;
 use MailPilot\Controllers\BriefingController;
 use MailPilot\Controllers\MailController;
 use MailPilot\Controllers\MeController;
+use MailPilot\Controllers\PendingController;
 use MailPilot\Controllers\SettingsController;
 use MailPilot\Controllers\SyncController;
 use MailPilot\Http\Exceptions\HttpException;
@@ -95,6 +96,7 @@ final class Router
 			'SyncController'     => SyncController::class,
 			'SettingsController' => SettingsController::class,
 			'MeController'       => MeController::class,
+			'PendingController'  => PendingController::class,
 			default              => throw new \RuntimeException("Unknown controller: {$controllerName}"),
 		};
 

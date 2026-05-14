@@ -190,4 +190,21 @@ export const api = {
 		saveAliases:   (list)  => request('POST',   '/me/aliases', { aliases: list }),
 		acknowledgePrivacy: () => request('POST',   '/me/privacy-acknowledge'),
 	},
+	// Sprint 6c — Modi + Pending
+	modes: {
+		get:    ()       => request('GET',  '/settings/modes'),
+		save:   (modes)  => request('POST', '/settings/modes', modes),
+	},
+	pending: {
+		list:         (kind = null, afterId = null, limit = 50) => {
+			const q = new URLSearchParams();
+			if (kind)    q.set('kind', kind);
+			if (afterId) q.set('after_id', afterId);
+			if (limit)   q.set('limit', String(limit));
+			return request('GET', `/pending${q.toString() ? '?' + q.toString() : ''}`);
+		},
+		approve:      (id)        => request('POST', `/pending/${id}/approve`),
+		reject:       (id)        => request('POST', `/pending/${id}/reject`),
+		bulkApprove:  (body = {}) => request('POST', '/pending/bulk-approve', body),
+	},
 };

@@ -7,6 +7,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
@@ -34,6 +35,9 @@ final class ActionOwnerTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		// Sprint 6c: Test geht von Auto-Discovery aus (kein suggest-Pending).
+		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
+			WHERE `key`='autosort_create_topic_mode'")->execute();
 	}
 
 	private function makeService(FakeClaudeClient $claude): MailScoringService
@@ -60,6 +64,7 @@ final class ActionOwnerTest extends TestCase
 			20,
 			2048,
 			$this->logger(),
+			new PendingActionRepository($pdo),
 		);
 	}
 

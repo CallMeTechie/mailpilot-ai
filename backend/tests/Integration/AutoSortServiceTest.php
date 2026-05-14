@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace MailPilot\Tests\Integration;
 
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Services\AutoSortService;
 use MailPilot\Tests\Fixtures\FakeGraphClient;
 use MailPilot\Tests\TestCase;
@@ -20,15 +22,23 @@ final class AutoSortServiceTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		// Sprint 6c: Bestandstests prüfen direktes-Move-Verhalten. Migration
+		// 0018 seedet 'suggest' als Default — explizit auf 'auto' setzen,
+		// damit applyToScoredMail durch den Graph-Pfad geht.
+		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto' WHERE `key`='autosort_move_mode'")
+			->execute();
 	}
 
 	private function makeService(FakeGraphClient $graph): AutoSortService
 	{
+		$pdo = $this->pdo();
 		return new AutoSortService(
 			$graph,
-			new AutoSortRepository($this->pdo()),
-			$this->pdo(),
+			new AutoSortRepository($pdo),
+			$pdo,
 			$this->logger(),
+			new SettingsRepository($pdo),
+			new PendingActionRepository($pdo),
 		);
 	}
 

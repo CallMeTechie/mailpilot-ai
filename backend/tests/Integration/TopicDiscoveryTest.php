@@ -7,6 +7,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\ScoreRepository;
@@ -34,6 +35,10 @@ final class TopicDiscoveryTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		// Sprint 6c: 'auto'-Mode für Discovery, damit Rule sofort enabled
+		// wird (TopicDiscoveryTest pinnt das Sprint-6b-Verhalten).
+		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
+			WHERE `key`='autosort_create_topic_mode'")->execute();
 	}
 
 	private function makeService(FakeClaudeClient $claude): MailScoringService
@@ -60,6 +65,7 @@ final class TopicDiscoveryTest extends TestCase
 			20,
 			2048,
 			$this->logger(),
+			new PendingActionRepository($pdo),
 		);
 	}
 
@@ -117,8 +123,12 @@ final class TopicDiscoveryTest extends TestCase
 		$rule = $this->pdo()->query("SELECT enabled, created_by, folder_name
 			FROM auto_sort_rules WHERE sub_label = 'GitHub CI' LIMIT 1")->fetch();
 		$this->assertIsArray($rule, 'KI-Discovery muss eine AutoSortRule erzeugen');
-		$this->assertSame(0,     (int)$rule['enabled'],     'Rule muss disabled sein (User-Approve nötig)');
-		$this->assertSame('ki',  $rule['created_by'],       'Rule muss als KI-Vorschlag markiert sein');
+		// Sprint 6c im auto-Modus: Rule sofort enabled. Suggest-Modus =
+		// disabled + pending_action — gepinnt in PendingActionsTest.
+		$this->assertSame(1,     (int)$rule['enabled'],     'Auto-Modus enabled die Rule sofort');
+		// created_by ist 'user' im auto-Pfad (upsert vs suggestKiRule).
+		// Der KI-Badge im UI greift nur über sub_labels.created_by='ki'
+		// (das bleibt korrekt gesetzt durch SubLabelRepository::create).
 		$this->assertStringContainsString('GitHub CI', $rule['folder_name'],
 			'folder_name sollte den Topic-Namen enthalten');
 	}

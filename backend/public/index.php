@@ -63,4 +63,14 @@ $router->post('/api/v1/me/aliases/scan',         'MeController@scanAliases');
 $router->post('/api/v1/me/aliases',              'MeController@saveAliases');
 $router->post('/api/v1/me/privacy-acknowledge',  'MeController@acknowledgePrivacy');
 
+// Sprint 6c — Pending-Action-Queue
+$router->get ('/api/v1/pending',                     'PendingController@list');
+$router->post('/api/v1/pending/bulk-approve',        'PendingController@bulkApprove');
+$router->post('/api/v1/pending/{id}/approve',        'PendingController@approve');
+$router->post('/api/v1/pending/{id}/reject',         'PendingController@reject');
+
+// Sprint 6c — Modus-Toggles (3 × 3)
+$router->get ('/api/v1/settings/modes',              'SettingsController@getModes');
+$router->post('/api/v1/settings/modes',              'SettingsController@saveModes');
+
 $router->dispatch();
