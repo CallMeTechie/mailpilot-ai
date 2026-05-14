@@ -2356,14 +2356,19 @@ function labelText(label) {
 /**
  * Öffnet eine Mail in Outlook (separates Lese-Fenster).
  *
- * Office.js erwartet eine REST-ID (AAMk...) oder EWS-ID, je nach Outlook-
- * Build. Unsere ms_message_id ist die REST-ID. Wenn der Parameter
- * unbrauchbar ist (alte Payload mit interner UUID, oder Mail wurde
- * gelöscht), failed displayMessageFormAsync silent — daher Callback
- * + Toast, sonst denkt der User „Button macht nichts".
+ * Microsoft Graph kann Message-IDs in zwei Formaten zurückgeben:
+ *   - AAMk… = REST Item ID (klassisch)
+ *   - AQMk… = Immutable Item ID (default seit Graph v1.0 für viele Mailboxen)
+ * Beide werden von displayMessageFormAsync akzeptiert. Marc's gesamte
+ * Inbox hat AQMk-IDs — der frühere AAMk-only-Filter ließ jede „Öffnen"-
+ * Aktion in den „Mail-ID nicht verfügbar"-Toast laufen.
+ *
+ * Bei wirklich unbrauchbarem Parameter (interne UUID, leerer String)
+ * failed displayMessageFormAsync silent — daher Callback + Toast,
+ * sonst denkt der User „Button macht nichts".
  */
 function openMailInOutlook(mailId) {
-	if (!mailId || typeof mailId !== 'string' || !mailId.startsWith('AAMk')) {
+	if (!mailId || typeof mailId !== 'string' || !/^(AAMk|AQMk)/.test(mailId)) {
 		setStatus('Mail-ID nicht verfügbar — vielleicht zu alt oder noch nicht synchronisiert.');
 		return;
 	}
