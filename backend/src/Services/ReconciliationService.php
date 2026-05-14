@@ -146,13 +146,17 @@ final class ReconciliationService
 		$followGraph = ((string)$rule['folder_name'] === (string)$rule['last_known_display_name']);
 
 		if ($followGraph) {
+			// PDO mit emulate_prepares=false akzeptiert keinen Named-Param
+			// mehrfach in derselben Query — separate :n1/:n2 nutzen.
 			$this->db->prepare('UPDATE auto_sort_rules
-				SET folder_name = :n,
-				    last_known_display_name = :n,
+				SET folder_name = :n1,
+				    last_known_display_name = :n2,
 				    parent_folder_id = :pf,
 				    last_reconciled_at = UTC_TIMESTAMP(3)
 				WHERE id = :id')
-				->execute([':id' => $rule['id'], ':n' => $graphDisplay, ':pf' => $graphParent]);
+				->execute([
+					':id' => $rule['id'], ':n1' => $graphDisplay, ':n2' => $graphDisplay, ':pf' => $graphParent,
+				]);
 			$this->logger->info('reconciliation.followed_graph', [
 				'rule' => $rule['id'], 'new' => $graphDisplay,
 			]);
