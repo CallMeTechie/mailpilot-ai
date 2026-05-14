@@ -70,8 +70,19 @@ final class SyncService
 		$deltaResult = $this->graph->syncInbox($accessToken, $mailbox['delta_token']);
 
 		$processed = 0;
+		$deleted   = 0;
 		foreach ($deltaResult['messages'] as $msg) {
 			if ($this->isTombstone($msg)) {
+				// Graph schickt @removed wenn der User die Mail in Outlook
+				// (oder ein anderer Client) gelöscht hat. Vor diesem Fix
+				// schluckten wir das schweigend — Mail blieb in MailPilot
+				// sichtbar, „Öffnen" warf ErrorItemNotFound.
+				$msMessageId = (string)($msg['id'] ?? '');
+				if ($msMessageId !== ''
+					&& $this->mails->markDeletedByMsId($tenantId, $mailboxId, $msMessageId)
+				) {
+					$deleted++;
+				}
 				continue;
 			}
 			// Sprint 6d: Move-Detection läuft VOR dem Upsert — sonst
@@ -130,6 +141,7 @@ final class SyncService
 			'mailbox'   => $mailboxId,
 			'processed' => $processed,
 			'scored'    => count($scored),
+			'deleted'   => $deleted,
 		]);
 
 		return ['processed' => $processed, 'scored' => count($scored)];

@@ -186,6 +186,21 @@ final class MailRepository
 	}
 
 	/**
+	 * Markiert eine Mail als gelöscht (Soft-Delete) basierend auf einem
+	 * Graph-Tombstone (@removed). Returnt true wenn eine Row geändert
+	 * wurde — sonst false (Tombstone für unbekannte / schon-gelöschte Mail).
+	 */
+	public function markDeletedByMsId(string $tenantId, string $mailboxId, string $msMessageId): bool
+	{
+		$stmt = $this->db->prepare('UPDATE mails
+			SET deleted_at = UTC_TIMESTAMP(3)
+			WHERE tenant_id = :t AND mailbox_id = :mb
+			  AND ms_message_id = :ms AND deleted_at IS NULL');
+		$stmt->execute([':t' => $tenantId, ':mb' => $mailboxId, ':ms' => $msMessageId]);
+		return $stmt->rowCount() > 0;
+	}
+
+	/**
 	 * Purge body_text older than retention days.
 	 */
 	public function purgeOldBodies(int $retentionDays): int
