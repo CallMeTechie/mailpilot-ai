@@ -25,13 +25,20 @@ final class ScoreRepository
 		// label/sub_label/priority/action_required stay frozen until
 		// the user re-corrects.
 		$sql = 'INSERT INTO mail_scores
-			(id, tenant_id, mail_id, label, sub_label, action_required, priority, summary, reasoning, prompt_version, model, cached, scored_at)
-			VALUES (:id, :tenant_id, :mail_id, :label, :sub_label, :action_required, :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
+			(id, tenant_id, mail_id, label, sub_label, action_required,
+			 action_owner, action_owner_confidence, action_owner_source,
+			 priority, summary, reasoning, prompt_version, model, cached, scored_at)
+			VALUES (:id, :tenant_id, :mail_id, :label, :sub_label, :action_required,
+			 :action_owner, :action_owner_confidence, :action_owner_source,
+			 :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
-				label           = IF(user_corrected_at IS NULL, VALUES(label),           label),
-				sub_label       = IF(user_corrected_at IS NULL, VALUES(sub_label),       sub_label),
-				action_required = IF(user_corrected_at IS NULL, VALUES(action_required), action_required),
-				priority        = IF(user_corrected_at IS NULL, VALUES(priority),        priority),
+				label                   = IF(user_corrected_at IS NULL, VALUES(label),                   label),
+				sub_label               = IF(user_corrected_at IS NULL, VALUES(sub_label),               sub_label),
+				action_required         = IF(user_corrected_at IS NULL, VALUES(action_required),         action_required),
+				action_owner            = IF(user_corrected_at IS NULL, VALUES(action_owner),            action_owner),
+				action_owner_confidence = IF(user_corrected_at IS NULL, VALUES(action_owner_confidence), action_owner_confidence),
+				action_owner_source     = IF(user_corrected_at IS NULL, VALUES(action_owner_source),     action_owner_source),
+				priority                = IF(user_corrected_at IS NULL, VALUES(priority),                priority),
 				summary         = VALUES(summary),
 				reasoning       = VALUES(reasoning),
 				prompt_version  = VALUES(prompt_version),
@@ -48,6 +55,9 @@ final class ScoreRepository
 				':label'           => $s['label'],
 				':sub_label'       => $s['sub_label'] ?? null,
 				':action_required' => $s['action_required'],
+				':action_owner'            => $s['action_owner']            ?? 'unsure',
+				':action_owner_confidence' => $s['action_owner_confidence'] ?? null,
+				':action_owner_source'     => $s['action_owner_source']     ?? null,
 				':priority'        => $s['priority'],
 				':summary'         => $s['summary'],
 				':reasoning'       => $s['reasoning'],

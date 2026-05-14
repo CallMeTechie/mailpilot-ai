@@ -983,7 +983,121 @@ let subLabelsByParent = {};
 /** @type {Array<{label:string, sub_label:?string, enabled:boolean, folder_name:string}>} */
 let autoSortRulesCache = [];
 
+// Sprint 6a Alias-State. local hält die in-memory-Liste, die
+// renderAliasChips() rendert; privacyAck wird vom Profile-Load
+// gesetzt und vom Save-Pfad konsultiert, um den Disclaimer nur einmal
+// pro User zu zeigen.
+const aliasState = { local: [], privacyAck: null };
+
+function renderAliasChips() {
+	const ul = document.getElementById('alias-chips');
+	if (!ul) return;
+	ul.innerHTML = '';
+	aliasState.local.forEach((name, idx) => {
+		const li = document.createElement('li');
+		li.className = 'mp-chip';
+		li.textContent = name;
+		const btn = document.createElement('button');
+		btn.className = 'mp-chip-remove';
+		btn.setAttribute('aria-label', `${name} entfernen`);
+		btn.textContent = '×';
+		btn.addEventListener('click', () => {
+			// DA-Finding 2: keine Mutation vor persistAliases. Wir berechnen
+			// die nächste Liste rein funktional und reichen sie weiter.
+			const next = aliasState.local.filter((_, i) => i !== idx);
+			persistAliases(next);
+		});
+		li.appendChild(btn);
+		ul.appendChild(li);
+	});
+}
+
+function renderAliasSuggestions(list) {
+	const wrap = document.getElementById('alias-suggestions');
+	const ul   = document.getElementById('alias-suggest-list');
+	if (!wrap || !ul) return;
+	ul.innerHTML = '';
+	if (list.length === 0) {
+		wrap.dataset.hidden = 'false';
+		const li = document.createElement('li');
+		li.className = 'mp-muted';
+		li.textContent = 'Keine wiederkehrenden Anreden gefunden.';
+		ul.appendChild(li);
+		return;
+	}
+	list.forEach((s) => {
+		const li = document.createElement('li');
+		li.className = 'mp-chip mp-chip-suggest';
+		li.textContent = `${s.name} · ${s.count}×`;
+		li.addEventListener('click', () => {
+			if (!aliasState.local.some(a => a.toLowerCase() === s.name.toLowerCase())
+				&& aliasState.local.length < 30) {
+				persistAliases([...aliasState.local, s.name]);
+			}
+			li.remove();
+		});
+		ul.appendChild(li);
+	});
+	wrap.dataset.hidden = 'false';
+}
+
+// DA-Finding 2: persistAliases nimmt jetzt die KANDIDATEN-Liste als Arg
+// statt zu mutieren bevor der User zustimmt. Bei Cancel oder Fail bleibt
+// aliasState.local unverändert, kein Phantom-Chip im UI.
+async function persistAliases(candidates) {
+	const previous = [...aliasState.local];
+	if (aliasState.privacyAck === null) {
+		const ok = await mpConfirm({
+			title: 'Hinweis zum Datenschutz',
+			body: 'Aliase enthalten manchmal Namen Dritter (Kollegen, Kunden). Diese Informationen bleiben auf deinem Server und werden nur als Kontext an die KI gesendet — nicht zur Weitergabe gespeichert. Akzeptierst du das?',
+			okLabel: 'Akzeptieren',
+		});
+		if (!ok) return;
+		try { await api.me.acknowledgePrivacy(); aliasState.privacyAck = new Date().toISOString(); }
+		catch (err) { handleError(err); return; }
+	}
+	try {
+		await api.me.saveAliases(candidates);
+		aliasState.local = candidates;
+		renderAliasChips();
+	} catch (err) {
+		// Rollback auf den State vor dem Save-Versuch — falls bereits
+		// optimistisch gerendert wurde, korrigiert das die UI zurück.
+		aliasState.local = previous;
+		renderAliasChips();
+		handleError(err);
+	}
+}
+
 function initSettings() {
+	// Sprint 6a Alias-Wireups
+	document.getElementById('btn-add-alias')?.addEventListener('click', () => {
+		const inp = document.getElementById('alias-input');
+		const v = inp.value.trim();
+		if (!v || aliasState.local.length >= 30) return;
+		if (!aliasState.local.some(a => a.toLowerCase() === v.toLowerCase())) {
+			persistAliases([...aliasState.local, v]);
+		}
+		inp.value = '';
+	});
+	document.getElementById('alias-input')?.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-add-alias').click(); }
+	});
+	document.getElementById('btn-scan-aliases')?.addEventListener('click', async () => {
+		const btn = document.getElementById('btn-scan-aliases');
+		btn.disabled = true;
+		btn.textContent = 'Scanne…';
+		try {
+			const res = await api.me.scanAliases();
+			renderAliasSuggestions(res.suggestions ?? []);
+		} catch (err) {
+			handleError(err);
+		} finally {
+			btn.disabled = false;
+			btn.textContent = 'Vorschläge aus letzten 200 Mails';
+		}
+	});
+
 	document.getElementById('btn-add-vip').addEventListener('click', async () => {
 		const email = document.getElementById('vip-email').value.trim();
 		if (!email) return;
@@ -1112,17 +1226,24 @@ let settingsGen = 0;
 async function loadSettings() {
 	const myGen = ++settingsGen;
 	try {
-		const [vip, red, autosort, subs] = await Promise.all([
+		const [vip, red, autosort, subs, profile] = await Promise.all([
 			api.settings.listVip(),
 			api.settings.listRedaction(),
 			api.settings.listAutoSort(),
 			api.settings.listSubLabels(),
+			api.me.profile(),
 		]);
 		if (myGen !== settingsGen) return;
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
 		renderList('red-list', red.items ?? [], (r) => `<code>${escape(r.pattern)}</code> — ${escape(r.description ?? '')}`, 'deleteRedaction');
 		renderSubLabels(subs.items ?? []);
 		renderAutoSortRules(autosort.rules ?? []);
+
+		// Sprint 6a: Alias-Chips aus Profil rendern, Privacy-Ack-Status merken
+		const user = profile?.user ?? {};
+		aliasState.local = Array.isArray(user.aliases) ? [...user.aliases] : [];
+		aliasState.privacyAck = user.privacy_acknowledged_at ?? null;
+		renderAliasChips();
 	} catch (err) {
 		// 401 darf nicht stumm im Overlay versanden — bounceToLogin
 		// schließt das Overlay (siehe Sprint 0.3-Fix) und führt den

@@ -185,5 +185,9 @@ export const api = {
 	me: {
 		export:        ()      => request('GET',    '/me/export'),
 		deleteAccount: ()      => request('DELETE', '/me'),
+		profile:       ()      => request('GET',    '/me/profile'),
+		scanAliases:   ()      => request('POST',   '/me/aliases/scan'),
+		saveAliases:   (list)  => request('POST',   '/me/aliases', { aliases: list }),
+		acknowledgePrivacy: () => request('POST',   '/me/privacy-acknowledge'),
 	},
 };

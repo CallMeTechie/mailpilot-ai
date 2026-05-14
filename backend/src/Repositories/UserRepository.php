@@ -105,4 +105,62 @@ final class UserRepository
 		}
 	}
 
+	/**
+	 * Liefert das vollständige User-Profil inkl. aliases + privacy_acknowledged_at
+	 * (Sprint 6a). Verwendet vom Score-Prompt-Builder und vom Add-in-Profile-Endpoint.
+	 *
+	 * @return array<string,mixed>|null
+	 */
+	public function findById(string $userId): ?array
+	{
+		$stmt = $this->db->prepare('SELECT id, email, display_name, aliases, privacy_acknowledged_at,
+				language, timezone, briefing_hour, created_at, updated_at
+			FROM users WHERE id = :id AND deleted_at IS NULL LIMIT 1');
+		$stmt->execute([':id' => $userId]);
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+		if ($row === false) return null;
+		// aliases ist JSON in der DB — direkt dekodieren, damit Consumer
+		// nicht jedes Mal selbst parsen müssen.
+		$row['aliases'] = $row['aliases'] !== null && $row['aliases'] !== ''
+			? (json_decode((string)$row['aliases'], true) ?: [])
+			: [];
+		return $row;
+	}
+
+	/**
+	 * Persistiert die User-bestätigte Alias-Liste (Sprint 6a). Akzeptiert
+	 * eine flache Liste von Strings; non-string Werte werden gefiltert,
+	 * Strings werden getrimmt, Duplikate (case-insensitive) entfernt,
+	 * Länge auf 50 Zeichen begrenzt. Max 30 Aliases pro User.
+	 *
+	 * @param list<mixed> $aliases
+	 */
+	public function saveAliases(string $userId, array $aliases): void
+	{
+		$clean = [];
+		$seen  = [];
+		foreach ($aliases as $a) {
+			if (!is_string($a)) continue;
+			$t = trim($a);
+			if ($t === '' || mb_strlen($t) > 50) continue;
+			$key = mb_strtolower($t);
+			if (isset($seen[$key])) continue;
+			$seen[$key] = true;
+			$clean[] = $t;
+			if (count($clean) >= 30) break;
+		}
+		$this->db->prepare('UPDATE users SET aliases = :a WHERE id = :id')
+			->execute([':a' => json_encode($clean, JSON_UNESCAPED_UNICODE), ':id' => $userId]);
+	}
+
+	/**
+	 * Markiert den DSGVO-Disclaimer als akzeptiert (Sprint 6a §10.3).
+	 * Idempotent: bestehender Zeitstempel wird nicht überschrieben.
+	 */
+	public function acknowledgePrivacy(string $userId): void
+	{
+		$this->db->prepare('UPDATE users SET privacy_acknowledged_at = UTC_TIMESTAMP(3)
+			WHERE id = :id AND privacy_acknowledged_at IS NULL')
+			->execute([':id' => $userId]);
+	}
 }

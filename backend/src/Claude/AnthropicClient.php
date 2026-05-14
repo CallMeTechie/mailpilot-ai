@@ -43,6 +43,10 @@ final class AnthropicClient implements ClaudeProvider
 					'Content-Type: application/json',
 					'x-api-key: ' . $this->apiKey,
 					'anthropic-version: ' . $this->anthropicVersion,
+					// Sprint 6a: Prompt-Caching + 1h-Extended-TTL. Header
+					// schadet nicht, wenn der Payload keine cache_control-
+					// Marker enthält; aktiviert aber das Feature wenn doch.
+					'anthropic-beta: prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11',
 				],
 			]);
 

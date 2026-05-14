@@ -239,6 +239,25 @@
 			<!-- Profil & Filter: VIP, Stichworte, Redaktion -->
 			<section class="mp-subpanel is-active" data-subpanel="profile">
 				<div class="mp-section">
+					<h2>Anrede-Aliase</h2>
+					<p class="mp-muted">Damit die KI „Hallo Marc", „Sehr geehrter Herr Backes" und „Hi MB" als denselben Empfänger erkennt. Ohne Aliase rät die KI bei mehrdeutigen Anreden — mit Aliasen kennt sie dich.</p>
+					<div class="mp-aliases">
+						<ul class="mp-chips" id="alias-chips" aria-label="Aktive Aliase"></ul>
+						<div class="mp-field mp-field-row">
+							<input type="text" id="alias-input" placeholder="z. B. Marc" maxlength="50">
+							<button class="mp-btn mp-btn-secondary" id="btn-add-alias">Hinzufügen</button>
+						</div>
+						<div class="mp-actions">
+							<button class="mp-btn mp-btn-ghost" id="btn-scan-aliases">Vorschläge aus letzten 200 Mails</button>
+						</div>
+						<div id="alias-suggestions" data-hidden="true">
+							<p class="mp-muted">Häufig in deinen Mails gefundene Anreden — klicke zum Übernehmen:</p>
+							<ul class="mp-chips mp-chips-suggest" id="alias-suggest-list"></ul>
+						</div>
+					</div>
+				</div>
+
+				<div class="mp-section">
 					<h2>VIP-Absender</h2>
 					<p class="mp-muted">Mails von diesen Adressen werden nie als Newsletter oder Noise klassifiziert.</p>
 					<div class="mp-field">

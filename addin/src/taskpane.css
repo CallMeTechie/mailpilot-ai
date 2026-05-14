@@ -739,3 +739,35 @@ textarea {
 }
 .mp-subpanel { display: none; }
 .mp-subpanel.is-active { display: block; }
+
+/* Alias-Chips (Sprint 6a) — kompakte tag-artige Liste mit Remove-Button.
+   Suggest-Chips sind klickbar zum Übernehmen. */
+.mp-chips {
+	display: flex; flex-wrap: wrap; gap: 6px;
+	list-style: none; padding: 0; margin: 0 0 8px 0;
+}
+.mp-chip {
+	display: inline-flex; align-items: center; gap: 4px;
+	padding: 4px 8px;
+	background: var(--mp-surface-hover);
+	color: var(--mp-text);
+	border-radius: 12px;
+	font-size: 12px;
+	border: 1px solid var(--mp-border);
+}
+.mp-chip-remove {
+	background: transparent; border: none; cursor: pointer;
+	color: var(--mp-text-muted); font-size: 14px; line-height: 1;
+	padding: 0 2px;
+}
+.mp-chip-remove:hover { color: var(--mp-text); }
+.mp-chips-suggest .mp-chip-suggest {
+	cursor: pointer;
+	background: var(--mp-bg);
+	border-style: dashed;
+}
+.mp-chips-suggest .mp-chip-suggest:hover {
+	background: var(--mp-surface-hover);
+	border-style: solid;
+}
+#alias-suggestions[data-hidden="true"] { display: none; }

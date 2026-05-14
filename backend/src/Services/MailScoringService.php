@@ -87,6 +87,13 @@ final class MailScoringService
 			? $this->loadSubLabelMap($tenantId, $userId)
 			: [];
 
+		// Mails, die per Cache klassifiziert werden, brauchen einen
+		// separaten Mini-Call für action_owner (PRD-Phase-6 §5.1) —
+		// hier sammeln wir die Mail-Refs mit Index in $scored, um sie
+		// nach dem Hauptloop in EINEM Batch zu Claude zu schicken.
+		// Format: list<array{mail: array, score_index: int}>
+		$cacheHits = [];
+
 		foreach ($mails as $mail) {
 			// --- Cache lookup ---
 			$hash = $this->contentHash($mail);
@@ -94,6 +101,7 @@ final class MailScoringService
 			if ($cached !== null) {
 				$row = $this->buildScoreFromCache($tenantId, $userId, $mail, $cached, $subLabelMap, $promptVersionTag, $activePrompt['model']);
 				$scored[] = $row;
+				$cacheHits[] = ['mail' => $mail, 'score_index' => count($scored) - 1];
 				if ($onChunkDone) { $onChunkDone(count($scored)); }
 				continue;
 			}
@@ -111,16 +119,221 @@ final class MailScoringService
 					$this->logger->warning('scoring.missing_result', ['mail_id' => $item['mail']['id']]);
 					continue;
 				}
-				$row = $this->buildScoreFromClaude($tenantId, $userId, $item['mail'], $claudeResult, $subLabelMap, $promptVersionTag, $activePrompt['model']);
+				$row = $this->buildScoreFromClaude($tenantId, $userId, $item['mail'], $claudeResult, $subLabelMap, $promptVersionTag, $activePrompt['model'], $userProfile);
 				$scored[] = $row;
 
-				$this->cache->put($tenantId, $item['hash'], $promptVersionTag, $activePrompt['model'], $claudeResult);
+				// claude_cache speichert NUR die kontext-unabhängigen
+				// Felder. action_owner/confidence kommen aus dem aktuellen
+				// Empfänger-Kontext und sind per PRD §5.1 NICHT cacheable —
+				// hier explizit entfernen. CacheRepository::put serialisiert
+				// das übergebene Array 1:1 als JSON, also muss der Filter
+				// vor dem Put passieren. CacheRepositoryTest pinnt das.
+				$cacheable = $claudeResult;
+				unset($cacheable['action_owner'], $cacheable['action_owner_confidence']);
+				$this->cache->put($tenantId, $item['hash'], $promptVersionTag, $activePrompt['model'], $cacheable);
 			}
 			if ($onChunkDone) { $onChunkDone(count($scored)); }
 		}
 
+		// --- Step 5: Mini-Call für action_owner der Cache-Hits ---
+		// EIN Call pro ensureScored-Aufruf, profitiert vom selben
+		// Prompt-Cache wie der Score-Call (System + USER_IDENTITY).
+		// Bei Failure → 3-Stufen-Fallback (Sprint 6a #5), nicht hier.
+		if ($cacheHits !== []) {
+			$this->resolveActionOwnersForCacheHits($userProfile, $cacheHits, $scored);
+		}
+
 		$this->scores->upsertMany($scored);
 		return $scored;
+	}
+
+	/**
+	 * Mini-Call: bekommt für jede Cache-Hit-Mail nur (recipients, Anrede-
+	 * Snippet, cached label) und liefert {action_owner, confidence}. Die
+	 * Ergebnisse werden direkt in die $scored-Rows zurück gemerged.
+	 *
+	 * Bei Failure (Throwable, Invalid-JSON, fehlende Mail-IDs) springt
+	 * der 3-Stufen-Fallback an (Sprint 6a #5 — applyActionOwnerFallback).
+	 *
+	 * @param array<string,mixed> $userProfile
+	 * @param list<array{mail:array<string,mixed>,score_index:int}> $cacheHits
+	 * @param list<array<string,mixed>> $scored In-place modified
+	 */
+	private function resolveActionOwnersForCacheHits(array $userProfile, array $cacheHits, array &$scored): void
+	{
+		$userEmail = strtolower((string)($userProfile['email'] ?? ''));
+		$payload = [];
+		foreach ($cacheHits as $hit) {
+			$mail = $hit['mail'];
+			$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');
+			$payload[] = [
+				'mail_id'      => (string)$mail['id'],
+				'recipients'   => $this->buildRecipients($mail, $userEmail),
+				'anrede_snippet' => substr($this->redactor->redact($body), 0, 200),
+				'cached_label' => $scored[$hit['score_index']]['label'] ?? 'auto',
+			];
+		}
+
+		try {
+			$results = $this->callMiniActionOwner($userProfile, $payload);
+		} catch (\Throwable $e) {
+			$this->logger->warning('action_owner.mini_call_failed', ['err' => $e->getMessage(), 'n' => count($payload)]);
+			$this->applyActionOwnerFallback($userProfile, $cacheHits, $scored);
+			return;
+		}
+
+		// Map nach mail_id für deterministischen Lookup (Index ist nicht
+		// garantiert, falls Claude die Reihenfolge bricht).
+		$byMailId = [];
+		foreach ($results as $r) {
+			if (is_array($r) && isset($r['mail_id'])) {
+				$byMailId[(string)$r['mail_id']] = $r;
+			}
+		}
+
+		$missing = [];
+		foreach ($cacheHits as $hit) {
+			$mailId = (string)$hit['mail']['id'];
+			$r = $byMailId[$mailId] ?? null;
+			if ($r === null) {
+				$missing[] = $hit;
+				continue;
+			}
+			$scored[$hit['score_index']]['action_owner']            = $this->validateActionOwner((string)($r['action_owner'] ?? 'unsure'));
+			$scored[$hit['score_index']]['action_owner_confidence'] = max(0, min(100, (int)($r['confidence'] ?? 0)));
+			$scored[$hit['score_index']]['action_owner_source']     = 'ki';
+		}
+
+		// Partial Result → für die fehlenden Mails Fallback fahren.
+		if ($missing !== []) {
+			$this->logger->info('action_owner.partial_result', ['missing' => count($missing)]);
+			$this->applyActionOwnerFallback($userProfile, $missing, $scored);
+		}
+	}
+
+	/**
+	 * Sendet den Mini-Call an Claude. Output ist JSON-Array von
+	 * {mail_id, action_owner, confidence}.
+	 *
+	 * @param array<string,mixed> $userProfile
+	 * @param list<array<string,mixed>> $payload
+	 * @return list<array<string,mixed>>
+	 */
+	private function callMiniActionOwner(array $userProfile, array $payload): array
+	{
+		$rules = "\n" . str_replace('\\n', "\n", $this->settings->getString(
+			'prompt.action_owner_rules',
+			'ACTION_OWNER_RULES: bei Anrede-Ambiguität immer action_owner=unsure.',
+		)) . "\n";
+
+		// Der System-Block ist hier kompakter als der Score-System-Prompt,
+		// teilt sich aber das USER_IDENTITY-Segment via buildCachedSystem-
+		// Segments (PRD §5.1: „Mini-Call enthält USER_IDENTITY-Segment und
+		// profitiert vom Prompt-Cache").
+		$systemSegments = $this->buildCachedSystemSegments(
+			'Du bist MailPilot, action_owner-Reasoner. Du antwortest AUSSCHLIESSLICH in gültigem JSON nach dem vorgegebenen Schema. Kein Prosa, keine Markdown-Codefences.',
+			$userProfile,
+		);
+
+		$user = "{$rules}\nMAILS:\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n\nGib exakt ein JSON-Objekt zurück:\n{\"results\":[{\"mail_id\":\"<id>\",\"action_owner\":\"user|other|group|unsure\",\"confidence\":0-100}]}\n\nAnzahl results = Anzahl MAILS, in derselben Reihenfolge.";
+
+		$tenantId = (string)($userProfile['tenant_id'] ?? '');
+		$userId   = (string)($userProfile['user_id']   ?? '') ?: null;
+		$model    = 'claude-haiku-4-5-20251001';
+		$promptTag = 'P-SCORE@mini-action-owner+code' . self::SCHEMA_CODE_REVISION;
+
+		$start = microtime(true);
+		try {
+			$response = $this->claude->messages([
+				'model'      => $model,
+				'max_tokens' => max(200, count($payload) * 40 + 200),
+				'system'     => $systemSegments,
+				'messages'   => [['role' => 'user', 'content' => $user]],
+			]);
+		} catch (\Throwable $e) {
+			// Budget-Tracking auch im Error-Pfad, damit gescheiterte Mini-
+			// Calls in usage_daily auftauchen (Latenz + Status).
+			$this->recordCall($tenantId, $userId, null, null, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage(), $promptTag, $model);
+			throw $e;
+		}
+		$this->recordCall($tenantId, $userId, null, null, $response['usage'] ?? [], (int)((microtime(true) - $start) * 1000), 'success', null, $promptTag, $model);
+
+		$text = $this->stripCodeFences(ClaudeClient::extractText($response));
+		$json = json_decode($text, true, 32, JSON_THROW_ON_ERROR);
+		$out = $json['results'] ?? [];
+		return is_array($out) ? $out : [];
+	}
+
+	/**
+	 * Deterministischer 3-Stufen-Fallback (Sprint 6a §5.1).
+	 *   1. User-im-To, einzig mit dem Vornamen → user/40
+	 *   2. BCC oder Verteiler-Adresse              → group/60
+	 *   3. Sonst                                   → unsure/0
+	 * Schreibt direkt in $scored, action_owner_source='fallback'.
+	 *
+	 * @param array<string,mixed> $userProfile
+	 * @param list<array{mail:array<string,mixed>,score_index:int}> $hits
+	 * @param list<array<string,mixed>> $scored
+	 */
+	private function applyActionOwnerFallback(array $userProfile, array $hits, array &$scored): void
+	{
+		foreach ($hits as $hit) {
+			[$owner, $conf] = $this->computeFallbackOwner($hit['mail'], $userProfile);
+			$scored[$hit['score_index']]['action_owner']            = $owner;
+			$scored[$hit['score_index']]['action_owner_confidence'] = $conf;
+			$scored[$hit['score_index']]['action_owner_source']     = 'fallback';
+		}
+	}
+
+	/**
+	 * 3-Stufen-Fallback für eine einzelne Mail (PRD §5.1). Wird von zwei
+	 * Pfaden genutzt: Mini-Call-Failure (Cache-Hit-Mails) und Fresh-Path-
+	 * Schema-Miss (Claude lieferte action_owner nicht).
+	 *
+	 *   1. User-im-To, kein Empfänger mit kollidierendem Vornamen → user/40
+	 *   2. Verteiler-From-Prefix ODER ≥3 weitere im To             → group/60
+	 *   3. Alles andere                                            → unsure/0
+	 *
+	 * @param array<string,mixed> $mail
+	 * @param array<string,mixed> $userProfile
+	 * @return array{0:string,1:int}
+	 */
+	private function computeFallbackOwner(array $mail, array $userProfile): array
+	{
+		$userEmail = strtolower((string)($userProfile['email'] ?? ''));
+		$aliases = array_map(
+			static fn($a) => strtolower((string)$a),
+			is_array($userProfile['aliases'] ?? null) ? $userProfile['aliases'] : [],
+		);
+		$groupPrefixes = ['info', 'support', 'no-reply', 'noreply', 'newsletter', 'team', 'service', 'notifications', 'kontakt'];
+
+		$recipients = $this->buildRecipients($mail, $userEmail);
+		$userInTo = false;
+		$nameCollision = false;
+		$othersInTo = [];
+		foreach ($recipients as $r) {
+			if ($r['role'] !== 'to') continue;
+			if ($r['is_user']) {
+				$userInTo = true;
+			} else {
+				$othersInTo[] = $r;
+				$firstName = strtolower(trim(explode(' ', $r['name'])[0] ?? ''));
+				if ($firstName !== '' && in_array($firstName, $aliases, true)) {
+					$nameCollision = true;
+				}
+			}
+		}
+
+		if ($userInTo && !$nameCollision) {
+			return ['user', 40];
+		}
+
+		$fromLocal = strtolower(strstr(($mail['from_email'] ?? ''), '@', true) ?: '');
+		if (in_array($fromLocal, $groupPrefixes, true) || count($othersInTo) >= 3) {
+			return ['group', 60];
+		}
+
+		return ['unsure', 0];
 	}
 
 	/**
@@ -174,13 +387,16 @@ final class MailScoringService
 	 */
 	private function callClaude(array $userProfile, array $mails, array $subLabelMap, array $activePrompt): array
 	{
+		$userEmail = strtolower((string)($userProfile['email'] ?? ''));
 		$redacted = array_map(
 			fn(array $m): array => $this->redactor->redactMail([
 				'id'               => $m['id'],
 				'from'             => $m['from_email'],
 				'from_name'        => $m['from_name'] ?? '',
-				'to'               => $m['to_json'] ?? [],
-				'cc'               => $m['cc_json'] ?? [],
+				// recipients-Array für action_owner-Disambiguierung (Sprint 6a §2.1).
+				// is_user-Marker entlastet Claude vom Email-Vergleich und macht
+				// Test-Pinning für Ambiguitäts-Fälle deterministisch.
+				'recipients'       => $this->buildRecipients($m, $userEmail),
 				'subject'          => $m['subject'] ?? '',
 				'body_preview'     => substr((string)($m['body_text'] ?? $m['body_preview'] ?? ''), 0, $this->maxBodyBytes),
 				'is_reply'         => (bool)($m['is_reply'] ?? false),
@@ -191,7 +407,12 @@ final class MailScoringService
 			$mails,
 		);
 
-		$system = $activePrompt['system_prompt'];
+		// Sprint 6a: System-Prompt segmentiert mit cache_control. Erste
+		// Block enthält den vollen System-Text (admin-editierbar), zweiter
+		// Block die stabile USER_IDENTITY (Aliases + Name). Beide TTL=1h.
+		// USER_SUBLABELS bleibt in dieser Iteration im User-Template;
+		// Migration ins gecachte System-Segment kommt mit USER_TOPICS in 6b/6e.
+		$systemSegments = $this->buildCachedSystemSegments($activePrompt['system_prompt'], $userProfile);
 		$user   = $this->renderUserTemplate($activePrompt['user_template'], $userProfile, $redacted, $subLabelMap);
 		$model  = $activePrompt['model'];
 
@@ -225,7 +446,7 @@ final class MailScoringService
 			$response = $this->claude->messages([
 				'model'      => $model,
 				'max_tokens' => $maxTokens,
-				'system'     => $system,
+				'system'     => $systemSegments,
 				'messages'   => [['role' => 'user', 'content' => $user]],
 			]);
 		} catch (\Throwable $e) {
@@ -335,11 +556,41 @@ final class MailScoringService
 			'TOPIC_DISCOVERY: propose new topics if no existing bucket fits.',
 		)) . "\n";
 
+		// USER_IDENTITY-Block (Sprint 6a §2). Liefert Display-Name + Aliase
+		// an Claude, damit „Hallo Marc" auf den richtigen User mappt. Wenn
+		// keine Aliase gepflegt → nur Display-Name (Alias-Pflege ist optional).
+		$aliases = is_array($userProfile['aliases'] ?? null) ? $userProfile['aliases'] : [];
+		$displayName = (string)($userProfile['display_name'] ?? '');
+		$identityHeader = $this->settings->getString(
+			'prompt.user_identity_header',
+			'USER_IDENTITY:',
+		);
+		$identityLines = [''];
+		$identityLines[] = $identityHeader;
+		if ($displayName !== '') {
+			$identityLines[] = '- name: ' . $displayName;
+		}
+		if ($aliases !== []) {
+			$identityLines[] = '- aliases: [' . implode(', ', array_map(static fn($a) => (string)$a, $aliases)) . ']';
+		}
+		// Newline am Ende für sauberen Abstand zum nächsten Block
+		$identityBlock = implode("\n", $identityLines) . "\n";
+
+		// ACTION_OWNER_RULES-Block (Sprint 6a §2.1). Wortlaut admin-editierbar
+		// in system_settings.prompt.action_owner_rules, \n-Tokens → echte
+		// Zeilenumbrüche (wie bei topic_discovery_note).
+		$actionOwnerRules = "\n" . str_replace('\\n', "\n", $this->settings->getString(
+			'prompt.action_owner_rules',
+			'ACTION_OWNER_RULES: bei Anrede-Ambiguität immer action_owner=unsure.',
+		)) . "\n";
+
 		return str_replace([
 			'{{user_email}}',
 			'{{user_language}}',
 			'{{vip_senders_csv}}',
 			'{{project_keywords_csv}}',
+			'{{user_identity_block}}',
+			'{{action_owner_rules_block}}',
 			'{{corrections_block}}',
 			'{{user_sublabels_block}}',
 			'{{topic_discovery_note}}',
@@ -350,12 +601,50 @@ final class MailScoringService
 			(string)($userProfile['language'] ?? 'de'),
 			$vip,
 			$kw,
+			$identityBlock,
+			$actionOwnerRules,
 			$correctionsBlock,
 			$subLabelsBlock,
 			$discoveryNote,
 			(string)$mailsJson,
 			$schemaSubLabel,
 		], $template);
+	}
+
+	/**
+	 * Baut das recipients-Array für eine Mail aus to_json/cc_json.
+	 * is_user wird via Email-Vergleich (lowercase) gesetzt. Wenn die
+	 * User-Email nicht in den Recipients steht (z.B. BCC), enthält das
+	 * Array sie nicht — der Mini-Call-Fallback (#5) erkennt das später
+	 * über die Original-to_json/cc_json.
+	 *
+	 * @param array<string,mixed> $mail
+	 * @return list<array{email:string,name:string,role:string,is_user:bool}>
+	 */
+	private function buildRecipients(array $mail, string $userEmail): array
+	{
+		$out = [];
+		foreach (['to_json' => 'to', 'cc_json' => 'cc'] as $field => $role) {
+			$raw = $mail[$field] ?? null;
+			if (is_string($raw)) {
+				$raw = json_decode($raw, true) ?: [];
+			}
+			if (!is_array($raw)) {
+				continue;
+			}
+			foreach ($raw as $entry) {
+				if (!is_array($entry)) continue;
+				$email = strtolower((string)($entry['address'] ?? $entry['email'] ?? ''));
+				if ($email === '') continue;
+				$out[] = [
+					'email'   => $email,
+					'name'    => (string)($entry['name'] ?? $entry['display_name'] ?? ''),
+					'role'    => $role,
+					'is_user' => $email === $userEmail,
+				];
+			}
+		}
+		return $out;
 	}
 
 	private function buildPresetScore(string $tenantId, array $mail, string $label, int $priority, string $summary): array
@@ -381,16 +670,24 @@ final class MailScoringService
 	private function buildScoreFromCache(string $tenantId, string $userId, array $mail, array $cached, array &$subLabelMap, string $promptVersionTag, string $model): array
 	{
 		$label = (string)($cached['label'] ?? 'auto');
+		// action_owner ist per PRD-Phase-6 §5.1 NICHT cacheable. Bei Cache-
+		// Hit gehen die Felder hier mit Default-'unsure'/null/null raus;
+		// der Mini-Call in MailScoringService::resolveActionOwnersForCacheHits
+		// (Sprint 6a #4) überschreibt sie batch-weise vor der Persistierung.
+		// Test CacheRepositoryTest::testActionOwnerFieldsAreNotCached pinnt,
+		// dass diese drei Felder NIE in claude_cache.response_json landen.
 		return [
 			'id'              => Uuid::v4(),
 			'tenant_id'       => $tenantId,
 			'mail_id'         => $mail['id'],
 			'label'           => $label,
-			// Cache enthält sub_label aus früherem Score-Call — also nicht "new"
 			'sub_label'       => $this->resolveOrDiscoverSubLabel(
 				$tenantId, $userId, $label, $cached['sub_label'] ?? null, false, $subLabelMap,
 			),
-			'action_required' => (int)($cached['action_required'] ?? 0),
+			'action_required'         => (int)($cached['action_required'] ?? 0),
+			'action_owner'            => 'unsure',
+			'action_owner_confidence' => null,
+			'action_owner_source'     => null,
 			'priority'        => (int)($cached['priority'] ?? 2),
 			'summary'         => $this->truncate((string)($cached['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($cached['reasoning'] ?? ''), 200),
@@ -402,11 +699,28 @@ final class MailScoringService
 
 	/**
 	 * @param array<string, list<array{name:string, description:?string}>> $subLabelMap
+	 * @param array<string,mixed> $userProfile  Für Schema-Miss-Fallback nötig (DA-Finding 1).
 	 */
-	private function buildScoreFromClaude(string $tenantId, string $userId, array $mail, array $result, array &$subLabelMap, string $promptVersionTag, string $model): array
+	private function buildScoreFromClaude(string $tenantId, string $userId, array $mail, array $result, array &$subLabelMap, string $promptVersionTag, string $model, array $userProfile): array
 	{
 		$label = $this->validateLabel((string)($result['label'] ?? 'auto'));
 		$isNew = (bool)($result['sub_label_is_new'] ?? false);
+
+		// action_owner-Source-Tracking (DA-Finding 1): wenn Claude das
+		// Feld im Result LIEFERT → source='ki'. Wenn es FEHLT (Schema-
+		// Drift, abgeschnittenes JSON, OPUS-Variante ohne Sprint-6a-Schema)
+		// → deterministischer Single-Mail-Fallback mit source='fallback',
+		// damit Observability-Queries (`WHERE source='ki'`) kein
+		// "AI confidently said unsure" sehen das gar nicht von der KI kam.
+		if (array_key_exists('action_owner', $result)) {
+			$ao  = $this->validateActionOwner((string)$result['action_owner']);
+			$aoc = max(0, min(100, (int)($result['action_owner_confidence'] ?? 0)));
+			$aos = 'ki';
+		} else {
+			[$ao, $aoc] = $this->computeFallbackOwner($mail, $userProfile);
+			$aos = 'fallback';
+		}
+
 		return [
 			'id'              => Uuid::v4(),
 			'tenant_id'       => $tenantId,
@@ -415,13 +729,59 @@ final class MailScoringService
 			'sub_label'       => $this->resolveOrDiscoverSubLabel(
 				$tenantId, $userId, $label, $result['sub_label'] ?? null, $isNew, $subLabelMap,
 			),
-			'action_required' => (int)(bool)($result['action_required'] ?? false),
+			'action_required'         => (int)(bool)($result['action_required'] ?? false),
+			'action_owner'            => $ao,
+			'action_owner_confidence' => $aoc,
+			'action_owner_source'     => $aos,
 			'priority'        => max(1, min(5, (int)($result['priority'] ?? 2))),
 			'summary'         => $this->truncate((string)($result['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($result['reasoning'] ?? ''), 200),
 			'prompt_version'  => $promptVersionTag,
 			'model'           => $model,
 			'cached'          => 0,
+		];
+	}
+
+	private function validateActionOwner(string $v): string
+	{
+		$allowed = ['user', 'other', 'group', 'unsure'];
+		return in_array($v, $allowed, true) ? $v : 'unsure';
+	}
+
+	/**
+	 * Baut die system-message für den Score-Call als Array von text-Blöcken
+	 * mit cache_control (1h-Extended-TTL). Anthropic erkennt das ab Beta
+	 * `extended-cache-ttl-2025-04-11`; ohne Beta-Header degradiert es
+	 * silently auf 5min-Ephemeral.
+	 *
+	 * Zwei Segmente: (1) der admin-editierbare System-Prompt, (2) USER_IDENTITY
+	 * aus Aliases+Display-Name. Beide ändern sich selten genug, dass die
+	 * 2× cache_creation-Kosten sich ab dem zweiten Read amortisieren (PRD §5.2).
+	 *
+	 * @param array<string,mixed> $userProfile
+	 * @return list<array<string,mixed>>
+	 */
+	private function buildCachedSystemSegments(string $systemPrompt, array $userProfile): array
+	{
+		$aliases = is_array($userProfile['aliases'] ?? null) ? $userProfile['aliases'] : [];
+		$displayName = (string)($userProfile['display_name'] ?? '');
+
+		$identity = "USER_IDENTITY:\n- name: " . ($displayName !== '' ? $displayName : '(unbekannt)');
+		if ($aliases !== []) {
+			$identity .= "\n- aliases: [" . implode(', ', array_map(static fn($a) => (string)$a, $aliases)) . ']';
+		}
+
+		return [
+			[
+				'type' => 'text',
+				'text' => $systemPrompt,
+				'cache_control' => ['type' => 'ephemeral', 'ttl' => '1h'],
+			],
+			[
+				'type' => 'text',
+				'text' => $identity,
+				'cache_control' => ['type' => 'ephemeral', 'ttl' => '1h'],
+			],
 		];
 	}
 

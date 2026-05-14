@@ -58,4 +58,9 @@ $router->delete('/api/v1/settings/sub-labels/{id}',  'SettingsController@deleteS
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');
 
+$router->get ('/api/v1/me/profile',              'MeController@profile');
+$router->post('/api/v1/me/aliases/scan',         'MeController@scanAliases');
+$router->post('/api/v1/me/aliases',              'MeController@saveAliases');
+$router->post('/api/v1/me/privacy-acknowledge',  'MeController@acknowledgePrivacy');
+
 $router->dispatch();
