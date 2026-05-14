@@ -79,7 +79,7 @@ final class ActionOwnerTest extends TestCase
 		return [$tenantId, $userId, $mailboxId];
 	}
 
-	private function insertMail(string $tenantId, string $mailboxId, string $body, array $to = []): string
+	private function seedMail(string $tenantId, string $mailboxId, string $body, array $to = []): string
 	{
 		$id = Uuid::v4();
 		$this->pdo()->prepare('INSERT INTO mails
@@ -109,7 +109,7 @@ final class ActionOwnerTest extends TestCase
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 
 		$claude = new FakeClaudeClient();
-		$mailId = $this->insertMail($tenantId, $mailboxId, 'Hallo Marc, kannst du das prüfen?',
+		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hallo Marc, kannst du das prüfen?',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 
 		$claude->scriptJson(['results' => [[
@@ -138,7 +138,7 @@ final class ActionOwnerTest extends TestCase
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 		$claude = new FakeClaudeClient();
-		$mailId = $this->insertMail($tenantId, $mailboxId, 'Hi Marc!',
+		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hi Marc!',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 		$claude->scriptJson(['results' => [[
 			'id' => $mailId, 'label' => 'direct', 'sub_label' => null, 'sub_label_is_new' => false,
@@ -163,7 +163,7 @@ final class ActionOwnerTest extends TestCase
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 		$claude = new FakeClaudeClient();
-		$mailId = $this->insertMail($tenantId, $mailboxId, 'body',
+		$mailId = $this->seedMail($tenantId, $mailboxId, 'body',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 		// Claude liefert garbage in action_owner — Service muss auf
 		// 'unsure' clampen statt den Enum-Constraint zu verletzen.
@@ -190,7 +190,7 @@ final class ActionOwnerTest extends TestCase
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 		$claude = new FakeClaudeClient();
-		$mailId = $this->insertMail($tenantId, $mailboxId, 'Hallo Marc',
+		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hallo Marc',
 			[
 				['address' => 'marc@example.de',   'name' => 'Marc'],
 				['address' => 'klaus@kunde.de',    'name' => 'Klaus'],
@@ -219,7 +219,7 @@ final class ActionOwnerTest extends TestCase
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 		$claude = new FakeClaudeClient();
-		$mailId = $this->insertMail($tenantId, $mailboxId, 'body',
+		$mailId = $this->seedMail($tenantId, $mailboxId, 'body',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 		$claude->scriptJson(['results' => [[
 			'id' => $mailId, 'label' => 'auto', 'sub_label_is_new' => false,
