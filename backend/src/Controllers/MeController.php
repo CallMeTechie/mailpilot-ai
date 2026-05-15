@@ -71,6 +71,7 @@ final class MeController extends BaseController
 			'usage_daily',
 			'pending_actions',
 			'usage_counters',
+			'reply_drafts',
 		];
 	}
 
@@ -213,6 +214,10 @@ final class MeController extends BaseController
 			// Sprint 6g — usage_counters: per-user-per-day Zählwerte.
 			// Hard-Delete (kein deleted_at, kein Compliance-Halten-Grund).
 			$pdo->prepare('DELETE FROM usage_counters WHERE user_id = :u')->execute([':u' => $u]);
+			// Sprint 6f — reply_drafts hat seit Migration 0027 eine user_id-
+			// Spalte (vorher nur FK-Cascade via mails). Explizites Hard-Delete
+			// um auch Orphan-Drafts ohne Mail-Referenz zu räumen.
+			$pdo->prepare('DELETE FROM reply_drafts WHERE user_id = :u')->execute([':u' => $u]);
 
 			$pdo->prepare('INSERT INTO audit_log (tenant_id, user_id, event, entity, entity_id, meta_json)
 				VALUES (:t, :u, "user.delete_request", "user", :id, NULL)')

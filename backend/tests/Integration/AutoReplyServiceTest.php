@@ -65,7 +65,9 @@ final class AutoReplyServiceTest extends TestCase
 		$drafts   = new DraftRepository($pdo);
 		$mailRepo = new MailRepository($pdo);
 		$mboxRepo = new MailboxRepository($pdo);
-		$tokens   = new TokenService($graph, $mboxRepo, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'fake', 'fake');
+		// TokenService verlangt 32-byte hex-encoded encrypt_key (64 hex chars).
+		$encKey = str_repeat('a', 64);
+		$tokens = new TokenService($graph, $mboxRepo, $encKey);
 		$prompts  = new PromptRepository($pdo);
 		$budget   = new BudgetService(
 			$settings,
@@ -167,7 +169,7 @@ final class AutoReplyServiceTest extends TestCase
 		// (Alternativ: TokenService skippen mit MockMailbox — würde Test-Klasse
 		// aufblähen. Workaround via Reflection-frei: setze access_token_enc
 		// auf nicht-leer und access_token_expires_at in die Zukunft.)
-		$pdo->prepare('UPDATE mailboxes SET access_token_enc = "dummy-token", access_token_expires_at = (UTC_TIMESTAMP() + INTERVAL 1 HOUR) WHERE id = :m')
+		$pdo->prepare('UPDATE mailboxes SET access_token_enc = "dummy-token", access_token_expires = (UTC_TIMESTAMP() + INTERVAL 1 HOUR) WHERE id = :m')
 			->execute([':m' => $mailboxId]);
 
 		$res = $this->makeService($graph, new FakeClaudeClient())->tick();
