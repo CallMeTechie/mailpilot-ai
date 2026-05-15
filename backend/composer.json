@@ -30,7 +30,8 @@
 		}
 	},
 	"scripts": {
-		"test": "phpunit",
-		"cs-fix": "php-cs-fixer fix --using-cache=no"
+		"test":     "phpunit",
+		"cs-fix":   "php-cs-fixer fix --using-cache=no",
+		"cs-check": "php-cs-fixer fix --using-cache=no --dry-run --diff"
 	}
 }

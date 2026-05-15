@@ -1,0 +1,25 @@
+# gitleaks-Konfiguration für MailPilot AI.
+#
+# Erbt das Default-Ruleset (API-Keys, Passwörter, JWT-Tokens, AWS, …),
+# erweitert nur die Allowlist um Test-Fixture-Strings, die wie Secrets
+# aussehen aber keine sind.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist für Test-Fixtures und Doku-Beispiele"
+paths = [
+    # PHP-CS-Fixer Cache
+    '''backend/var/.*''',
+    # composer-deps werden ohnehin nicht committed
+    '''vendor/.*''',
+]
+regexes = [
+    # str_repeat('a', 64) — synthetische 32-Byte-Hex-Keys in Tests
+    '''str_repeat\(['"][a-z0-9]['"],\s*\d+\)''',
+    # synthetische IBAN/CC-Test-Strings (aus RedactionServiceTest)
+    '''DE89 ?3704 ?0044 ?0532 ?0130 ?00''',
+    '''4111 ?1111 ?1111 ?1111''',
+    # Test-IDs aus Sprint-6f-Tests
+    '''AQMk-[a-z]+''',
+]

@@ -119,6 +119,59 @@ jobs:
         run: ./vendor/bin/phpunit --testsuite Integration --no-coverage
         working-directory: backend
 
+  trivy-fs:
+    name: Vulnerability Scan (trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: trivy filesystem-scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
+          # composer.lock + Future package.json werden gegen die
+          # Vuln-DB geprüft. Reine Source-Scans, kein Container-Pull.
+
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scannt history, nicht nur HEAD
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # personal repo / public: GITLEAKS_LICENSE wird nicht verlangt.
+          # Bei Org-Repo später setzen: secrets.GITLEAKS_LICENSE
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cs-check:
+    name: PHP-CS-Fixer (Minimal-Gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Cache composer
+        uses: actions/cache@v4
+        with:
+          path: backend/vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('backend/composer.lock') }}
+      - name: Install
+        run: composer install --no-interaction --no-progress --prefer-dist
+        working-directory: backend
+      - name: cs-check
+        run: composer cs-check
+        working-directory: backend
+
   phpstan:
     name: PHPStan (Level 5)
     runs-on: ubuntu-latest
