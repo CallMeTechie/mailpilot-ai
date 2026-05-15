@@ -153,6 +153,11 @@ final class PendingController extends BaseController
 					$repo->setStatus($tenantId, $userId, $pid, 'approved');
 					return ['ok' => true, 'kind' => 'reply_draft', 'note' => 'reply_draft execution kommt in Sprint 6f'];
 
+				case 'rule_suggestion':
+					$summary = $this->executeRuleSuggestion($tenantId, $userId, $pld);
+					$repo->setStatus($tenantId, $userId, $pid, 'approved');
+					return ['ok' => true, 'kind' => 'rule_suggestion'] + $summary;
+
 				default:
 					throw new \RuntimeException("Unknown action kind: {$kind}");
 			}
@@ -160,6 +165,95 @@ final class PendingController extends BaseController
 			$repo->rememberError($tenantId, $userId, $pid, $e->getMessage());
 			return ['ok' => false, 'kind' => $kind, 'error' => $e->getMessage()];
 		}
+	}
+
+	/**
+	 * Sprint 6g — User hat eine KI-vorgeschlagene Regel bestätigt.
+	 * Wir legen die Regel an, dann Bulk-Move auf alle affected_mail_ids.
+	 * ID-Refresh nach Move folgt demselben uq_mail-Konflikt-Pattern
+	 * wie AutoSortService (kollidierende Row → soft-delete der alten).
+	 *
+	 * @param array<string,mixed> $payload
+	 * @return array{rule_created:bool, moves_done:int, moves_failed:int}
+	 */
+	private function executeRuleSuggestion(string $tenantId, string $userId, array $payload): array
+	{
+		$label    = (string)($payload['label'] ?? 'auto');
+		$subLabel = isset($payload['sub_label']) && $payload['sub_label'] !== null && $payload['sub_label'] !== ''
+			? (string)$payload['sub_label']
+			: null;
+		$folder   = (string)($payload['folder_name'] ?? '');
+		$mailIds  = is_array($payload['affected_mail_ids'] ?? null) ? $payload['affected_mail_ids'] : [];
+		if ($folder === '') {
+			throw new \RuntimeException('rule_suggestion payload missing folder_name');
+		}
+
+		// 1) Regel anlegen — Fuzzy-Merge hat im RuleInferenceService schon
+		// gegriffen, hier ist's idempotent: upsert macht UPDATE statt
+		// INSERT bei existing (tenant, user, label, sub_label).
+		$this->kernel->get(AutoSortRepository::class)
+			->upsert($tenantId, $userId, $label, $subLabel, true, $folder);
+
+		// 2) Mailbox + Folder vorbereiten
+		$mailboxes = $this->kernel->get(MailboxRepository::class)->findByUser($tenantId, $userId);
+		if ($mailboxes === []) {
+			// Regel angelegt, aber kein Bulk-Move möglich. Kein Hard-Fail —
+			// künftige Mails werden über AutoSort verschoben.
+			return ['rule_created' => true, 'moves_done' => 0, 'moves_failed' => 0];
+		}
+		$accessToken = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mailboxes[0]);
+		$graph       = $this->kernel->get(GraphClient::class);
+		$folderId    = $graph->ensureFolderPath($accessToken, $folder);
+
+		// 3) Bulk-Move
+		$pdo    = $this->kernel->get(PDO::class);
+		$moved  = 0;
+		$failed = 0;
+		foreach ($mailIds as $mailId) {
+			if (!is_string($mailId) || $mailId === '') {
+				$failed++;
+				continue;
+			}
+			$mailStmt = $pdo->prepare('SELECT id, ms_message_id FROM mails
+				WHERE id = :m AND tenant_id = :t AND deleted_at IS NULL LIMIT 1');
+			$mailStmt->execute([':m' => $mailId, ':t' => $tenantId]);
+			$mail = $mailStmt->fetch(PDO::FETCH_ASSOC);
+			if ($mail === false) {
+				$failed++;
+				continue;
+			}
+			$oldMsId = (string)$mail['ms_message_id'];
+			try {
+				$newMsId = $graph->moveToFolder($accessToken, $oldMsId, $folderId);
+				if ($newMsId !== null && $newMsId !== $oldMsId) {
+					try {
+						$pdo->prepare('UPDATE mails SET ms_message_id = :new
+							WHERE id = :id AND tenant_id = :t')
+							->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
+					} catch (\PDOException $e) {
+						// uq_mail-Konflikt → alte Row soft-deleten (selbe
+						// Heuristik wie AutoSortService:175).
+						if ($e->getCode() === '23000') {
+							$pdo->prepare('UPDATE mails SET deleted_at = UTC_TIMESTAMP(3)
+								WHERE id = :id AND tenant_id = :t AND deleted_at IS NULL')
+								->execute([':id' => $mail['id'], ':t' => $tenantId]);
+						} else {
+							throw $e;
+						}
+					}
+				}
+				$pdo->prepare('UPDATE mail_scores
+					SET auto_sorted_at = UTC_TIMESTAMP(3),
+					    cleared_at = UTC_TIMESTAMP(3)
+					WHERE mail_id = :m AND tenant_id = :t')
+					->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				$moved++;
+			} catch (\Throwable $e) {
+				$failed++;
+			}
+		}
+
+		return ['rule_created' => true, 'moves_done' => $moved, 'moves_failed' => $failed];
 	}
 
 	/**

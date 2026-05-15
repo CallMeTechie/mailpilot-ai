@@ -285,6 +285,7 @@
 					<span class="mp-pending-card" id="pc-create_topic">Neue Topics: <strong>0</strong></span>
 					<span class="mp-pending-card" id="pc-move_to_pending_topic">… zu pending Topics: <strong>0</strong></span>
 					<span class="mp-pending-card" id="pc-reply_draft">Reply-Drafts: <strong>0</strong></span>
+					<span class="mp-pending-card" id="pc-rule_suggestion">Regel-Vorschläge: <strong>0</strong></span>
 				</div>
 
 				<div class="mp-actions">
@@ -429,6 +430,29 @@
 						<button class="mp-btn mp-btn-secondary" id="btn-apply-autosort-now">Regeln jetzt anwenden</button>
 					</div>
 					<p class="mp-muted" id="autosort-status"></p>
+
+					<!-- Sprint 6g — Auto-Rule-Inference aus Korrektur-Begründungen -->
+					<div class="mp-divider"></div>
+					<h3>Aus Korrekturen lernen</h3>
+					<p class="mp-muted">Wenn du eine Mail korrigierst und im Feld „Begründung" beschreibst warum sie woanders hingehört, leitet die KI daraus eine Regel ab. Wie viel Vergangenheit dabei betroffen sein darf, legst du hier fest.</p>
+					<div class="mp-field">
+						<label for="rule-inference-enabled">
+							<input type="checkbox" id="rule-inference-enabled">
+							Auto-Rule-Inference aktivieren
+						</label>
+					</div>
+					<div class="mp-field">
+						<label for="rule-inference-backfill-range">Backfill-Range</label>
+						<select id="rule-inference-backfill-range">
+							<option value="future_only">Nur künftige Mails (sicherste Option)</option>
+							<option value="last_30_days" selected>Letzte 30 Tage (empfohlen)</option>
+							<option value="all">Alle Mails (immer Pending zur Bestätigung)</option>
+						</select>
+					</div>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary" id="btn-save-rule-inference">Lern-Settings speichern</button>
+					</div>
+					<p class="mp-muted" id="rule-inference-status"></p>
 				</div>
 			</section>
 

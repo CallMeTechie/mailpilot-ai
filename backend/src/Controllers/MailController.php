@@ -12,7 +12,9 @@ use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
+use MailPilot\Services\QuotaExceededException;
 use MailPilot\Services\ReplyDraftService;
+use MailPilot\Services\RuleInferenceService;
 use MailPilot\Services\TokenService;
 
 final class MailController extends BaseController
@@ -264,6 +266,8 @@ final class MailController extends BaseController
 		$origStmt->execute([':id' => $mailId, ':t' => $ctx['tenant_id']]);
 		$orig = $origStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 
+		$reasoningText = isset($body['reasoning']) ? trim((string)$body['reasoning']) : '';
+
 		$this->kernel->get(CorrectionRepository::class)->record(
 			$ctx['tenant_id'],
 			$ctx['user_id'],
@@ -272,7 +276,7 @@ final class MailController extends BaseController
 				'label'           => $label,
 				'priority'        => $priority,
 				'action_required' => (bool)($body['action_required'] ?? false),
-				'reasoning'       => isset($body['reasoning']) ? (string)$body['reasoning'] : null,
+				'reasoning'       => $reasoningText !== '' ? $reasoningText : null,
 			],
 			[
 				'label'           => $orig['label']           ?? null,
@@ -281,12 +285,38 @@ final class MailController extends BaseController
 			],
 		);
 
-		Response::json(['ok' => true, 'score' => [
+		// Sprint 6g — wenn der User eine Begründung mitgegeben hat,
+		// versucht der RuleInferenceService daraus eine AutoSort-Regel
+		// abzuleiten. Failures sind nicht fatal — die Korrektur selbst
+		// ist schon committed; das Add-in zeigt nur einen weniger
+		// hilfreichen Toast.
+		$ruleResult = null;
+		if ($reasoningText !== '') {
+			try {
+				$ruleResult = $this->kernel->get(RuleInferenceService::class)
+					->infer($ctx['tenant_id'], $ctx['user_id'], $mailId, $reasoningText);
+			} catch (QuotaExceededException $e) {
+				throw HttpException::tooManyRequests(
+					'QUOTA_EXCEEDED',
+					'Tageslimit für Auto-Rule-Inference erreicht. Korrektur ist gespeichert; die Regel-Ableitung ist morgen wieder verfügbar.'
+				);
+			} catch (\Throwable $e) {
+				// Logging übernimmt der Service. Wir scheitern still und
+				// liefern die Korrektur-Response ohne rule_inference-Block.
+				$ruleResult = ['action' => 'error', 'reason' => $e->getMessage()];
+			}
+		}
+
+		$response = ['ok' => true, 'score' => [
 			'label'           => $label,
 			'priority'        => $priority,
 			'action_required' => (bool)($body['action_required'] ?? false),
 			'user_corrected'  => true,
-		]]);
+		]];
+		if ($ruleResult !== null) {
+			$response['rule_inference'] = $ruleResult;
+		}
+		Response::json($response);
 	}
 
 	/**

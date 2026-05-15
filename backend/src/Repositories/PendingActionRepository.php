@@ -27,7 +27,7 @@ use PDO;
 final class PendingActionRepository
 {
 	/** @var list<string> */
-	public const KINDS    = ['move', 'create_topic', 'move_to_pending_topic', 'reply_draft'];
+	public const KINDS    = ['move', 'create_topic', 'move_to_pending_topic', 'reply_draft', 'rule_suggestion'];
 	/** @var list<string> */
 	public const STATUSES = ['pending', 'approved', 'rejected', 'aged_out'];
 	/** @var list<string> */

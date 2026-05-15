@@ -63,4 +63,52 @@ final class RedactionService
 		}
 		return $mail;
 	}
+
+	/**
+	 * Sprint 6g (DA-R2 Finding 1) — Dedizierte Redaction für Korrektur-
+	 * Begründungen. Freitext geht durch IBAN/CC/SSN + User-Patterns
+	 * (wie redact()) PLUS eine Namensliste, die der Admin im System-
+	 * Settings-Panel pflegt (`reasoning_pii_names`).
+	 *
+	 * Namensmatch ist case-insensitive und an Wortgrenzen (`\b`) gebunden,
+	 * damit „Stephan Müller" nicht „stephan@example.com" trifft.
+	 *
+	 * @param list<string> $nameList Optional zusätzliche Eigennamen.
+	 */
+	public function redactReasoning(string $reasoning, array $nameList = []): string
+	{
+		$out = $this->redact($reasoning);
+		foreach ($nameList as $name) {
+			if (!is_string($name) || trim($name) === '') {
+				continue;
+			}
+			$pattern = '#\b' . preg_quote(trim($name), '#') . '\b#iu';
+			$result  = @preg_replace($pattern, '[NAME-REDACTED]', $out);
+			if (is_string($result)) {
+				$out = $result;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Reduziert eine E-Mail-Adresse auf `*@domain.tld`. Schützt
+	 * Lokalanteile (Vorname.Nachname, Identifier) im `from`-Feld,
+	 * das zu Claude wandert — für die Rule-Inference reicht die Domain.
+	 *
+	 * Liefert `[FROM-REDACTED]` wenn das Argument kein @ enthält oder
+	 * leer ist.
+	 */
+	public function reduceFromToDomain(string $email): string
+	{
+		$email = trim($email);
+		if ($email === '') {
+			return '[FROM-REDACTED]';
+		}
+		$at = strrpos($email, '@');
+		if ($at === false || $at === strlen($email) - 1) {
+			return '[FROM-REDACTED]';
+		}
+		return '*@' . substr($email, $at + 1);
+	}
 }

@@ -381,6 +381,9 @@ function initSettingsOverlay() {
 
 			// Sprint 6c: Lazy-Load der Tab-Daten beim Wechsel.
 			if (name === 'modes')   loadModes();
+			// Sprint 6g — Rule-Inference Settings liegen im Auto-Sort-Tab.
+			// Modes-Endpoint liefert beides, daher derselbe Loader.
+			if (name === 'autosort') loadModes();
 		});
 	});
 
@@ -402,8 +405,29 @@ async function loadModes() {
 		document.getElementById('mode-move').value  = m.autosort_move_mode         ?? 'suggest';
 		document.getElementById('mode-topic').value = m.autosort_create_topic_mode ?? 'suggest';
 		document.getElementById('mode-reply').value = m.autosort_reply_mode        ?? 'suggest';
+		// Sprint 6g — Rule-Inference Settings
+		const riEnabled = document.getElementById('rule-inference-enabled');
+		const riRange   = document.getElementById('rule-inference-backfill-range');
+		if (riEnabled) riEnabled.checked = (m.rule_inference_enabled !== false);
+		if (riRange)   riRange.value     = m.rule_inference_backfill_range ?? 'last_30_days';
 		refreshModeHints();
 	} catch (err) { handleError(err); }
+}
+
+async function saveRuleInference() {
+	const status = document.getElementById('rule-inference-status');
+	if (status) status.textContent = 'Speichere…';
+	try {
+		await api.modes.save({
+			rule_inference_enabled:        document.getElementById('rule-inference-enabled').checked,
+			rule_inference_backfill_range: document.getElementById('rule-inference-backfill-range').value,
+		});
+		if (status) status.textContent = 'Gespeichert.';
+		showToast('Lern-Settings gespeichert', 'success', 2500);
+	} catch (err) {
+		if (status) status.textContent = '';
+		handleError(err);
+	}
 }
 
 function refreshModeHints() {
@@ -493,7 +517,7 @@ function renderPending(res) {
 	}
 
 	// Per-Kind-Counts
-	['move','create_topic','move_to_pending_topic','reply_draft'].forEach((kind) => {
+	['move','create_topic','move_to_pending_topic','reply_draft','rule_suggestion'].forEach((kind) => {
 		const el = document.getElementById('pc-' + kind);
 		if (el) {
 			const strong = el.querySelector('strong');
@@ -544,18 +568,62 @@ function buildPendingRow(item) {
 		create_topic:           'Neuer Topic',
 		move_to_pending_topic:  'Verschieben (wartet auf Topic)',
 		reply_draft:            'Reply-Draft',
+		rule_suggestion:        'Regel-Vorschlag',
 	}[item.kind] ?? item.kind;
 	title.textContent = kindLabel + ': ';
 	const subj = document.createElement('strong');
-	subj.textContent = item.payload?.subject || item.payload?.sub_label || item.payload?.mail_id || item.id;
+	subj.textContent = item.payload?.subject || item.payload?.sub_label || item.payload?.label || item.payload?.mail_id || item.id;
 	title.appendChild(subj);
 	li.appendChild(title);
 
-	if (item.payload?.target_folder || item.payload?.folder_path) {
+	if (item.payload?.target_folder || item.payload?.folder_path || item.payload?.folder_name) {
 		const sub = document.createElement('div');
 		sub.className = 'mp-muted';
-		sub.textContent = '→ ' + (item.payload?.target_folder || item.payload?.folder_path);
+		sub.textContent = '→ ' + (item.payload?.target_folder || item.payload?.folder_path || item.payload?.folder_name);
 		li.appendChild(sub);
+	}
+
+	// Sprint 6g — rule_suggestion: Reasoning-Summary + Affected-Preview
+	if (item.kind === 'rule_suggestion') {
+		const conf = item.payload?.confidence;
+		if (typeof conf === 'number') {
+			const confEl = document.createElement('div');
+			confEl.className = 'mp-muted';
+			confEl.textContent = `KI-Konfidenz: ${conf}%`;
+			li.appendChild(confEl);
+		}
+		const summary = item.payload?.reasoning_summary;
+		if (summary) {
+			const summEl = document.createElement('div');
+			summEl.className = 'mp-muted';
+			summEl.textContent = summary;
+			li.appendChild(summEl);
+		}
+		const affectedIds = Array.isArray(item.payload?.affected_mail_ids) ? item.payload.affected_mail_ids : [];
+		const subjects    = Array.isArray(item.payload?.affected_subjects) ? item.payload.affected_subjects : [];
+		if (affectedIds.length > 0) {
+			const count = document.createElement('div');
+			count.textContent = `${affectedIds.length} ähnliche Mail${affectedIds.length === 1 ? '' : 's'} werden mitverschoben:`;
+			li.appendChild(count);
+			const preview = document.createElement('ul');
+			preview.className = 'mp-muted';
+			subjects.slice(0, 3).forEach((s) => {
+				const sLi = document.createElement('li');
+				sLi.textContent = s || '(ohne Betreff)';
+				preview.appendChild(sLi);
+			});
+			if (affectedIds.length > 3) {
+				const more = document.createElement('li');
+				more.textContent = `… und ${affectedIds.length - 3} weitere`;
+				preview.appendChild(more);
+			}
+			li.appendChild(preview);
+		} else {
+			const count = document.createElement('div');
+			count.className = 'mp-muted';
+			count.textContent = 'Nur Regel anlegen — keine bestehenden Mails betroffen.';
+			li.appendChild(count);
+		}
 	}
 
 	if (item.last_error) {
@@ -570,8 +638,15 @@ function buildPendingRow(item) {
 	const ok = document.createElement('button');
 	ok.className = 'mp-btn mp-btn-primary';
 	const childCount = item.children_count ?? 0;
+	const ruleAffected = item.kind === 'rule_suggestion' && Array.isArray(item.payload?.affected_mail_ids)
+		? item.payload.affected_mail_ids.length
+		: 0;
 	if (item.kind === 'create_topic' && childCount > 0) {
 		ok.textContent = `Anlegen + ${childCount} Mail${childCount === 1 ? '' : 's'} verschieben`;
+	} else if (item.kind === 'rule_suggestion') {
+		ok.textContent = ruleAffected > 0
+			? `Regel anlegen + ${ruleAffected} Mail${ruleAffected === 1 ? '' : 's'} verschieben`
+			: 'Regel anlegen';
 	} else {
 		ok.textContent = item.last_error ? 'Erneut versuchen' : 'Bestätigen';
 	}
@@ -1623,6 +1698,8 @@ function initSettings() {
 
 	document.getElementById('btn-save-autosort')?.addEventListener('click', saveAutoSort);
 	document.getElementById('btn-apply-autosort-now')?.addEventListener('click', applyAutoSortNow);
+	// Sprint 6g — Rule-Inference Save
+	document.getElementById('btn-save-rule-inference')?.addEventListener('click', saveRuleInference);
 	document.getElementById('btn-rescore-all')?.addEventListener('click', rescoreAll);
 
 	document.getElementById('btn-export').addEventListener('click', async () => {

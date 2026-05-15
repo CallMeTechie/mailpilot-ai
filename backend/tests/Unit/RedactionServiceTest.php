@@ -80,4 +80,42 @@ final class RedactionServiceTest extends TestCase
 		$result = $r->redact('Some text here');
 		$this->assertSame('Some text here', $result);
 	}
+
+	// Sprint 6g — DA-R2 Finding 1: Reasoning-Redaction mit Namensliste.
+
+	public function testRedactReasoningRunsBuiltinPatterns(): void
+	{
+		$r = new RedactionService();
+		$out = $r->redactReasoning('Bei IBAN DE89 3704 0044 0532 0130 00 muss verschoben werden');
+		$this->assertStringContainsString('[IBAN-REDACTED]', $out);
+	}
+
+	public function testRedactReasoningReplacesNamesFromList(): void
+	{
+		$r = new RedactionService();
+		$out = $r->redactReasoning(
+			'Stephan Müller hat das mit Acme abgestimmt',
+			['Stephan Müller', 'Acme'],
+		);
+		$this->assertStringContainsString('[NAME-REDACTED]', $out);
+		$this->assertStringNotContainsString('Stephan Müller', $out);
+		$this->assertStringNotContainsString(' Acme ', $out);
+	}
+
+	public function testRedactReasoningEmptyNameListDoesNothingExtra(): void
+	{
+		$r = new RedactionService();
+		$plain = 'kein PII, keine Namen, nur normaler Text';
+		$this->assertSame($plain, $r->redactReasoning($plain, []));
+	}
+
+	public function testReduceFromToDomain(): void
+	{
+		$r = new RedactionService();
+		$this->assertSame('*@example.com',     $r->reduceFromToDomain('alice@example.com'));
+		$this->assertSame('*@sub.example.com', $r->reduceFromToDomain('Bob.Vorname+filter@sub.example.com'));
+		$this->assertSame('[FROM-REDACTED]',   $r->reduceFromToDomain(''));
+		$this->assertSame('[FROM-REDACTED]',   $r->reduceFromToDomain('not-an-email'));
+		$this->assertSame('[FROM-REDACTED]',   $r->reduceFromToDomain('trailing@'));
+	}
 }

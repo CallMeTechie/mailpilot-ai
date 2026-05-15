@@ -22,6 +22,7 @@ use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\SummaryRepository;
+use MailPilot\Repositories\UsageCounterRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
@@ -34,6 +35,7 @@ use MailPilot\Services\MoveDetectionService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
+use MailPilot\Services\RuleInferenceService;
 use MailPilot\Services\SyncService;
 use MailPilot\Services\TokenService;
 use Monolog\Handler\StreamHandler;
@@ -113,6 +115,7 @@ class Kernel
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
+			UsageCounterRepository::class => new UsageCounterRepository($this->get(PDO::class)),
 			AutoSortCorrectionRepository::class => new AutoSortCorrectionRepository($this->get(PDO::class)),
 			MoveDetectionService::class => new MoveDetectionService(
 				$this->get(MailRepository::class),
@@ -192,6 +195,17 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+			),
+			RuleInferenceService::class => new RuleInferenceService(
+				$this->get(PDO::class),
+				$this->get(ClaudeClient::class),
+				$this->get(RedactionService::class),
+				$this->get(SettingsRepository::class),
+				$this->get(UsageCounterRepository::class),
+				$this->get(AutoSortRepository::class),
+				$this->get(PendingActionRepository::class),
+				$this->get(PromptRepository::class),
+				$this->get(Logger::class),
 			),
 			SyncService::class        => new SyncService(
 				$this->get(GraphClient::class),

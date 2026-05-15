@@ -104,6 +104,55 @@ final class AutoSortRepository
 	 *
 	 * @return array{enabled:bool, folder_name:string, folder_id:?string, sub_label:?string}|null
 	 */
+	/**
+	 * Sprint 6g (DA-R1 Finding 3) — Fuzzy-Match auf bestehende Sub-Labels
+	 * desselben Labels, damit KI-extrahierte Vorschläge wie „CI" / „ci" /
+	 * „CI Pipeline" nicht drei separate Regeln + Outlook-Ordner anlegen.
+	 *
+	 * Schwelle nimmt `topics.fuzzy_merge_levenshtein_max` (default 3) —
+	 * dieselbe Mechanik wie Sprint 6b für Topic-Vorschläge
+	 * (MailScoringService:975). Reihenfolge: exakter Normalized-Match
+	 * gewinnt vor Levenshtein-Match.
+	 *
+	 * @return array<string,mixed>|null
+	 */
+	public function findFuzzyMatchSubLabel(string $tenantId, string $userId, string $label, string $candidate): ?array
+	{
+		$candidateNorm = mb_strtolower(trim($candidate));
+		if ($candidateNorm === '') {
+			return null;
+		}
+
+		$stmt = $this->db->prepare('SELECT label, sub_label, enabled, folder_name, folder_id, last_error, created_by, updated_at
+			FROM auto_sort_rules
+			WHERE tenant_id = :t AND user_id = :u AND label = :l AND sub_label IS NOT NULL');
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':l' => $label]);
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		// Pass 1 — exakter Normalized-Match.
+		foreach ($rows as $row) {
+			if (mb_strtolower(trim((string)$row['sub_label'])) === $candidateNorm) {
+				return $this->hydrate($row);
+			}
+		}
+
+		// Pass 2 — Levenshtein. levenshtein() arbeitet auf Bytes,
+		// limitiert auf 255 — defensiv abfangen.
+		$cap = $this->settings !== null
+			? max(0, $this->settings->getInt('topics.fuzzy_merge_levenshtein_max', 3))
+			: 3;
+		foreach ($rows as $row) {
+			$existingNorm = mb_strtolower(trim((string)$row['sub_label']));
+			if (strlen($existingNorm) > 255 || strlen($candidateNorm) > 255) {
+				continue;
+			}
+			if (levenshtein($candidateNorm, $existingNorm) <= $cap) {
+				return $this->hydrate($row);
+			}
+		}
+		return null;
+	}
+
 	public function findRule(string $tenantId, string $userId, string $label, ?string $subLabel): ?array
 	{
 		// 1) exact match

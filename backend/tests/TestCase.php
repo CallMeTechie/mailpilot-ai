@@ -73,7 +73,9 @@ abstract class TestCase extends BaseTestCase
 			// wir die explizit wischen, sonst bleiben stale tenant_id-Rows
 			// und der nächste FK-Check beim Test-Insert/Update kracht.
 			'pending_actions',
-			'auto_sort_corrections'];
+			'auto_sort_corrections',
+			// 0025: Sprint-6g Quota-Counter
+			'usage_counters'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

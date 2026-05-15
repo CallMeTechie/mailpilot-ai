@@ -516,9 +516,11 @@ final class SettingsController extends BaseController
 		$this->requireAuth();
 		$s = $this->kernel->get(SettingsRepository::class);
 		Response::json([
-			'autosort_move_mode'         => $s->getString('autosort_move_mode',         'suggest'),
-			'autosort_create_topic_mode' => $s->getString('autosort_create_topic_mode', 'suggest'),
-			'autosort_reply_mode'        => $s->getString('autosort_reply_mode',        'suggest'),
+			'autosort_move_mode'            => $s->getString('autosort_move_mode',         'suggest'),
+			'autosort_create_topic_mode'    => $s->getString('autosort_create_topic_mode', 'suggest'),
+			'autosort_reply_mode'           => $s->getString('autosort_reply_mode',        'suggest'),
+			'rule_inference_enabled'        => $s->getBool('rule_inference_enabled', true),
+			'rule_inference_backfill_range' => $s->getString('rule_inference_backfill_range', 'last_30_days'),
 		]);
 	}
 
@@ -560,6 +562,20 @@ final class SettingsController extends BaseController
 		if ($move  !== null) $s->set('autosort_move_mode',         $move);
 		if ($topic !== null) $s->set('autosort_create_topic_mode', $topic);
 		if ($reply !== null) $s->set('autosort_reply_mode',        $reply);
+
+		// Sprint 6g — Rule-Inference Settings im selben Endpoint, weil
+		// sie semantisch zu „wie autonom darf die KI handeln" gehören.
+		if (array_key_exists('rule_inference_enabled', $body)) {
+			$s->set('rule_inference_enabled', ((bool)$body['rule_inference_enabled']) ? '1' : '0');
+		}
+		if (array_key_exists('rule_inference_backfill_range', $body)) {
+			$range = (string)$body['rule_inference_backfill_range'];
+			if (!in_array($range, ['future_only', 'last_30_days', 'all'], true)) {
+				throw HttpException::badRequest('INVALID_RANGE',
+					'rule_inference_backfill_range muss future_only|last_30_days|all sein');
+			}
+			$s->set('rule_inference_backfill_range', $range);
+		}
 
 		// DA-Impl-Finding 3: wenn Modus auf 'auto' wechselt, sind Bestands-
 		// Pending mit created_under_mode='suggest' nicht automatisch

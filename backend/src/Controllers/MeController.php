@@ -43,6 +43,7 @@ final class MeController extends BaseController
 			'api_usage',
 			'usage_daily',
 			'pending_actions',
+			'usage_counters',
 		];
 	}
 
@@ -69,6 +70,7 @@ final class MeController extends BaseController
 			'api_usage',
 			'usage_daily',
 			'pending_actions',
+			'usage_counters',
 		];
 	}
 
@@ -165,6 +167,11 @@ final class MeController extends BaseController
 				FROM pending_actions
 				WHERE user_id = :u AND created_at >= (UTC_TIMESTAMP(3) - INTERVAL 30 DAY)
 				ORDER BY created_at DESC', [':u' => $u]),
+			// Sprint 6g — Per-User-Quota-Zähler (rule_inference,
+			// künftig auto_reply). Counter ohne Body-Data, nur Zählwerte.
+			'usage_counters' => $fetch('SELECT kind, `date`, count, updated_at
+				FROM usage_counters WHERE user_id = :u
+				ORDER BY `date` DESC, kind', [':u' => $u]),
 		];
 
 		Response::json($export);
@@ -203,6 +210,9 @@ final class MeController extends BaseController
 			// sind PII. Hard-Delete; FK ON DELETE CASCADE räumt gekoppelte
 			// move_to_pending_topic-Children automatisch ab.
 			$pdo->prepare('DELETE FROM pending_actions WHERE user_id = :u')->execute([':u' => $u]);
+			// Sprint 6g — usage_counters: per-user-per-day Zählwerte.
+			// Hard-Delete (kein deleted_at, kein Compliance-Halten-Grund).
+			$pdo->prepare('DELETE FROM usage_counters WHERE user_id = :u')->execute([':u' => $u]);
 
 			$pdo->prepare('INSERT INTO audit_log (tenant_id, user_id, event, entity, entity_id, meta_json)
 				VALUES (:t, :u, "user.delete_request", "user", :id, NULL)')
