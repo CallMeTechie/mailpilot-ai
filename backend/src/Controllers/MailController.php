@@ -140,20 +140,6 @@ final class MailController extends BaseController
 		$stmt->execute([':id' => $mail['id']]);
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 
-		// 2026-05-15 Debug-Trace: zeigt was wir aus der DB lesen vs. was
-		// vom Add-in angefragt wurde. error_log → stderr → docker logs.
-		// Wird nach Bug-Diagnose entfernt. Volle msid + Suffix der DB-msid
-		// damit wir bei Mismatch sehen welche Mail Outlook eigentlich
-		// adressiert.
-		$dbMsid = (string)($r['ms_message_id'] ?? '');
-		error_log(sprintf(
-			'ENSURESCORED_TRACE req_msid_tail=%s db_msid_tail=%s found_id=%s subj=%s prio=%s',
-			substr($msId, -30),
-			substr($dbMsid, -30),
-			(string)$mail['id'],
-			substr((string)($r['subject'] ?? ''), 0, 60),
-			(string)($r['priority'] ?? 'null'),
-		));
 
 		// Click-time AutoSort: run regardless of whether this is the
 		// first score or a stale score we just retrieved. The
