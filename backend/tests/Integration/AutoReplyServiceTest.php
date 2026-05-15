@@ -163,12 +163,21 @@ final class AutoReplyServiceTest extends TestCase
 			'sent_at'     => gmdate('Y-m-d\TH:i:s\Z'),
 		]);
 
-		// TokenService::ensureFreshAccessToken erwartet access_token_enc/_expires.
-		$this->pdo()->prepare('UPDATE mailboxes
-			SET access_token_enc = "dummy-token",
+		// TokenService::ensureFreshAccessToken decryptet access_token_enc —
+		// muss also ein echt-verschlüsselter Blob sein. Wir bauen ihn mit
+		// dem gleichen TokenService-Key wie makeService.
+		$encKey = str_repeat('a', 64);
+		$pdo = $this->pdo();
+		$mboxRepo = new MailboxRepository($pdo);
+		$tokens   = new TokenService(new FakeGraphClient(), $mboxRepo, $encKey);
+		$tokenEnc = $tokens->encrypt('dummy-bearer-not-used-for-this-test');
+		$stmt = $pdo->prepare('UPDATE mailboxes
+			SET access_token_enc = :enc,
 			    access_token_expires = (UTC_TIMESTAMP() + INTERVAL 1 HOUR)
-			WHERE id = :m')
-			->execute([':m' => $mailboxId]);
+			WHERE id = :m');
+		$stmt->bindValue(':enc', $tokenEnc);
+		$stmt->bindValue(':m',   $mailboxId);
+		$stmt->execute();
 
 		$res = $this->makeService($graph, new FakeClaudeClient())->tick();
 
