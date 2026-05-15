@@ -137,7 +137,14 @@ final class MailRepository
 				body_preview = VALUES(body_preview),
 				body_text = VALUES(body_text),
 				has_attachment = VALUES(has_attachment),
-				list_unsubscribe = VALUES(list_unsubscribe)';
+				list_unsubscribe = VALUES(list_unsubscribe),
+				-- 2026-05-15 Auto-Heal für Phantom-Deletes:
+				-- Wenn Graph die Mail aktiv re-liefert (z.B. via
+				-- ensureScored beim Klick im Add-in), ist sie definitiv
+				-- nicht gelöscht — egal was der frühere Tombstone-Handler
+				-- dachte. deleted_at wieder NULL setzen heilt false-
+				-- positives automatisch beim ersten Touch.
+				deleted_at = NULL';
 
 		$stmt = $this->db->prepare($sql);
 		$stmt->execute([
