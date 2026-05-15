@@ -63,14 +63,28 @@ final class AutoSortService
 		array $mail,
 		array $score,
 	): array {
-		$label    = (string)($score['label']    ?? '');
-		$subLabel = isset($score['sub_label']) && $score['sub_label'] !== null && $score['sub_label'] !== ''
+		$label          = (string)($score['label'] ?? '');
+		$subLabel       = isset($score['sub_label']) && $score['sub_label'] !== null && $score['sub_label'] !== ''
 			? (string)$score['sub_label']
 			: null;
-		$priority = (int)   ($score['priority'] ?? 0);
+		$priority       = (int)   ($score['priority']        ?? 0);
+		$actionRequired = (bool)  ($score['action_required'] ?? false);
+		$actionOwner    = (string)($score['action_owner']    ?? '');
 
+		// High-Prio-Schutz erweitert (2026-05-15 Bug-Fund):
+		//   alte Logik:  (label IN direct/action) AND priority>=4 → protected
+		//   Problem:     Amazon-Zahlungs-Problem mit label='auto', priority=4,
+		//                action_required=1, action_owner='user' lief durch
+		//                und landete in „Auto".
+		//   neue Logik: ZUSÄTZLICH schützen wenn der User explizit handeln
+		//                muss — action_required + action_owner='user'. Labels
+		//                sind KI-fehleranfällig; action_owner ist die echte
+		//                Aussage „du musst hier ran".
 		if (in_array($label, ['direct', 'action'], true) && $priority >= 4) {
 			return ['moved' => false, 'reason' => 'high_priority_protected'];
+		}
+		if ($actionRequired && $actionOwner === 'user' && $priority >= 4) {
+			return ['moved' => false, 'reason' => 'user_action_required'];
 		}
 
 		$rule = $this->rules->findRule($tenantId, $userId, $label, $subLabel);

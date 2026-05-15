@@ -1331,6 +1331,14 @@ async function loadCurrentMailScore(msMessageId) {
 			return bounceToLogin();
 		}
 		if (err instanceof ApiError && err.code === 'NOT_FOUND') {
+			// Verhindert Frankenstein-Render: wenn die API 404 liefert,
+			// zeigen wir keine alten Score-/Summary-Daten der vorherigen
+			// Mail. Header (Subject/From kommen aus Office.js item) und
+			// alle Content-Blocks ausblenden, Empty-State zeigen.
+			state.currentMailData = null;
+			toggle('current-header', false);
+			toggle('current-content', false);
+			toggle('current-empty', true);
 			showToast('Mail in Microsoft 365 nicht gefunden — eventuell gelöscht?', 'info', 7000);
 			return;
 		}

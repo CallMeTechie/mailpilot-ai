@@ -76,16 +76,35 @@ final class SyncService
 		$deleted   = 0;
 		foreach ($deltaResult['messages'] as $msg) {
 			if ($this->isTombstone($msg)) {
-				// Graph schickt @removed wenn der User die Mail in Outlook
-				// (oder ein anderer Client) gelöscht hat. Vor diesem Fix
-				// schluckten wir das schweigend — Mail blieb in MailPilot
-				// sichtbar, „Öffnen" warf ErrorItemNotFound.
+				// Sprint-6f-Bug-Fix: @removed im /me/mailFolders/Inbox/delta
+				// bedeutet entweder „Mail in Papierkorb gelöscht" ODER
+				// „Mail aus Inbox in einen anderen Folder verschoben"
+				// (z.B. durch unsere eigene AutoSort-Aktion). Wir können
+				// das aus dem Event allein nicht unterscheiden — daher
+				// fragen wir Graph direkt: existiert die Mail noch
+				// irgendwo? fetchMessage greift cross-folder via
+				// /me/messages/{id}, returnt null bei 404.
 				$msMessageId = (string)($msg['id'] ?? '');
-				if ($msMessageId !== ''
-					&& $this->mails->markDeletedByMsId($tenantId, $mailboxId, $msMessageId)
-				) {
-					$deleted++;
+				if ($msMessageId === '') {
+					continue;
 				}
+				try {
+					$stillExists = $this->graph->fetchMessage($accessToken, $msMessageId);
+				} catch (\Throwable $e) {
+					// Fail-safe: bei Graph-Error nicht deleten. Beim
+					// nächsten Tick versuchen wir's nochmal.
+					$this->logger->warning('sync.tombstone_lookup_failed', [
+						'ms_message_id' => substr($msMessageId, 0, 20),
+						'err'           => $e->getMessage(),
+					]);
+					continue;
+				}
+				if ($stillExists === null) {
+					if ($this->mails->markDeletedByMsId($tenantId, $mailboxId, $msMessageId)) {
+						$deleted++;
+					}
+				}
+				// else: Mail liegt in anderem Folder — kein delete.
 				continue;
 			}
 			// Sprint 6d: Move-Detection läuft VOR dem Upsert — sonst

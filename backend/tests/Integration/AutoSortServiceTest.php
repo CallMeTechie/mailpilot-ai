@@ -131,6 +131,42 @@ final class AutoSortServiceTest extends TestCase
 		$this->assertSame([], $graph->moveCalls, 'Must never call Graph for protected mails');
 	}
 
+	/**
+	 * 2026-05-15 Bug-Fund: Amazon-Zahlungs-Mail mit label='auto' aber
+	 * priority=4 + action_required=1 + action_owner='user' wurde nach
+	 * MailPilot/Auto verschoben, obwohl Marc handeln musste. Der alte
+	 * Schutz prüfte nur (direct/action AND priority>=4) — label='auto'
+	 * lief durch. Neuer Schutz: action_required + action_owner='user'
+	 * + priority>=4 schützt unabhängig vom (KI-fehleranfälligen) Label.
+	 */
+	public function testUserActionRequiredProtectsRegardlessOfLabel(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+
+		$rules = new AutoSortRepository($this->pdo());
+		$rules->upsert($tenantId, $userId, 'auto', null, true, 'MailPilot/Auto');
+
+		$mail = $this->insertScoredMail($tenantId, $mailboxId, 'auto', null, 4);
+
+		$graph = new FakeGraphClient();
+		$res = $this->makeService($graph)->applyToScoredMail(
+			'tok', $tenantId, $userId, $mail,
+			[
+				'label'           => 'auto',
+				'sub_label'       => null,
+				'priority'        => 4,
+				'action_required' => true,
+				'action_owner'    => 'user',
+			],
+		);
+
+		$this->assertFalse($res['moved']);
+		$this->assertSame('user_action_required', $res['reason']);
+		$this->assertSame([], $graph->moveCalls,
+			'User-action-required mails dürfen nicht verschoben werden, auch wenn label="auto"');
+	}
+
 	public function testDisabledRuleResultsInNoMove(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();
