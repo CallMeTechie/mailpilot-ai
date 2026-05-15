@@ -134,11 +134,22 @@ final class MailController extends BaseController
 		}
 
 		$stmt = $pdo->prepare('SELECT m.id, m.mailbox_id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
-				s.label, s.sub_label, s.action_required, s.priority, s.summary, s.scored_at
+				s.label, s.sub_label, s.action_required, s.action_owner, s.priority, s.summary, s.scored_at
 			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.id = :id LIMIT 1');
 		$stmt->execute([':id' => $mail['id']]);
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+		// 2026-05-15 Debug-Trace: zeigt was wir aus der DB lesen vs. was
+		// vom Add-in angefragt wurde. Wird nach Bug-Diagnose entfernt.
+		$this->kernel->get(\Monolog\Logger::class)->info('ensureScored.result', [
+			'requested_msid'     => substr($msId, 0, 30) . '...',
+			'found_mail_id'      => (string)$mail['id'],
+			'found_subject'      => substr((string)($r['subject'] ?? ''), 0, 60),
+			'found_priority'     => $r['priority'] ?? null,
+			'found_label'        => $r['label'] ?? null,
+			'found_summary_head' => substr((string)($r['summary'] ?? ''), 0, 80),
+		]);
 
 		// Click-time AutoSort: run regardless of whether this is the
 		// first score or a stale score we just retrieved. The
@@ -161,6 +172,10 @@ final class MailController extends BaseController
 							'sub_label'       => $r['sub_label'] ?? null,
 							'priority'        => $r['priority'],
 							'action_required' => $r['action_required'],
+							// 2026-05-15 Bug-Fix: action_owner war hier
+							// nicht durchgereicht → user_action_required-
+							// Schutz griff bei Click-time-AutoSort nie.
+							'action_owner'    => $r['action_owner'] ?? '',
 						]);
 				} catch (\Throwable) { /* best-effort, never break the response */ }
 			}
