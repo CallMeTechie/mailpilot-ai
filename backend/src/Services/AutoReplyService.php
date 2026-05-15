@@ -227,11 +227,13 @@ final class AutoReplyService
 	{
 		// users.email (primary) plus alle Mailbox-Adressen, die der User
 		// in diesem Tenant verknüpft hat. UNION-Distinct über email.
-		$stmt = $this->db->prepare('SELECT LOWER(email) AS email FROM users WHERE id = :u
+		// PDO native prepare erlaubt jeden Named-Param nur 1x — daher
+		// :u1/:u2 statt :u zweimal.
+		$stmt = $this->db->prepare('SELECT LOWER(email) AS email FROM users WHERE id = :u1
 			UNION
 			SELECT LOWER(email) AS email FROM mailboxes
-			WHERE tenant_id = :t AND user_id = :u AND deleted_at IS NULL');
-		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+			WHERE tenant_id = :t AND user_id = :u2 AND deleted_at IS NULL');
+		$stmt->execute([':t' => $tenantId, ':u1' => $userId, ':u2' => $userId]);
 		return array_values(array_filter(
 			array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'email'),
 			static fn($v): bool => is_string($v) && $v !== '',
