@@ -289,28 +289,30 @@
 		     Settings-Overlay zum Hauptnav-Tab — Bestätigen ist jetzt
 		     1 Klick statt 3. -->
 		<section class="mp-panel" data-panel="pending">
-			<div class="mp-section">
-				<h2>Vorschläge der KI</h2>
-				<p class="mp-muted">Hier landen alle Aktionen aus „Vorschlag"-Modi. Bestätigen führt sie aus, Ablehnen verwirft sie. Älter als 30 Tage werden automatisch verworfen.</p>
-
-				<div id="pending-banner" class="mp-banner" data-hidden="true"></div>
-
-				<div class="mp-pending-counts">
-					<span class="mp-pending-card" id="pc-move">Verschieben: <strong>0</strong></span>
-					<span class="mp-pending-card" id="pc-create_topic">Neue Topics: <strong>0</strong></span>
-					<span class="mp-pending-card" id="pc-move_to_pending_topic">… zu pending Topics: <strong>0</strong></span>
-					<span class="mp-pending-card" id="pc-reply_draft">Reply-Drafts: <strong>0</strong></span>
-					<span class="mp-pending-card" id="pc-rule_suggestion">Regel-Vorschläge: <strong>0</strong></span>
-				</div>
-
-				<div class="mp-actions">
-					<button class="mp-btn mp-btn-primary"   id="btn-pending-approve-all">Alle bestätigen</button>
-					<button class="mp-btn mp-btn-secondary" id="btn-pending-reload">Neu laden</button>
-				</div>
-
-				<ul class="mp-pending-list" id="pending-list"></ul>
-				<p class="mp-muted" id="pending-status"></p>
+			<div class="mp-pending-header">
+				<h2>Vorschläge der KI <span id="pending-total-count" class="mp-pending-total">0</span></h2>
+				<button class="mp-icon-btn mp-icon-btn-ghost" id="btn-pending-reload" aria-label="Neu laden" title="Neu laden">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+				</button>
 			</div>
+
+			<div id="pending-banner" class="mp-banner" data-hidden="true"></div>
+
+			<!-- Filter-Chips. Click = filter Liste. is-active markiert das aktive Filter. -->
+			<div class="mp-pending-filters" id="pending-filters">
+				<button class="mp-pending-filter is-active" data-filter-kind="all">Alle <span data-filter-count="all">0</span></button>
+				<button class="mp-pending-filter" data-filter-kind="move">Verschieben <span data-filter-count="move">0</span></button>
+				<button class="mp-pending-filter" data-filter-kind="create_topic">Topics <span data-filter-count="create_topic">0</span></button>
+				<button class="mp-pending-filter" data-filter-kind="rule_suggestion">Regeln <span data-filter-count="rule_suggestion">0</span></button>
+				<button class="mp-pending-filter" data-filter-kind="reply_draft">Replies <span data-filter-count="reply_draft">0</span></button>
+			</div>
+
+			<div class="mp-pending-bulk-actions">
+				<button class="mp-btn mp-btn-primary" id="btn-pending-approve-all">Alle bestätigen</button>
+			</div>
+
+			<ul class="mp-pending-list" id="pending-list"></ul>
+			<p class="mp-muted" id="pending-status"></p>
 		</section>
 
 	</main>

@@ -226,7 +226,7 @@ export const api = {
 			if (limit)   q.set('limit', String(limit));
 			return request('GET', `/pending${q.toString() ? '?' + q.toString() : ''}`);
 		},
-		approve:      (id)        => request('POST', `/pending/${id}/approve`),
+		approve:      (id, body = {}) => request('POST', `/pending/${id}/approve`, body),
 		reject:       (id)        => request('POST', `/pending/${id}/reject`),
 		bulkApprove:  (body = {}) => request('POST', '/pending/bulk-approve', body),
 	},

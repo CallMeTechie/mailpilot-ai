@@ -71,6 +71,20 @@ final class PendingController extends BaseController
 		if ($action['status'] !== 'pending') {
 			throw HttpException::preconditionFailed('PENDING_NOT_PENDING', 'Action ist bereits entschieden');
 		}
+
+		// 2026-05-15: für rule_suggestion kann der User im UI eine Subset-
+		// Auswahl der affected_mail_ids machen (Checkbox-Liste). Wir
+		// schneiden payload.affected_mail_ids gegen body[selected_mail_ids],
+		// damit nur die ausgewählten Mails wirklich verschoben werden.
+		if ($action['kind'] === 'rule_suggestion' && isset($body['selected_mail_ids']) && is_array($body['selected_mail_ids'])) {
+			$selected = array_values(array_filter($body['selected_mail_ids'], 'is_string'));
+			$payload  = $action['payload'];
+			if (isset($payload['affected_mail_ids']) && is_array($payload['affected_mail_ids'])) {
+				$payload['affected_mail_ids'] = array_values(array_intersect($payload['affected_mail_ids'], $selected));
+				$action['payload'] = $payload;
+			}
+		}
+
 		$result = $this->executeAction($ctx['tenant_id'], $ctx['user_id'], $action);
 		Response::json(['ok' => true, 'result' => $result]);
 	}

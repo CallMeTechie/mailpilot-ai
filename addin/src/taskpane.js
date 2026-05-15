@@ -219,22 +219,22 @@ function initTabs() {
 			document.querySelector(`.mp-panel[data-panel="${name}"]`).classList.add('is-active');
 
 			if (name === 'briefing') {
-				// Always refresh when the user opens the briefing tab — the
-				// counts can change anytime as the worker keeps scoring.
 				loadBriefing();
-				// Refresh pending badge silently so the count is current
-				// even when the user never opens the pending tab itself.
-				loadPending().catch(() => { /* badge stays stale, harmless */ });
 			}
 			if (name === 'today') {
 				loadToday();
 			}
 			if (name === 'current') {
-				// Re-evaluate the currently-open mail when user opens this tab.
 				onItemChanged();
 			}
 			if (name === 'pending') {
 				loadPending();
+			}
+			// Bei jedem Tab-Switch: Pending-Badge silent refresh — Marc
+			// soll auch in „Diese Mail" sehen, wenn ein neuer Vorschlag
+			// reinkommt, ohne erst auf Pending oder Briefing wechseln.
+			if (name !== 'pending') {
+				loadPending().catch(() => { /* badge stays stale, harmless */ });
 			}
 		});
 	});
@@ -396,6 +396,10 @@ function initSettingsOverlay() {
 	// Buttons im Pending-Sub-Tab
 	document.getElementById('btn-pending-reload')?.addEventListener('click', () => loadPending());
 	document.getElementById('btn-pending-approve-all')?.addEventListener('click', bulkApproveAllPending);
+	// Filter-Pills im Pending-Tab (2026-05-15 Redesign)
+	document.querySelectorAll('.mp-pending-filter').forEach((btn) => {
+		btn.addEventListener('click', () => setPendingFilter(btn.dataset.filterKind || 'all'));
+	});
 }
 
 // ----- Sprint 6c: Modi -----
@@ -606,15 +610,21 @@ async function loadPending() {
 	}
 }
 
+// Cached items, damit der Filter-Click ohne Re-Fetch greift.
+const pendingState = { items: [], filter: 'all' };
+
 function renderPending(res) {
 	const counts = res.counts ?? {};
 	const total  = counts.total ?? 0;
+	pendingState.items = res.items ?? [];
 
-	// Tab-Count-Badge
+	// Header total + Hauptnav-Tab-Badge.
+	const totalEl = document.getElementById('pending-total-count');
+	if (totalEl) totalEl.textContent = String(total);
 	const tabBadge = document.getElementById('pending-tab-count');
 	if (tabBadge) {
 		if (total > 0) {
-			tabBadge.textContent = ' ' + total;
+			tabBadge.textContent = String(total);
 			tabBadge.dataset.hidden = 'false';
 		} else {
 			tabBadge.textContent = '';
@@ -622,14 +632,13 @@ function renderPending(res) {
 		}
 	}
 
-	// Per-Kind-Counts
-	['move','create_topic','move_to_pending_topic','reply_draft','rule_suggestion'].forEach((kind) => {
-		const el = document.getElementById('pc-' + kind);
-		if (el) {
-			const strong = el.querySelector('strong');
-			if (strong) strong.textContent = String(counts[kind] ?? 0);
-		}
-	});
+	// Filter-Chip-Counters.
+	const filterCount = (kind) => document.querySelector(`[data-filter-count="${kind}"]`);
+	if (filterCount('all'))             filterCount('all').textContent = String(total);
+	if (filterCount('move'))            filterCount('move').textContent = String((counts.move ?? 0) + (counts.move_to_pending_topic ?? 0));
+	if (filterCount('create_topic'))    filterCount('create_topic').textContent = String(counts.create_topic ?? 0);
+	if (filterCount('rule_suggestion')) filterCount('rule_suggestion').textContent = String(counts.rule_suggestion ?? 0);
+	if (filterCount('reply_draft'))     filterCount('reply_draft').textContent = String(counts.reply_draft ?? 0);
 
 	// Banner
 	const banner = document.getElementById('pending-banner');
@@ -648,126 +657,290 @@ function renderPending(res) {
 		banner.textContent = msgs[b.level] ?? '';
 	}
 
+	renderPendingList();
+}
+
+function renderPendingList() {
 	const list = document.getElementById('pending-list');
+	if (!list) return;
 	list.replaceChildren();
-	for (const item of res.items ?? []) {
-		list.appendChild(buildPendingRow(item));
+
+	const filtered = pendingState.items.filter((item) => {
+		if (pendingState.filter === 'all') return true;
+		if (pendingState.filter === 'move') {
+			return item.kind === 'move' || item.kind === 'move_to_pending_topic';
+		}
+		return item.kind === pendingState.filter;
+	});
+
+	for (const item of filtered) {
+		list.appendChild(buildPendingCard(item));
 	}
-	if ((res.items ?? []).length === 0) {
+	if (filtered.length === 0) {
 		const li = document.createElement('li');
-		li.className = 'mp-muted';
-		li.textContent = 'Keine offenen Vorschläge.';
+		li.className = 'mp-muted mp-pending-empty';
+		li.textContent = pendingState.items.length === 0
+			? 'Keine offenen Vorschläge.'
+			: 'Keine Vorschläge in dieser Kategorie.';
 		list.appendChild(li);
 	}
 }
 
-function buildPendingRow(item) {
+function setPendingFilter(kind) {
+	pendingState.filter = kind;
+	document.querySelectorAll('.mp-pending-filter').forEach((btn) => {
+		btn.classList.toggle('is-active', btn.dataset.filterKind === kind);
+	});
+	renderPendingList();
+}
+
+const PENDING_KIND_META = {
+	move:                   { icon: '📁', label: 'Verschieben' },
+	create_topic:           { icon: '🆕', label: 'Neuer Topic' },
+	move_to_pending_topic:  { icon: '📁', label: 'Verschieben (wartet auf Topic)' },
+	reply_draft:            { icon: '✉️', label: 'Reply-Draft' },
+	rule_suggestion:        { icon: '⚙️', label: 'Regel-Vorschlag' },
+};
+
+function pendingTitle(item) {
+	const p = item.payload ?? {};
+	if (item.kind === 'rule_suggestion') {
+		return p.sub_label || p.label || '(unbenannt)';
+	}
+	if (item.kind === 'create_topic') {
+		return p.sub_label || p.primary || '(unbenannt)';
+	}
+	// move / move_to_pending_topic / reply_draft: Mail-Subject ist primär.
+	// Fallback-Reihenfolge: subject > target_folder > sub_label > '(ohne Betreff)'.
+	return p.subject || p.target_folder || p.folder_path || p.folder_name || p.sub_label || '(ohne Betreff)';
+}
+
+function pendingTarget(item) {
+	const p = item.payload ?? {};
+	return p.target_folder || p.folder_path || p.folder_name || '';
+}
+
+function pendingAffectedCount(item) {
+	if (item.kind === 'rule_suggestion' && Array.isArray(item.payload?.affected_mail_ids)) {
+		return item.payload.affected_mail_ids.length;
+	}
+	if (item.kind === 'create_topic') {
+		return item.children_count ?? 0;
+	}
+	return 0;
+}
+
+function buildPendingCard(item) {
 	const li = document.createElement('li');
-	li.className = 'mp-pending-item';
+	li.className = 'mp-pending-card-v2';
 	li.dataset.kind = item.kind;
+	li.dataset.itemId = item.id;
 	if (item.last_error) li.dataset.hasError = 'true';
 
-	const title = document.createElement('div');
-	title.className = 'mp-pending-title';
-	const kindLabel = {
-		move:                   'Verschieben',
-		create_topic:           'Neuer Topic',
-		move_to_pending_topic:  'Verschieben (wartet auf Topic)',
-		reply_draft:            'Reply-Draft',
-		rule_suggestion:        'Regel-Vorschlag',
-	}[item.kind] ?? item.kind;
-	title.textContent = kindLabel + ': ';
-	const subj = document.createElement('strong');
-	subj.textContent = item.payload?.subject || item.payload?.sub_label || item.payload?.label || item.payload?.mail_id || item.id;
-	title.appendChild(subj);
-	li.appendChild(title);
+	const meta = PENDING_KIND_META[item.kind] ?? { icon: '•', label: item.kind };
 
-	if (item.payload?.target_folder || item.payload?.folder_path || item.payload?.folder_name) {
-		const sub = document.createElement('div');
-		sub.className = 'mp-muted';
-		sub.textContent = '→ ' + (item.payload?.target_folder || item.payload?.folder_path || item.payload?.folder_name);
-		li.appendChild(sub);
+	// Compact header (always visible)
+	const header = document.createElement('div');
+	header.className = 'mp-pending-card-head';
+
+	const icon = document.createElement('span');
+	icon.className = 'mp-pending-card-icon';
+	icon.textContent = meta.icon;
+	header.appendChild(icon);
+
+	const title = document.createElement('div');
+	title.className = 'mp-pending-card-title';
+	const titleStrong = document.createElement('strong');
+	titleStrong.textContent = pendingTitle(item);
+	title.appendChild(titleStrong);
+	const target = pendingTarget(item);
+	if (target) {
+		const arrow = document.createElement('span');
+		arrow.className = 'mp-pending-card-target';
+		arrow.textContent = ' → ' + target;
+		title.appendChild(arrow);
+	}
+	header.appendChild(title);
+
+	const affectedCount = pendingAffectedCount(item);
+	if (affectedCount > 0) {
+		const badge = document.createElement('span');
+		badge.className = 'mp-pending-card-affected';
+		badge.textContent = String(affectedCount);
+		badge.title = `${affectedCount} Mails betroffen`;
+		header.appendChild(badge);
 	}
 
-	// Sprint 6g — rule_suggestion: Reasoning-Summary + Affected-Preview
+	const expandBtn = document.createElement('button');
+	expandBtn.className = 'mp-pending-card-expand';
+	expandBtn.setAttribute('aria-label', 'Details');
+	expandBtn.textContent = '▾';
+	header.appendChild(expandBtn);
+
+	li.appendChild(header);
+
+	// Expanded body
+	const body = document.createElement('div');
+	body.className = 'mp-pending-card-body';
+	body.dataset.hidden = 'true';
+
 	if (item.kind === 'rule_suggestion') {
-		const conf = item.payload?.confidence;
-		if (typeof conf === 'number') {
-			const confEl = document.createElement('div');
-			confEl.className = 'mp-muted';
-			confEl.textContent = `KI-Konfidenz: ${conf}%`;
-			li.appendChild(confEl);
-		}
-		const summary = item.payload?.reasoning_summary;
-		if (summary) {
-			const summEl = document.createElement('div');
-			summEl.className = 'mp-muted';
-			summEl.textContent = summary;
-			li.appendChild(summEl);
-		}
-		const affectedIds = Array.isArray(item.payload?.affected_mail_ids) ? item.payload.affected_mail_ids : [];
-		const subjects    = Array.isArray(item.payload?.affected_subjects) ? item.payload.affected_subjects : [];
-		if (affectedIds.length > 0) {
-			const count = document.createElement('div');
-			count.textContent = `${affectedIds.length} ähnliche Mail${affectedIds.length === 1 ? '' : 's'} werden mitverschoben:`;
-			li.appendChild(count);
-			const preview = document.createElement('ul');
-			preview.className = 'mp-muted';
-			subjects.slice(0, 3).forEach((s) => {
-				const sLi = document.createElement('li');
-				sLi.textContent = s || '(ohne Betreff)';
-				preview.appendChild(sLi);
-			});
-			if (affectedIds.length > 3) {
-				const more = document.createElement('li');
-				more.textContent = `… und ${affectedIds.length - 3} weitere`;
-				preview.appendChild(more);
-			}
-			li.appendChild(preview);
-		} else {
-			const count = document.createElement('div');
-			count.className = 'mp-muted';
-			count.textContent = 'Nur Regel anlegen — keine bestehenden Mails betroffen.';
-			li.appendChild(count);
-		}
+		buildRuleSuggestionBody(body, item);
+	} else if (item.kind === 'create_topic' && affectedCount > 0) {
+		const note = document.createElement('p');
+		note.className = 'mp-muted';
+		note.textContent = `${affectedCount} Mails werden in den neuen Topic-Ordner verschoben.`;
+		body.appendChild(note);
 	}
 
 	if (item.last_error) {
 		const err = document.createElement('div');
 		err.className = 'mp-error-text';
-		err.textContent = 'Fehler: ' + item.last_error;
-		li.appendChild(err);
+		err.textContent = 'Letzter Fehler: ' + item.last_error;
+		body.appendChild(err);
 	}
 
+	// Actions (inside body)
 	const actions = document.createElement('div');
-	actions.className = 'mp-actions';
+	actions.className = 'mp-pending-card-actions';
+
 	const ok = document.createElement('button');
 	ok.className = 'mp-btn mp-btn-primary';
-	const childCount = item.children_count ?? 0;
-	const ruleAffected = item.kind === 'rule_suggestion' && Array.isArray(item.payload?.affected_mail_ids)
-		? item.payload.affected_mail_ids.length
-		: 0;
-	if (item.kind === 'create_topic' && childCount > 0) {
-		ok.textContent = `Anlegen + ${childCount} Mail${childCount === 1 ? '' : 's'} verschieben`;
-	} else if (item.kind === 'rule_suggestion') {
-		ok.textContent = ruleAffected > 0
-			? `Regel anlegen + ${ruleAffected} Mail${ruleAffected === 1 ? '' : 's'} verschieben`
-			: 'Regel anlegen';
-	} else {
-		ok.textContent = item.last_error ? 'Erneut versuchen' : 'Bestätigen';
-	}
-	ok.addEventListener('click', () => approvePending(item.id, item.kind, childCount));
+	ok.textContent = approveButtonText(item);
+	ok.addEventListener('click', () => approvePending(item));
+	actions.appendChild(ok);
+
 	const no = document.createElement('button');
 	no.className = 'mp-btn mp-btn-ghost';
 	no.textContent = 'Ablehnen';
 	no.addEventListener('click', () => rejectPending(item.id));
-	actions.appendChild(ok);
 	actions.appendChild(no);
-	li.appendChild(actions);
+
+	body.appendChild(actions);
+	li.appendChild(body);
+
+	// Expand-Toggle
+	expandBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		const open = body.dataset.hidden !== 'false';
+		body.dataset.hidden = open ? 'false' : 'true';
+		expandBtn.textContent = open ? '▴' : '▾';
+		li.classList.toggle('is-expanded', open);
+	});
+	// Click on header (außer Buttons) auch expand.
+	header.addEventListener('click', (e) => {
+		if (e.target.closest('button') !== expandBtn && e.target.closest('button') !== null) return;
+		if (e.target === expandBtn) return; // schon gehandelt
+		expandBtn.click();
+	});
+
 	return li;
 }
 
-async function approvePending(id, kind = null, childrenCount = 0) {
+function approveButtonText(item) {
+	if (item.last_error) return 'Erneut versuchen';
+	const count = pendingAffectedCount(item);
+	if (item.kind === 'rule_suggestion') {
+		return count > 0 ? `Regel anlegen + ${count} verschieben` : 'Regel anlegen';
+	}
+	if (item.kind === 'create_topic' && count > 0) {
+		return `Anlegen + ${count} verschieben`;
+	}
+	return 'Bestätigen';
+}
+
+function buildRuleSuggestionBody(body, item) {
+	const p = item.payload ?? {};
+	const conf = p.confidence;
+	const summary = p.reasoning_summary;
+
+	if (typeof conf === 'number' || summary) {
+		const metaLine = document.createElement('div');
+		metaLine.className = 'mp-pending-card-meta';
+		if (typeof conf === 'number') {
+			const c = document.createElement('span');
+			c.className = 'mp-pending-conf';
+			c.textContent = `KI ${conf}%`;
+			metaLine.appendChild(c);
+		}
+		if (summary) {
+			const s = document.createElement('span');
+			s.className = 'mp-muted';
+			s.textContent = summary;
+			metaLine.appendChild(s);
+		}
+		body.appendChild(metaLine);
+	}
+
+	const affectedIds = Array.isArray(p.affected_mail_ids) ? p.affected_mail_ids : [];
+	const subjects    = Array.isArray(p.affected_subjects) ? p.affected_subjects : [];
+
+	if (affectedIds.length === 0) {
+		const note = document.createElement('p');
+		note.className = 'mp-muted';
+		note.textContent = 'Nur Regel anlegen — keine bestehenden Mails betroffen.';
+		body.appendChild(note);
+		return;
+	}
+
+	// Checkbox-Liste mit Toolbar (Alle / Keine)
+	const listHeader = document.createElement('div');
+	listHeader.className = 'mp-pending-rule-list-header';
+	const listTitle = document.createElement('span');
+	listTitle.textContent = `${affectedIds.length} Mails würden mitverschoben:`;
+	listHeader.appendChild(listTitle);
+	const toolbar = document.createElement('span');
+	toolbar.className = 'mp-pending-rule-toolbar';
+	const allBtn = document.createElement('button');
+	allBtn.className = 'mp-btn-link';
+	allBtn.textContent = 'Alle';
+	const noneBtn = document.createElement('button');
+	noneBtn.className = 'mp-btn-link';
+	noneBtn.textContent = 'Keine';
+	toolbar.appendChild(allBtn);
+	toolbar.appendChild(noneBtn);
+	listHeader.appendChild(toolbar);
+	body.appendChild(listHeader);
+
+	const list = document.createElement('ul');
+	list.className = 'mp-pending-rule-list';
+	const checkboxes = [];
+	affectedIds.forEach((mailId, i) => {
+		const liEntry = document.createElement('li');
+		const cb = document.createElement('input');
+		cb.type = 'checkbox';
+		cb.checked = true;
+		cb.value = mailId;
+		cb.id = `pending-mail-${item.id}-${i}`;
+		checkboxes.push(cb);
+		const label = document.createElement('label');
+		label.htmlFor = cb.id;
+		label.textContent = subjects[i] || '(ohne Betreff)';
+		liEntry.appendChild(cb);
+		liEntry.appendChild(label);
+		list.appendChild(liEntry);
+	});
+	body.appendChild(list);
+
+	// Bind toolbar
+	allBtn.addEventListener('click',  () => { checkboxes.forEach(cb => cb.checked = true); });
+	noneBtn.addEventListener('click', () => { checkboxes.forEach(cb => cb.checked = false); });
+
+	// Hänge die Checkboxes als Property direkt an das body-Element —
+	// approvePending() greift später über li.querySelector('.mp-pending-card-body')
+	// drauf zu (.__ruleCheckboxes).
+	body.__ruleCheckboxes = checkboxes;
+}
+
+async function approvePending(item) {
+	// Backward-compat: ältere Callers reichen noch eine ID rein.
+	if (typeof item === 'string') {
+		item = pendingState.items.find(i => i.id === item) ?? { id: item, kind: null };
+	}
+	const id = item.id;
+	const kind = item.kind;
+	const childrenCount = item.children_count ?? 0;
+
 	// DA-Impl-Finding 2: bei create_topic mit Children Bulk-Move-Confirm
 	// (PRD §3.1). Sonst sieht der User den Mail-Move nicht kommen.
 	if (kind === 'create_topic' && childrenCount > 0) {
@@ -778,12 +951,30 @@ async function approvePending(id, kind = null, childrenCount = 0) {
 		});
 		if (!ok) return;
 	}
+
+	// Sprint 6g: bei rule_suggestion holen wir die gecheckten Mail-IDs
+	// aus der Card-Body-Checkbox-Liste (kompakt-UI 2026-05-15).
+	const body = {};
+	if (kind === 'rule_suggestion') {
+		const card = document.querySelector(`.mp-pending-card-v2[data-item-id="${id}"]`);
+		const cardBody = card?.querySelector('.mp-pending-card-body');
+		if (cardBody && Array.isArray(cardBody.__ruleCheckboxes)) {
+			body.selected_mail_ids = cardBody.__ruleCheckboxes
+				.filter(cb => cb.checked)
+				.map(cb => cb.value);
+		}
+	}
+
 	try {
-		const res = await api.pending.approve(id);
+		const res = await api.pending.approve(id, body);
 		if (res?.result?.kind === 'create_topic') {
 			const done   = res.result.moves_done   ?? 0;
 			const failed = res.result.moves_failed ?? 0;
 			setStatus(`Topic angelegt. ${done} verschoben, ${failed} Fehler.`);
+		} else if (res?.result?.kind === 'rule_suggestion') {
+			const done   = res.result.moves_done   ?? 0;
+			const failed = res.result.moves_failed ?? 0;
+			setStatus(`Regel angelegt. ${done} verschoben, ${failed} Fehler.`);
 		}
 		await loadPending();
 	} catch (err) { handleError(err); }
@@ -1014,12 +1205,18 @@ function startAutoRefresh() {
 	if (autoRefreshTimer !== null) return;
 	autoRefreshTimer = setInterval(() => {
 		if (document.hidden) return;
-		if (state.filterLabel !== null) return;
-		const activeTab = document.querySelector('.mp-tab.is-active')?.dataset.tab;
-		if (activeTab !== 'briefing') return;
 		if (!localStorage.getItem('mp_jwt')) return;
-		loadBriefing();
-		// Keep the pending-tab badge fresh while the user is on briefing.
+		const activeTab = document.querySelector('.mp-tab.is-active')?.dataset.tab;
+
+		// Briefing-Counts nur refreshen wenn der User wirklich darauf
+		// schaut (Liste ist groß, vermeidet Render-Flackern).
+		if (activeTab === 'briefing' && state.filterLabel === null) {
+			loadBriefing();
+		}
+
+		// Pending-Badge MUSS überall live sein — sonst sieht Marc nicht
+		// dass eine neue rule_suggestion eingetroffen ist während er auf
+		// „Heute" oder „Diese Mail" arbeitet.
 		loadPending().catch(() => { /* silent */ });
 	}, 60 * 1000);
 }
