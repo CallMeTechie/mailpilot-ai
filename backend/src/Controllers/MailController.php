@@ -141,15 +141,17 @@ final class MailController extends BaseController
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 
 		// 2026-05-15 Debug-Trace: zeigt was wir aus der DB lesen vs. was
-		// vom Add-in angefragt wurde. Wird nach Bug-Diagnose entfernt.
-		$this->kernel->get(\Monolog\Logger::class)->info('ensureScored.result', [
-			'requested_msid'     => substr($msId, 0, 30) . '...',
-			'found_mail_id'      => (string)$mail['id'],
-			'found_subject'      => substr((string)($r['subject'] ?? ''), 0, 60),
-			'found_priority'     => $r['priority'] ?? null,
-			'found_label'        => $r['label'] ?? null,
-			'found_summary_head' => substr((string)($r['summary'] ?? ''), 0, 80),
-		]);
+		// vom Add-in angefragt wurde. error_log → stderr → docker logs.
+		// Wird nach Bug-Diagnose entfernt.
+		error_log(sprintf(
+			'ENSURESCORED_TRACE req_msid=%s found_id=%s subj=%s prio=%s label=%s summary=%s',
+			substr($msId, 0, 30),
+			(string)$mail['id'],
+			substr((string)($r['subject'] ?? ''), 0, 60),
+			(string)($r['priority'] ?? 'null'),
+			(string)($r['label'] ?? 'null'),
+			substr((string)($r['summary'] ?? ''), 0, 80),
+		));
 
 		// Click-time AutoSort: run regardless of whether this is the
 		// first score or a stale score we just retrieved. The
