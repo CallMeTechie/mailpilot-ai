@@ -109,4 +109,17 @@ final class FakeGraphClient extends GraphClient
 		}
 		return $this->folderMeta[$folderId] ?? null;
 	}
+
+	/** @var array<string, array{id:string, from_email:string, received_at:string, sent_at:?string}|null> */
+	private array $conversationLast = [];
+
+	public function scriptConversationLastMessage(string $conversationId, ?array $message): void
+	{
+		$this->conversationLast[$conversationId] = $message;
+	}
+
+	public function getConversationLastMessage(string $accessToken, string $conversationId): ?array
+	{
+		return $this->conversationLast[$conversationId] ?? null;
+	}
 }

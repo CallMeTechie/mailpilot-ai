@@ -40,6 +40,9 @@ final class SyncService
 		// Sprint 6d: optional, damit Tests ohne Wiring laufen. Wenn null,
 		// wird die Move-Detection still übersprungen.
 		private readonly ?MoveDetectionService $moveDetection = null,
+		// Sprint 6f: Stale-Hook auf reply_drafts. Wenn null, Hook wird
+		// einfach übersprungen (Drafts bleiben „aktuell" bis Worker-Tick).
+		private readonly ?\MailPilot\Repositories\DraftRepository $drafts = null,
 	) {
 	}
 
@@ -93,6 +96,17 @@ final class SyncService
 			);
 			$this->mails->upsertFromGraph($tenantId, $mailboxId, $msg);
 			$processed++;
+
+			// Sprint 6f Stale-Hook: neue Mail in einer Konversation, für
+			// die schon eine Draft existiert → markiere Draft als stale.
+			// Decken nur den eingehenden Pfad ab; der Sent-Folder-Lookup
+			// im AutoReplyService (DA-R1 Finding 1) deckt den Outbound-Fall.
+			if ($this->drafts !== null) {
+				$convId = (string)($msg['conversationId'] ?? '');
+				if ($convId !== '') {
+					$this->drafts->markStaleByConversation($tenantId, $convId);
+				}
+			}
 		}
 
 		$unscored = $this->mails->findUnscoredForMailbox($tenantId, $mailboxId, 200);

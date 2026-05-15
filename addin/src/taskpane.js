@@ -410,8 +410,114 @@ async function loadModes() {
 		const riRange   = document.getElementById('rule-inference-backfill-range');
 		if (riEnabled) riEnabled.checked = (m.rule_inference_enabled !== false);
 		if (riRange)   riRange.value     = m.rule_inference_backfill_range ?? 'last_30_days';
+		// Sprint 6f — Auto-Reply Settings
+		const arEnabled = document.getElementById('autoreply-enabled');
+		if (arEnabled) arEnabled.checked = !!m.autoreply_enabled;
 		refreshModeHints();
 	} catch (err) { handleError(err); }
+}
+
+// ============================================================
+// Sprint 6f — Auto-Reply-Drafts
+// ============================================================
+let _draftState = { mailId: null, draftId: null, text: '', stale: false };
+
+async function loadActiveDraft(mailDbId) {
+	const box = document.getElementById('current-draft-box');
+	if (!box) return;
+	box.dataset.hidden = 'true';
+	if (!mailDbId) return;
+	const res = await api.drafts.getActive(mailDbId);
+	const d = res?.draft;
+	if (!d) return;
+	_draftState = {
+		mailId:  mailDbId,
+		draftId: d.id,
+		text:    d.draft_text || '',
+		stale:   Boolean(d.stale_at),
+	};
+	document.getElementById('current-draft-text').textContent = _draftState.text;
+	const meta = document.getElementById('current-draft-meta');
+	if (meta) {
+		const tag = d.created_by === 'auto' ? 'KI-Vorschlag' : 'on-demand';
+		meta.textContent = _draftState.stale ? `${tag} · veraltet` : tag;
+	}
+	box.classList.toggle('is-stale', _draftState.stale);
+	box.dataset.hidden = 'false';
+}
+
+function openDraftInOutlook() {
+	if (!_draftState.text) return;
+	const text = _draftState.text;
+	// Versuche Reply-Form mit Body zu öffnen; fallback Clipboard.
+	const api2 = Office?.context?.mailbox?.item?.displayReplyForm;
+	try {
+		if (typeof api2 === 'function') {
+			Office.context.mailbox.item.displayReplyForm({ htmlBody: text.replace(/\n/g, '<br>') });
+			setStatus('Reply-Form mit Entwurf geöffnet.');
+			return;
+		}
+	} catch (_) { /* fallback below */ }
+	try {
+		navigator.clipboard?.writeText(text);
+		setStatus('Entwurf in die Zwischenablage kopiert. In Outlook „Antworten" klicken und einfügen.');
+	} catch (_) {
+		setStatus('Entwurf konnte nicht geöffnet werden — manuell kopieren.');
+	}
+}
+
+async function regenerateDraft() {
+	if (!_draftState.mailId) return;
+	setStatus('Neuen Entwurf generieren…');
+	try {
+		// Wir verwerfen den alten zuerst, damit der Worker keinen Race generiert.
+		if (_draftState.draftId) {
+			await api.drafts.dismiss(_draftState.draftId).catch(() => {});
+		}
+		await api.drafts.regenerate(_draftState.mailId);
+		await loadActiveDraft(_draftState.mailId);
+		setStatus('Neuer Entwurf bereit.');
+	} catch (err) { handleError(err); }
+}
+
+async function dismissDraft() {
+	if (!_draftState.draftId) return;
+	try {
+		await api.drafts.dismiss(_draftState.draftId);
+		document.getElementById('current-draft-box').dataset.hidden = 'true';
+		_draftState = { mailId: null, draftId: null, text: '', stale: false };
+		setStatus('Entwurf verworfen.');
+	} catch (err) { handleError(err); }
+}
+
+async function saveAutoReplySettings() {
+	const status = document.getElementById('autoreply-status');
+	if (status) status.textContent = 'Speichere…';
+	try {
+		await api.modes.save({
+			autoreply_enabled: document.getElementById('autoreply-enabled').checked,
+		});
+		if (status) status.textContent = 'Gespeichert.';
+		showToast('Auto-Reply-Settings gespeichert', 'success', 2500);
+	} catch (err) {
+		if (status) status.textContent = '';
+		handleError(err);
+	}
+}
+
+async function includeAutoReplyBacklog() {
+	const status = document.getElementById('autoreply-status');
+	if (status) status.textContent = 'Backlog läuft an…';
+	try {
+		const res = await api.drafts.includeBacklog();
+		const t = res?.tick ?? {};
+		const msg = `Backlog: ${t.generated ?? 0} Drafts erzeugt, ${t.candidates ?? 0} Kandidaten geprüft.`;
+		if (status) status.textContent = msg;
+		showToast(msg, 'success', 4000);
+	} catch (err) {
+		if (status) status.textContent = '';
+		handleError(err);
+	}
 }
 
 async function saveRuleInference() {
@@ -1292,6 +1398,7 @@ function bounceToLogin() {
 
 function renderCurrentMail(row) {
 	state.currentMailData = row;
+	loadActiveDraft(row.id).catch(() => { /* silent — Draft-Box bleibt versteckt */ });
 	const score = row.score ?? {};
 	const badge = document.getElementById('current-badge');
 	badge.textContent = labelText(score.label);
@@ -1700,6 +1807,12 @@ function initSettings() {
 	document.getElementById('btn-apply-autosort-now')?.addEventListener('click', applyAutoSortNow);
 	// Sprint 6g — Rule-Inference Save
 	document.getElementById('btn-save-rule-inference')?.addEventListener('click', saveRuleInference);
+	// Sprint 6f — Auto-Reply-Drafts
+	document.getElementById('btn-save-autoreply')?.addEventListener('click', saveAutoReplySettings);
+	document.getElementById('btn-autoreply-backlog')?.addEventListener('click', includeAutoReplyBacklog);
+	document.getElementById('btn-draft-open-outlook')?.addEventListener('click', openDraftInOutlook);
+	document.getElementById('btn-draft-regenerate')?.addEventListener('click', regenerateDraft);
+	document.getElementById('btn-draft-dismiss')?.addEventListener('click', dismissDraft);
 	document.getElementById('btn-rescore-all')?.addEventListener('click', rescoreAll);
 
 	document.getElementById('btn-export').addEventListener('click', async () => {

@@ -263,6 +263,50 @@ class GraphClient
 		return (string)$parentId;
 	}
 
+	/**
+	 * Sprint 6f (DA-R1 Finding 1) — Sent-Folder-Blindheit-Schutz.
+	 *
+	 * Holt die LATEST Message einer Conversation (egal welcher Folder!) —
+	 * gerade auch Sent. Wenn die neueste Message vom User selbst stammt
+	 * ODER nach dem Original-Mail-Empfang gesendet wurde, hat der User
+	 * vermutlich schon geantwortet → AutoReplyService skipt Draft-Gen.
+	 *
+	 * Returnt null bei 404 oder leerer Conversation (z.B. Conversation
+	 * wurde manuell gelöscht).
+	 *
+	 * @return array{id:string, from_email:string, received_at:string, sent_at:?string}|null
+	 */
+	public function getConversationLastMessage(string $accessToken, string $conversationId): ?array
+	{
+		$url = self::GRAPH_BASE . '/me/messages'
+			. '?$filter=' . rawurlencode("conversationId eq '" . $conversationId . "'")
+			. '&$top=1&$orderby=receivedDateTime%20desc'
+			. '&$select=id,from,sender,receivedDateTime,sentDateTime';
+		try {
+			$res = $this->get($accessToken, $url);
+		} catch (\RuntimeException $e) {
+			if (preg_match('/\b404\b/', $e->getMessage())) {
+				return null;
+			}
+			throw $e;
+		}
+		$rows = $res['value'] ?? [];
+		if (!is_array($rows) || $rows === []) {
+			return null;
+		}
+		$msg = $rows[0];
+		// from kann fehlen bei Sent-Items in manchen Tenants — fallback auf sender.
+		$fromEmail = $msg['from']['emailAddress']['address']
+			?? $msg['sender']['emailAddress']['address']
+			?? '';
+		return [
+			'id'           => (string)($msg['id'] ?? ''),
+			'from_email'   => strtolower((string)$fromEmail),
+			'received_at'  => (string)($msg['receivedDateTime'] ?? ''),
+			'sent_at'      => isset($msg['sentDateTime']) ? (string)$msg['sentDateTime'] : null,
+		];
+	}
+
 	public function getMe(string $accessToken): array
 	{
 		return $this->get($accessToken, self::GRAPH_BASE . '/me');

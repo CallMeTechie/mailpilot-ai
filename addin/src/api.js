@@ -199,6 +199,15 @@ export const api = {
 		get:    ()       => request('GET',  '/settings/modes'),
 		save:   (modes)  => request('POST', '/settings/modes', modes),
 	},
+	// Sprint 6f — Auto-Reply-Drafts
+	drafts: {
+		getActive: (mailId)  => request('GET',  `/mails/${encodeURIComponent(mailId)}/drafts/active`),
+		dismiss:   (draftId) => request('POST', `/drafts/${encodeURIComponent(draftId)}/dismiss`),
+		regenerate:(mailId, instruction = null) =>
+			request('POST', `/mails/${encodeURIComponent(mailId)}/draft-reply`,
+				instruction !== null ? { instruction } : {}),
+		includeBacklog: () => request('POST', '/settings/auto-reply/include-backlog'),
+	},
 	today: {
 		fetch: (range = 'today', cursors = {}) => {
 			const q = new URLSearchParams();

@@ -8,6 +8,7 @@ use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Request;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Services\MailScoringService;
@@ -204,6 +205,48 @@ final class MailController extends BaseController
 		$draft = $this->kernel->get(ReplyDraftService::class)
 			->draft($ctx['tenant_id'], (string)$params['id'], $instruction, $ctx['user_id']);
 		Response::json(['draft' => $draft]);
+	}
+
+	/**
+	 * Sprint 6f — liefert die aktive (non-dismissed, non-stale) Draft für
+	 * eine Mail, oder null. Wird vom Add-in im „Diese Mail"-Tab gepollt
+	 * um die Draft-Box anzuzeigen.
+	 */
+	public function getActiveDraft(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$mailId = (string)($params['id'] ?? '');
+		$draft = $this->kernel->get(DraftRepository::class)
+			->findActiveForMail($ctx['tenant_id'], $mailId);
+		if ($draft === null) {
+			Response::json(['draft' => null]);
+			return;
+		}
+		Response::json(['draft' => [
+			'id'           => (string)$draft['id'],
+			'draft_text'   => (string)$draft['draft_text'],
+			'created_by'   => (string)($draft['created_by'] ?? 'user'),
+			'generated_at' => (string)$draft['generated_at'],
+			'stale_at'     => $draft['stale_at']     !== null ? (string)$draft['stale_at']     : null,
+			'dismissed_at' => $draft['dismissed_at'] !== null ? (string)$draft['dismissed_at'] : null,
+		]]);
+	}
+
+	/**
+	 * Sprint 6f — User verwirft eine Draft (Auto- oder On-demand).
+	 * Setzt dismissed_at; Worker generiert keine neue, bis der User
+	 * im Add-in „Neuen Entwurf" klickt (= draftReply on-demand).
+	 */
+	public function dismissDraft(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$draftId = (string)($params['id'] ?? '');
+		$ok = $this->kernel->get(DraftRepository::class)
+			->markDismissed($ctx['tenant_id'], $draftId);
+		if (!$ok) {
+			throw HttpException::notFound('DRAFT_NOT_FOUND', 'Draft nicht gefunden oder bereits verworfen');
+		}
+		Response::json(['ok' => true]);
 	}
 
 	public function rescore(array $params, array $body): void

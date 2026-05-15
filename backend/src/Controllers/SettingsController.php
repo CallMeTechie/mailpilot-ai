@@ -7,6 +7,7 @@ use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
+use MailPilot\Services\AutoReplyService;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\SettingsRepository;
@@ -521,7 +522,30 @@ final class SettingsController extends BaseController
 			'autosort_reply_mode'           => $s->getString('autosort_reply_mode',        'suggest'),
 			'rule_inference_enabled'        => $s->getBool('rule_inference_enabled', true),
 			'rule_inference_backfill_range' => $s->getString('rule_inference_backfill_range', 'last_30_days'),
+			// Sprint 6f
+			'autoreply_enabled'             => $s->getBool('autoreply_enabled', false),
+			'autoreply_enabled_at'          => $s->getString('autoreply_enabled_at', ''),
+			'autoreply_max_per_day'         => $s->getInt('autoreply_max_per_day', 15),
 		]);
+	}
+
+	/**
+	 * Sprint 6f — User-Knopf „Backlog inkludieren". Setzt enabled_at
+	 * zurück (= alle Mails sind kandidaten-würdig) und triggert
+	 * EINEN sofortigen AutoReplyService-Tick. Quota greift normal,
+	 * dh max autoreply_max_per_day Drafts in der ersten Charge.
+	 */
+	public function includeAutoReplyBacklog(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$s = $this->kernel->get(SettingsRepository::class);
+		if (!$s->getBool('autoreply_enabled', false)) {
+			throw HttpException::preconditionFailed('AUTOREPLY_DISABLED',
+				'Auto-Reply-Drafts sind deaktiviert — erst im Auto-Sort-Tab aktivieren.');
+		}
+		$s->set('autoreply_enabled_at', '');  // leerer Filter = alle Mails kandidieren
+		$result = $this->kernel->get(AutoReplyService::class)->tick();
+		Response::json(['ok' => true, 'tick' => $result]);
 	}
 
 	/**
@@ -575,6 +599,19 @@ final class SettingsController extends BaseController
 					'rule_inference_backfill_range muss future_only|last_30_days|all sein');
 			}
 			$s->set('rule_inference_backfill_range', $range);
+		}
+
+		// Sprint 6f — Auto-Reply-Drafts Master-Toggle. Beim On-Toggle
+		// wird enabled_at auf jetzt-UTC gesetzt → Backlog-Schutz greift.
+		// User kann via /settings/auto-reply/include-backlog explizit
+		// Backlog freischalten.
+		if (array_key_exists('autoreply_enabled', $body)) {
+			$wasEnabled = $s->getBool('autoreply_enabled', false);
+			$now = (bool)$body['autoreply_enabled'];
+			$s->set('autoreply_enabled', $now ? '1' : '0');
+			if ($now && !$wasEnabled) {
+				$s->set('autoreply_enabled_at', gmdate('Y-m-d\TH:i:s\Z'));
+			}
 		}
 
 		// DA-Impl-Finding 3: wenn Modus auf 'auto' wechselt, sind Bestands-

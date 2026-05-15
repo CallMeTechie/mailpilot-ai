@@ -26,6 +26,7 @@ use MailPilot\Repositories\UsageCounterRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
+use MailPilot\Services\AutoReplyService;
 use MailPilot\Services\AutoSortService;
 use MailPilot\Services\BudgetService;
 use MailPilot\Services\JwtService;
@@ -195,6 +196,18 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
+			),
+			AutoReplyService::class   => new AutoReplyService(
+				$this->get(PDO::class),
+				$this->get(GraphClient::class),
+				$this->get(TokenService::class),
+				$this->get(SettingsRepository::class),
+				$this->get(UsageCounterRepository::class),
+				$this->get(DraftRepository::class),
+				$this->get(MailboxRepository::class),
+				$this->get(ReplyDraftService::class),
+				$this->get(Logger::class),
 			),
 			RuleInferenceService::class => new RuleInferenceService(
 				$this->get(PDO::class),
@@ -217,6 +230,7 @@ class Kernel
 				$this->get(AutoSortService::class),
 				$this->get(Logger::class),
 				$this->get(MoveDetectionService::class),
+				$this->get(DraftRepository::class), // Sprint 6f: Stale-Hook
 			),
 			default => throw new \RuntimeException("No factory for service: {$id}"),
 		};

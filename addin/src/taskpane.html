@@ -175,6 +175,21 @@
 				<p class="mp-from" id="current-from">—</p>
 			</div>
 
+			<!-- Sprint 6f — Auto-Reply-Draft-Box. Versteckt bis getActiveDraft
+			     etwas liefert. Bei stale_at: gedimmter Stale-Hinweis. -->
+			<div id="current-draft-box" class="mp-draft-box" data-hidden="true">
+				<div class="mp-draft-header">
+					<strong>📝 Antwort-Entwurf</strong>
+					<span class="mp-muted" id="current-draft-meta"></span>
+				</div>
+				<pre class="mp-draft-text" id="current-draft-text"></pre>
+				<div class="mp-actions">
+					<button class="mp-btn mp-btn-primary"   id="btn-draft-open-outlook">In Outlook öffnen</button>
+					<button class="mp-btn mp-btn-secondary" id="btn-draft-regenerate">Neuen Entwurf</button>
+					<button class="mp-btn mp-btn-ghost"     id="btn-draft-dismiss">Verwerfen</button>
+				</div>
+			</div>
+
 			<!-- No mail selected in Outlook reading pane. -->
 			<div class="mp-empty" id="current-empty" data-hidden="true">
 				<p>Keine Mail im Lese­bereich geöffnet.</p>
@@ -453,6 +468,23 @@
 						<button class="mp-btn mp-btn-primary" id="btn-save-rule-inference">Lern-Settings speichern</button>
 					</div>
 					<p class="mp-muted" id="rule-inference-status"></p>
+
+					<!-- Sprint 6f — Auto-Reply-Drafts -->
+					<div class="mp-divider"></div>
+					<h3>Auto-Reply-Drafts</h3>
+					<p class="mp-muted">Wenn aktiviert, generiert MailPilot für dich Antwort-Entwürfe zu hochprioritären Mails (priority ≥ 4, du bist Adressat). Drafts werden NIE automatisch gesendet — du siehst sie im „Diese Mail"-Tab und kannst sie übernehmen, anpassen oder verwerfen.</p>
+					<div class="mp-field">
+						<label for="autoreply-enabled">
+							<input type="checkbox" id="autoreply-enabled">
+							Auto-Reply-Drafts aktivieren
+						</label>
+					</div>
+					<p class="mp-muted">Bei Aktivierung gilt der Schutz: nur Mails ab jetzt werden bedacht. Backlog (bestehende Mails) kannst du explizit freischalten.</p>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary"   id="btn-save-autoreply">Auto-Reply speichern</button>
+						<button class="mp-btn mp-btn-secondary" id="btn-autoreply-backlog">Backlog inkludieren</button>
+					</div>
+					<p class="mp-muted" id="autoreply-status"></p>
 				</div>
 			</section>
 

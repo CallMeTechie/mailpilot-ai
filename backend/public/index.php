@@ -34,6 +34,9 @@ $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');
 $router->post('/api/v1/mails/{id}/correct-score','MailController@correctScore');
+// Sprint 6f — Auto-Reply-Drafts
+$router->get ('/api/v1/mails/{id}/drafts/active','MailController@getActiveDraft');
+$router->post('/api/v1/drafts/{id}/dismiss',     'MailController@dismissDraft');
 
 $router->post('/api/v1/sync',                    'SyncController@trigger');
 $router->get ('/api/v1/sync/status/{id}',        'SyncController@status');
@@ -72,6 +75,8 @@ $router->post('/api/v1/pending/{id}/reject',         'PendingController@reject')
 // Sprint 6c — Modus-Toggles (3 × 3)
 $router->get ('/api/v1/settings/modes',              'SettingsController@getModes');
 $router->post('/api/v1/settings/modes',              'SettingsController@saveModes');
+// Sprint 6f — Auto-Reply-Backlog-Trigger
+$router->post('/api/v1/settings/auto-reply/include-backlog', 'SettingsController@includeAutoReplyBacklog');
 
 // Sprint 6d — Reason-Capture für Move-Korrekturen (Privacy-gated)
 $router->post('/api/v1/me/auto-sort-corrections/{id}/reason', 'MeController@setCorrectionReason');

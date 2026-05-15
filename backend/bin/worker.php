@@ -28,6 +28,7 @@ use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
+use MailPilot\Services\AutoReplyService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\SyncService;
@@ -60,6 +61,8 @@ $heartbeat = $pdo->prepare('UPDATE system_settings SET `value` = :v WHERE `key` 
 $lastBackgroundSync = 0;
 $backgroundIntervalSec = 300; // schedule a sync_job per mailbox every 5 min
 $staleRunningTimeoutMin = 10; // jobs running > N min are auto-recovered
+$lastAutoReplyTick = 0;
+$autoReplyIntervalSec = 300; // Sprint 6f: Auto-Reply-Drafts Tick alle 5 min
 
 while (true) {
 	try {
@@ -78,6 +81,17 @@ while (true) {
 			// new ones (the SELECT … IN ("queued","running") check).
 			recoverStaleRunningJobs($pdo, $log, $staleRunningTimeoutMin);
 			scheduleBackgroundSync($pdo, $log);
+		}
+
+		// Sprint 6f — Auto-Reply-Drafts Tick. AutoReplyService prüft selbst
+		// das Master-Toggle (autoreply_enabled), kein zusätzlicher Guard nötig.
+		if ($now - $lastAutoReplyTick >= $autoReplyIntervalSec) {
+			$lastAutoReplyTick = $now;
+			try {
+				$kernel->get(AutoReplyService::class)->tick();
+			} catch (\Throwable $e) {
+				$log->error('worker.auto_reply_tick_failed', ['err' => $e->getMessage()]);
+			}
 		}
 
 		$jobHint = null;
