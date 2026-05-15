@@ -28,6 +28,7 @@ use MailPilot\Repositories\UserRepository;
 use MailPilot\Repositories\VipRepository;
 use MailPilot\Services\AutoReplyService;
 use MailPilot\Services\AutoSortService;
+use MailPilot\Services\JobRecoveryService;
 use MailPilot\Services\BudgetService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\MailScoringService;
@@ -197,6 +198,10 @@ class Kernel
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
 				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
+			),
+			JobRecoveryService::class => new JobRecoveryService(
+				$this->get(PDO::class),
+				$this->get(Logger::class),
 			),
 			AutoReplyService::class   => new AutoReplyService(
 				$this->get(PDO::class),

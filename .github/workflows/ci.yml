@@ -119,6 +119,44 @@ jobs:
         run: ./vendor/bin/phpunit --testsuite Integration --no-coverage
         working-directory: backend
 
+  phpstan:
+    name: PHPStan (Level 5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, openssl, json, curl, pdo_mysql
+          coverage: none
+      - name: Cache composer
+        uses: actions/cache@v4
+        with:
+          path: backend/vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('backend/composer.lock') }}
+      - name: Install
+        run: composer install --no-interaction --no-progress --prefer-dist
+        working-directory: backend
+      - name: PHPStan analyse
+        run: ./vendor/bin/phpstan analyse --memory-limit=1G --no-progress --error-format=github
+        working-directory: backend
+
+  schema-drift:
+    name: Schema Drift Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: sql/schema.sql == backend/migrations/0001_initial_schema.sql
+        run: |
+          if ! diff -q sql/schema.sql backend/migrations/0001_initial_schema.sql; then
+            echo "ERROR: sql/schema.sql and migrations/0001_initial_schema.sql have drifted."
+            echo "Halte die zwei Schema-Quellen synchron — beide werden in unterschiedlichen Pfaden geladen."
+            diff -u sql/schema.sql backend/migrations/0001_initial_schema.sql | head -60
+            exit 1
+          fi
+
   composer-audit:
     name: Composer Audit
     runs-on: ubuntu-latest

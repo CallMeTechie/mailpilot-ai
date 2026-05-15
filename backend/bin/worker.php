@@ -29,6 +29,7 @@ use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\AutoReplyService;
+use MailPilot\Services\JobRecoveryService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\SyncService;
@@ -79,7 +80,8 @@ while (true) {
 			// or killed worker leaves jobs stuck in "running" forever,
 			// which then blocks scheduleBackgroundSync from queueing
 			// new ones (the SELECT … IN ("queued","running") check).
-			recoverStaleRunningJobs($pdo, $log, $staleRunningTimeoutMin);
+			$kernel->get(JobRecoveryService::class)
+				->recoverStaleRunningJobs($staleRunningTimeoutMin);
 			scheduleBackgroundSync($pdo, $log);
 		}
 
@@ -161,35 +163,6 @@ while (true) {
 	} catch (\Throwable $e) {
 		$log->error('worker.loop_error', ['err' => $e->getMessage()]);
 		sleep(3);
-	}
-}
-
-/**
- * Auto-recover sync_jobs that are stuck in "running" longer than
- * $thresholdMinutes. Happens when the worker is killed (OOM, SIGKILL,
- * container restart) mid-run — the job never transitions to done/error
- * and then blocks scheduleBackgroundSync from queueing fresh runs for
- * that mailbox forever.
- *
- * A normal sync takes 30s–3min; 10 min is a generous safety margin.
- */
-function recoverStaleRunningJobs(\PDO $pdo, \Monolog\Logger $log, int $thresholdMinutes): void
-{
-	$stmt = $pdo->prepare('UPDATE sync_jobs
-		SET status = "error",
-		    finished_at = UTC_TIMESTAMP(3),
-		    error_text = :err
-		WHERE status = "running"
-		  AND started_at < (UTC_TIMESTAMP(3) - INTERVAL :m MINUTE)');
-	$stmt->bindValue(':err', sprintf('auto-recovered: stale running > %d min', $thresholdMinutes));
-	$stmt->bindValue(':m', $thresholdMinutes, \PDO::PARAM_INT);
-	$stmt->execute();
-	$recovered = $stmt->rowCount();
-	if ($recovered > 0) {
-		$log->warning('worker.stale_jobs_recovered', [
-			'count'             => $recovered,
-			'threshold_minutes' => $thresholdMinutes,
-		]);
 	}
 }
 

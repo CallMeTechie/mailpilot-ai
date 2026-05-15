@@ -1,0 +1,11 @@
+parameters:
+    level: 5
+    paths:
+        - src
+    excludePaths:
+        - vendor
+    tmpDir: var/phpstan
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
+includes:
+    - phpstan-baseline.neon

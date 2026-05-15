@@ -55,7 +55,7 @@ final class RuleInferenceService
 	 * Haupteinstieg. Returnt eine struktierte Antwort die der Caller
 	 * an's Add-in weiterleitet (für Toast + Status).
 	 *
-	 * @return array{action: string, ...mixed}
+	 * @return array<string, mixed>
 	 */
 	public function infer(string $tenantId, string $userId, string $mailId, string $reasoning): array
 	{

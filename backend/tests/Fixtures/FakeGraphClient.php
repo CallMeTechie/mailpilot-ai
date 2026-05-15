@@ -110,6 +110,22 @@ final class FakeGraphClient extends GraphClient
 		return $this->folderMeta[$folderId] ?? null;
 	}
 
+	/** @var array{messages: list<array<string,mixed>>, delta_token: ?string}|null */
+	private ?array $syncInboxResponse = null;
+
+	public function scriptSyncInbox(array $messages, ?string $deltaToken = null): void
+	{
+		$this->syncInboxResponse = ['messages' => $messages, 'delta_token' => $deltaToken];
+	}
+
+	public function syncInbox(string $accessToken, ?string $deltaToken = null): array
+	{
+		if ($this->syncInboxResponse !== null) {
+			return $this->syncInboxResponse;
+		}
+		return ['messages' => [], 'delta_token' => null];
+	}
+
 	/** @var array<string, array{id:string, from_email:string, received_at:string, sent_at:?string}|null> */
 	private array $conversationLast = [];
 

@@ -1,0 +1,46 @@
+parameters:
+	ignoreErrors:
+		-
+			message: "#^PHPDoc tag @return with type T is not subtype of native type object\\.$#"
+			count: 1
+			path: src/Http/Kernel.php
+
+		-
+			message: "#^Negated boolean expression is always false\\.$#"
+			count: 1
+			path: src/Services/AutoSortService.php
+
+		-
+			message: "#^Result of && is always false\\.$#"
+			count: 1
+			path: src/Services/AutoSortService.php
+
+		-
+			message: "#^Method MailPilot\\\\Services\\\\MailScoringService\\:\\:buildPresetScore\\(\\) is unused\\.$#"
+			count: 1
+			path: src/Services/MailScoringService.php
+
+		-
+			message: "#^Method MailPilot\\\\Services\\\\MailScoringService\\:\\:isObviousNewsletter\\(\\) is unused\\.$#"
+			count: 1
+			path: src/Services/MailScoringService.php
+
+		-
+			message: "#^Property MailPilot\\\\Services\\\\MailScoringService\\:\\:\\$mails is never read, only written\\.$#"
+			count: 1
+			path: src/Services/MailScoringService.php
+
+		-
+			message: "#^Property MailPilot\\\\Services\\\\MoveDetectionService\\:\\:\\$rules is never read, only written\\.$#"
+			count: 1
+			path: src/Services/MoveDetectionService.php
+
+		-
+			message: "#^Property MailPilot\\\\Services\\\\MoveDetectionService\\:\\:\\$scores is never read, only written\\.$#"
+			count: 1
+			path: src/Services/MoveDetectionService.php
+
+		-
+			message: "#^Property MailPilot\\\\Services\\\\SyncService\\:\\:\\$scores is never read, only written\\.$#"
+			count: 1
+			path: src/Services/SyncService.php
