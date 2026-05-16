@@ -1060,6 +1060,36 @@ textarea {
 	display: flex; gap: 6px; margin-top: 10px;
 }
 
+/* Rule/Move-Summary im Card-Body — Folder + Match-Signals explizit */
+.mp-pending-rule-summary,
+.mp-pending-move-summary {
+	margin: 8px 0;
+	padding: 8px;
+	background: var(--mp-surface-hover);
+	border-radius: 4px;
+	font-size: 12px;
+	display: flex; flex-direction: column; gap: 4px;
+}
+.mp-pending-rule-label {
+	color: var(--mp-text-muted);
+	font-size: 11px;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	margin-right: 4px;
+}
+.mp-pending-rule-summary code,
+.mp-pending-move-summary code {
+	background: var(--mp-bg);
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-size: 11px;
+	font-family: var(--mp-font-mono);
+}
+.mp-pending-rule-signal {
+	margin-right: 4px;
+}
+
 .mp-pending-empty { padding: 12px; text-align: center; }
 .mp-error-text { color: #b91c1c; font-size: 11px; margin-top: 6px; }
 

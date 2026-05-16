@@ -162,6 +162,11 @@ Office.onReady((info) => {
 	// this automatically for fresh logins; this handles the reload case.
 	if (localStorage.getItem('mp_jwt')) {
 		startTokenRefreshLoop();
+		// 2026-05-16: Initial-Badge-Fix. Bisher war der Pending-Badge bei
+		// App-Start leer, bis der User entweder einen Tab wechselte oder
+		// 60 s auf den autoRefresh-Tick wartete. Direkt nach JWT-Check
+		// einmal feuern damit das Badge sofort die richtige Zahl zeigt.
+		loadPending().catch(() => { /* silent, badge stays 0 */ });
 	}
 
 	// Path 1: postMessage (works when window.opener survived).
@@ -791,6 +796,36 @@ function buildPendingCard(item) {
 		note.className = 'mp-muted';
 		note.textContent = `${affectedCount} Mails werden in den neuen Topic-Ordner verschoben.`;
 		body.appendChild(note);
+	} else if (item.kind === 'move' || item.kind === 'move_to_pending_topic') {
+		// Move-Pendings: zeige Subject + From + Target explizit im Body.
+		// Bisher war Target nur im Header-Pfeil; bei langem Subject wurde
+		// es abgeschnitten. Plus From-Adresse ist Kontext den Marc oft
+		// braucht zum schnellen Entscheiden.
+		const p = item.payload ?? {};
+		const dl = document.createElement('div');
+		dl.className = 'mp-pending-move-summary';
+		if (p.subject) {
+			const r = document.createElement('div');
+			r.innerHTML = '<span class="mp-pending-rule-label">Betreff:</span> ';
+			const v = document.createElement('span'); v.textContent = p.subject;
+			r.appendChild(v);
+			dl.appendChild(r);
+		}
+		if (p.from) {
+			const r = document.createElement('div');
+			r.innerHTML = '<span class="mp-pending-rule-label">Von:</span> ';
+			const v = document.createElement('span'); v.textContent = p.from;
+			r.appendChild(v);
+			dl.appendChild(r);
+		}
+		if (p.target_folder) {
+			const r = document.createElement('div');
+			r.innerHTML = '<span class="mp-pending-rule-label">Ziel-Ordner:</span> ';
+			const v = document.createElement('code'); v.textContent = p.target_folder;
+			r.appendChild(v);
+			dl.appendChild(r);
+		}
+		body.appendChild(dl);
 	}
 
 	if (item.last_error) {
@@ -851,9 +886,39 @@ function approveButtonText(item) {
 
 function buildRuleSuggestionBody(body, item) {
 	const p = item.payload ?? {};
+
+	// 1) Rule-Beschreibung: Folder + Match-Signals explizit anzeigen.
+	//    Marc muss wissen WORÜBER die Regel matcht, nicht nur sub_label.
+	const ruleBox = document.createElement('div');
+	ruleBox.className = 'mp-pending-rule-summary';
+
+	if (p.folder_name) {
+		const row = document.createElement('div');
+		row.innerHTML = '<span class="mp-pending-rule-label">Ziel-Ordner:</span> ';
+		const v = document.createElement('code');
+		v.textContent = p.folder_name;
+		row.appendChild(v);
+		ruleBox.appendChild(row);
+	}
+	if (Array.isArray(p.match_signals) && p.match_signals.length > 0) {
+		const row = document.createElement('div');
+		row.innerHTML = '<span class="mp-pending-rule-label">Match wenn:</span> ';
+		p.match_signals.forEach((sig, idx) => {
+			const tag = document.createElement('code');
+			tag.className = 'mp-pending-rule-signal';
+			tag.textContent = sig;
+			row.appendChild(tag);
+			if (idx < p.match_signals.length - 1) {
+				row.appendChild(document.createTextNode(' '));
+			}
+		});
+		ruleBox.appendChild(row);
+	}
+	if (ruleBox.children.length > 0) body.appendChild(ruleBox);
+
+	// 2) KI-Konfidenz + Reasoning-Summary
 	const conf = p.confidence;
 	const summary = p.reasoning_summary;
-
 	if (typeof conf === 'number' || summary) {
 		const metaLine = document.createElement('div');
 		metaLine.className = 'mp-pending-card-meta';
@@ -883,11 +948,16 @@ function buildRuleSuggestionBody(body, item) {
 		return;
 	}
 
-	// Checkbox-Liste mit Toolbar (Alle / Keine)
+	// 3) Checkbox-Liste mit Toolbar (Alle / Keine).
+	//    Backend liefert max. 10 Subjects (Payload-Cap). Bei mehr IDs
+	//    fallen weitere auf ID-Display zurück — besser als leeres Label.
 	const listHeader = document.createElement('div');
 	listHeader.className = 'mp-pending-rule-list-header';
 	const listTitle = document.createElement('span');
-	listTitle.textContent = `${affectedIds.length} Mails würden mitverschoben:`;
+	const subjectCount = subjects.length;
+	listTitle.textContent = subjectCount < affectedIds.length
+		? `${affectedIds.length} Mails würden mitverschoben (erste ${subjectCount} mit Betreff):`
+		: `${affectedIds.length} Mails würden mitverschoben:`;
 	listHeader.appendChild(listTitle);
 	const toolbar = document.createElement('span');
 	toolbar.className = 'mp-pending-rule-toolbar';
@@ -915,7 +985,11 @@ function buildRuleSuggestionBody(body, item) {
 		checkboxes.push(cb);
 		const label = document.createElement('label');
 		label.htmlFor = cb.id;
-		label.textContent = subjects[i] || '(ohne Betreff)';
+		// Fallback-Kaskade: Subject > kurze Mail-ID > '(ohne Betreff)'.
+		// Marc sah vorher 11 leere Labels weil der Payload-Cap bei 10
+		// Subjects liegt; jetzt mind. die kurze ID damit man unterscheidet.
+		label.textContent = subjects[i]
+			|| (mailId ? '(Mail ' + mailId.substring(0, 8) + '…)' : '(ohne Betreff)');
 		liEntry.appendChild(cb);
 		liEntry.appendChild(label);
 		list.appendChild(liEntry);
