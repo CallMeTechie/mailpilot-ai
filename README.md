@@ -121,25 +121,28 @@ Office Add-ins erfordern HTTPS — für lokal entweder self-signed Cert oder
 
 ## Roadmap
 
-### MVP (v0.1)
+### MVP (v0.1) — abgeschlossen
 - [x] Projekt-Skelett
-- [x] DB-Schema
+- [x] DB-Schema (inkl. 29 Migrations)
 - [x] Claude Client + Scoring Service
 - [x] Graph Client + OAuth
 - [x] Task Pane UI
-- [ ] Auth-Controllers + JWT-Middleware
-- [ ] Worker für asynchrones Scoring
-- [ ] Sync-Controller + Job-Tracking
-- [ ] Integration-Tests
+- [x] Auth-Controller + JWT-Verifikation in `BaseController`
+- [x] Worker für asynchrones Scoring (`bin/worker.php` + `mailpilot-worker` Container)
+- [x] Sync-Controller + Job-Tracking (`SyncController` + `JobRecoveryService`)
+- [x] Integration-Tests (23 Tests in `tests/Integration/`)
 
-### v0.2
+### v0.2 — in Arbeit
+- [x] Auto-Sort-Rules + Korrektur-Loop (Sprint 6g — Rule-Inference aus Korrektur-Begründungen)
+- [x] Auto-Reply-Drafts (Sprint 6f)
+- [x] Pending-Actions UI + Auto-Sort Reconciliation
 - [ ] Thread-level Analyse (statt nur letzte Mail)
 - [ ] Kalender-Awareness
 - [ ] Weekly Digest per Mail
 
 ### v1.0
-- [ ] Bedrock eu-central-1 für EU-Sovereign-Mode
-- [ ] Admin-UI (Mandanten, Nutzer, Prompt-Tuning)
+- [x] Bedrock-Provider via `ProviderFactory` (EU-Sovereign-Mode wählbar)
+- [x] Admin-UI (`admin/` mit Mandanten- und Prompt-Verwaltung)
 - [ ] Slack/Teams Mirror
 
 ## Lizenz
