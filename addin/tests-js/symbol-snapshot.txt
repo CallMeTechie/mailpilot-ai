@@ -1,0 +1,109 @@
+async function addAutoSortSubRule
+async function applyAutoSortNow
+async function approvePending
+async function bulkApproveAllPending
+async function correctOwnerInline
+async function dismissDraft
+async function draftCurrent
+async function includeAutoReplyBacklog
+async function loadActiveDraft
+async function loadBriefing
+async function loadCurrentMailScore
+async function loadModes
+async function loadPending
+async function loadSettings
+async function loadToday
+async function openFilteredList
+async function persistAliases
+async function persistKeywords
+async function regenerateDraft
+async function rejectPending
+async function reloadFilterList
+async function rescoreAll
+async function rescoreCurrent
+async function runBulkAction
+async function saveAutoReplySettings
+async function saveAutoSort
+async function saveCorrection
+async function saveModes
+async function saveRuleInference
+async function summarizeCurrent
+const aliasState
+const BULK_ACTIONS
+const keywordState
+const LABEL_META
+const PENDING_KIND_META
+const pendingState
+const state
+const todayState
+function approveButtonText
+function bounceToLogin
+function buildAutoSortRow
+function buildIconElement
+function buildLabelTd
+function buildMailListItem
+function buildPendingCard
+function buildRuleSuggestionBody
+function buildTodayCard
+function clearBusy
+function closeFilteredList
+function compactNumber
+function consumeHandoff
+function dependentRulesForSubLabel
+function dismissToast
+function escape
+function filterSinceUtc
+function findSubLabelMetaById
+function handleCurrentMailError
+function handleError
+function initBriefing
+function initCurrentMail
+function initSettings
+function initSettingsOverlay
+function initTabs
+function initToday
+function labelText
+function maybeShowOutlookNotification
+function mpConfirm
+function mpProgress
+function onItemChanged
+function openCorrectForm
+function openDraftInOutlook
+function openMailInOutlook
+function pendingAffectedCount
+function pendingTarget
+function pendingTitle
+function pollSyncStatus
+function populateAutoSortSubPick
+function refreshButtonStates
+function refreshModeHints
+function renderAliasChips
+function renderAliasSuggestions
+function renderAutoSortRules
+function renderBriefing
+function renderCurrentMail
+function renderFooterStats
+function renderKeywordChips
+function renderList
+function renderPending
+function renderPendingList
+function renderSubLabels
+function renderTodaySection
+function resetCurrentMailUi
+function setBusy
+function setPendingFilter
+function setStatus
+function setSyncProgress
+function showError
+function showToast
+function startAutoRefresh
+function toggle
+function useDraft
+let autoRefreshTimer
+let autoSortRulesCache
+let _draftState
+let mpBusy
+let pendingLoading
+let settingsGen
+let subLabelsByParent
+let toastSeq
