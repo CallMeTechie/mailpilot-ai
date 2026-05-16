@@ -1,0 +1,141 @@
+/* --- Layout --- */
+.mp-header {
+	background: var(--mp-surface);
+	border-bottom: 1px solid var(--mp-border);
+	padding: var(--mp-sp-2) var(--mp-sp-3);
+	position: sticky; top: 0; z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: var(--mp-sp-2);
+	/* Container-Query-Anchor: erlaubt der Tab-Bar, sich anhand der
+	   eigenen Breite (= Task-Pane-Breite) auf Icon-only zu schrumpfen,
+	   unabhängig vom Outlook-Fenster-Viewport. */
+	container-type: inline-size;
+}
+
+.mp-tabs {
+	display: flex; gap: var(--mp-sp-1);
+	background: var(--mp-bg);
+	padding: 4px;
+	border-radius: var(--mp-radius);
+	flex: 1;
+	min-width: 0;
+}
+
+.mp-header-icon {
+	flex-shrink: 0;
+	width: 30px; height: 30px;
+	display: inline-flex; align-items: center; justify-content: center;
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--mp-radius-sm);
+	color: var(--mp-text-muted);
+	cursor: pointer;
+	transition: background 120ms ease, color 120ms ease;
+}
+.mp-header-icon:hover { background: var(--mp-surface-hover); color: var(--mp-text); }
+.mp-header-icon.is-spinning svg { animation: mp-spin 800ms linear infinite; }
+.mp-tab {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: inline-flex; align-items: center; justify-content: center;
+	gap: 4px;
+	padding: 6px var(--mp-sp-2);
+	font-size: 12px; font-weight: 500;
+	color: var(--mp-text-muted);
+	border-radius: var(--mp-radius-sm);
+	transition: all 0.15s ease;
+}
+.mp-tab:hover { color: var(--mp-text); }
+.mp-tab.is-active {
+	background: var(--mp-surface);
+	color: var(--mp-text);
+	box-shadow: var(--mp-shadow-sm);
+}
+
+.mp-tab-icon {
+	width: 14px; height: 14px;
+	flex-shrink: 0;
+}
+.mp-tab-label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mp-tab-badge {
+	background: var(--mp-danger, #dc2626);
+	color: #fff;
+	font-size: 10px; font-weight: 700;
+	padding: 1px 5px;
+	border-radius: 9px;
+	min-width: 14px;
+	text-align: center;
+	line-height: 1.2;
+}
+.mp-tab-badge[data-hidden="true"] { display: none; }
+
+/* Sprint 6f — Auto-Reply-Draft-Box */
+.mp-draft-box {
+	margin: var(--mp-sp-3) 0;
+	padding: var(--mp-sp-3);
+	background: var(--mp-surface);
+	border: 1px solid var(--mp-border);
+	border-left: 3px solid #2563eb;
+	border-radius: var(--mp-radius);
+}
+.mp-draft-box[data-hidden="true"] { display: none; }
+.mp-draft-box.is-stale {
+	opacity: 0.7;
+	border-left-color: #d97706;
+}
+.mp-draft-header {
+	display: flex; align-items: baseline; justify-content: space-between;
+	gap: var(--mp-sp-2);
+	margin-bottom: var(--mp-sp-2);
+}
+.mp-draft-text {
+	font-family: var(--mp-font-mono);
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	background: var(--mp-bg);
+	padding: var(--mp-sp-2);
+	border-radius: var(--mp-radius-sm);
+	max-height: 280px;
+	overflow-y: auto;
+	margin: 0 0 var(--mp-sp-2) 0;
+}
+
+/* Schmaler Modus: nur Icons. Tooltip via `title=""` deckt die Bedeutung
+   ab. Schwellwert 340px deckt die typische Task-Pane-Default-Breite
+   in Outlook Desktop (320px) und Web (350-360px) ab. */
+@container (max-width: 340px) {
+	.mp-tab-label { display: none; }
+	.mp-tab { padding: 6px; }
+}
+
+.mp-main {
+	padding: var(--mp-sp-4);
+	padding-bottom: 60px;
+}
+
+.mp-panel { display: none; }
+.mp-panel.is-active { display: block; }
+
+.mp-footer {
+	position: fixed; bottom: 0; left: 0; right: 0;
+	background: var(--mp-surface);
+	border-top: 1px solid var(--mp-border);
+	padding: var(--mp-sp-2) var(--mp-sp-4);
+	font-size: 12px;
+	display: flex; align-items: center; gap: var(--mp-sp-3);
+}
+.mp-footer #status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-footer-stat { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--mp-muted, #64748b); }
+.mp-footer-stat[data-hidden="true"] { display: none; }
+.mp-budget-warn  { color: #b45309; }
+.mp-budget-crit  { color: #b91c1c; font-weight: 500; }
+.mp-worker-ok    { color: #15803d; }
+.mp-worker-stale { color: #b91c1c; font-weight: 500; }
+

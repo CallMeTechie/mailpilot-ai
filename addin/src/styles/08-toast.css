@@ -1,0 +1,60 @@
+
+/* ---------------------------------------------------------- */
+/* Toast stack — non-blocking notifications, layered bottom-up */
+/* ---------------------------------------------------------- */
+.mp-toast-stack {
+	position: fixed;
+	right: 12px;
+	bottom: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	/* Toasts müssen über Settings-Overlay (1050) und Modal (1100) bleiben,
+	   sonst werden sie vom opaken Overlay-Hintergrund verschluckt. */
+	z-index: 1150;
+	pointer-events: none;
+	max-width: calc(100% - 24px);
+}
+.mp-toast {
+	background: #1e293b;
+	color: #f8fafc;
+	font-size: 13px;
+	padding: 8px 12px;
+	border-radius: 6px;
+	box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+	pointer-events: auto;
+	animation: mp-toast-in 160ms ease;
+}
+.mp-toast.mp-toast-error  { background: #b91c1c; }
+.mp-toast.mp-toast-success { background: #047857; }
+.mp-toast.mp-toast-info    { background: #1e293b; }
+.mp-toast.is-leaving { animation: mp-toast-out 200ms ease forwards; }
+@keyframes mp-toast-in  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes mp-toast-out { from { opacity: 1; } to { opacity: 0; transform: translateY(8px); } }
+.mp-counter:hover {
+	border-color: var(--mp-border-strong, #cbd5e1);
+	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.mp-counter:active {
+	transform: scale(0.985);
+}
+.mp-counter:focus-visible {
+	outline: 2px solid var(--mp-primary, #2563eb);
+	outline-offset: 2px;
+}
+
+.mp-counter-dot {
+	position: absolute; top: var(--mp-sp-3); right: var(--mp-sp-3);
+	width: 6px; height: 6px; border-radius: 50%;
+}
+
+.mp-counter-value {
+	font-size: 22px; font-weight: 600; line-height: 1;
+	font-family: var(--mp-font-sans);
+}
+.mp-counter-label {
+	font-size: 11px; color: var(--mp-text-muted);
+	text-transform: uppercase; letter-spacing: 0.04em;
+	margin-top: 4px;
+}
+

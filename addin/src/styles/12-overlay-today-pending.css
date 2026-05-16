@@ -1,0 +1,383 @@
+
+/* ===================== Sprint 0.3 — Settings-Overlay =====================
+   Vollbild-Layer über dem Task-Pane mit eigenem Header, horizontalen
+   Sub-Tabs und scrollbarem Content. z=1050 < Modal (1100), damit
+   transient Confirms/Toasts darüber bleiben. */
+.mp-settings-overlay {
+	position: fixed; inset: 0;
+	background: var(--mp-bg);
+	z-index: 1050;
+	display: flex; flex-direction: column;
+	animation: mp-fade-in 120ms ease-out;
+}
+.mp-settings-overlay[data-hidden="true"] { display: none; }
+
+.mp-settings-head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: var(--mp-sp-3) var(--mp-sp-4);
+	border-bottom: 1px solid var(--mp-border);
+	background: var(--mp-surface);
+}
+.mp-settings-title {
+	margin: 0; font-size: 15px; font-weight: 600; color: var(--mp-text);
+}
+
+.mp-settings-subtabs {
+	display: flex; gap: 2px;
+	overflow-x: auto;
+	padding: var(--mp-sp-2) var(--mp-sp-3);
+	border-bottom: 1px solid var(--mp-border);
+	background: var(--mp-surface);
+	scrollbar-width: thin;
+}
+.mp-subtab {
+	flex-shrink: 0;
+	padding: 6px 12px;
+	font-size: 12px; font-weight: 500;
+	color: var(--mp-text-muted);
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--mp-radius-sm);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+.mp-subtab:hover { color: var(--mp-text); background: var(--mp-surface-hover); }
+.mp-subtab.is-active {
+	background: var(--mp-bg);
+	color: var(--mp-text);
+	border-color: var(--mp-border);
+}
+
+.mp-settings-content {
+	flex: 1;
+	overflow-y: auto;
+	padding: var(--mp-sp-4);
+}
+.mp-subpanel { display: none; }
+.mp-subpanel.is-active { display: block; }
+
+/* Alias-Chips (Sprint 6a) — kompakte tag-artige Liste mit Remove-Button.
+   Suggest-Chips sind klickbar zum Übernehmen. */
+.mp-chips {
+	display: flex; flex-wrap: wrap; gap: 6px;
+	list-style: none; padding: 0; margin: 0 0 8px 0;
+}
+.mp-chip {
+	display: inline-flex; align-items: center; gap: 4px;
+	padding: 4px 8px;
+	background: var(--mp-surface-hover);
+	color: var(--mp-text);
+	border-radius: 12px;
+	font-size: 12px;
+	border: 1px solid var(--mp-border);
+}
+.mp-chip-remove {
+	background: transparent; border: none; cursor: pointer;
+	color: var(--mp-text-muted); font-size: 14px; line-height: 1;
+	padding: 0 2px;
+}
+.mp-chip-remove:hover { color: var(--mp-text); }
+.mp-chips-suggest .mp-chip-suggest {
+	cursor: pointer;
+	background: var(--mp-bg);
+	border-style: dashed;
+}
+.mp-chips-suggest .mp-chip-suggest:hover {
+	background: var(--mp-surface-hover);
+	border-style: solid;
+}
+#alias-suggestions[data-hidden="true"] { display: none; }
+
+/* Sprint 6e — „MailPilot Heute"-Dashboard */
+.mp-today-head {
+	display: flex; justify-content: space-between; align-items: center;
+	margin-bottom: 12px;
+}
+.mp-today-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.mp-today-range { display: inline-flex; gap: 2px; background: var(--mp-bg); padding: 3px; border-radius: 6px; }
+.mp-today-range-btn {
+	padding: 4px 10px; font-size: 12px;
+	background: transparent; border: 1px solid transparent;
+	color: var(--mp-text-muted); border-radius: 4px; cursor: pointer;
+}
+.mp-today-range-btn.is-active {
+	background: var(--mp-surface); color: var(--mp-text);
+	border-color: var(--mp-border);
+}
+.mp-today-section { margin-bottom: 12px; }
+.mp-today-section > summary {
+	cursor: pointer; padding: 6px 0; font-size: 14px;
+	display: flex; align-items: center; gap: 8px;
+}
+.mp-today-count {
+	display: inline-block; min-width: 20px; padding: 1px 6px;
+	background: var(--mp-surface-hover); color: var(--mp-text);
+	border-radius: 9px; font-size: 11px; font-weight: 500; text-align: center;
+}
+.mp-today-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.mp-today-card {
+	padding: 10px; border: 1px solid var(--mp-border); border-radius: 6px;
+	background: var(--mp-bg); display: flex; flex-direction: column; gap: 4px;
+}
+.mp-today-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mp-today-card-from { font-size: 11px; }
+.mp-today-card-summary { font-size: 12px; color: var(--mp-text-muted); line-height: 1.4; }
+.mp-prio-pill {
+	display: inline-block; padding: 1px 6px; border-radius: 4px;
+	font-size: 10px; font-weight: 600; background: var(--mp-surface-hover);
+	color: var(--mp-text);
+}
+.mp-prio-pill[data-priority="5"] { background: #fee2e2; color: #991b1b; }
+.mp-prio-pill[data-priority="4"] { background: #fef3c7; color: #92400e; }
+.mp-prio-pill[data-priority="3"] { background: #dbeafe; color: #1e40af; }
+
+/* Sprint 6c: Pending-Tab + Modi-Tab */
+.mp-subtab-count {
+	display: inline-block; min-width: 18px; padding: 0 6px;
+	background: var(--mp-primary, #2563eb); color: #fff;
+	border-radius: 9px; font-size: 10px; font-weight: 600;
+	margin-left: 4px; text-align: center;
+}
+.mp-subtab-count[data-hidden="true"] { display: none; }
+
+.mp-modes { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.mp-mode { display: flex; flex-direction: column; gap: 4px; }
+.mp-mode-title { font-weight: 500; font-size: 13px; }
+
+.mp-banner {
+	padding: 8px 12px; border-radius: 6px; font-size: 12px;
+	margin: 8px 0 12px;
+}
+.mp-banner[data-hidden="true"] { display: none; }
+.mp-banner[data-level="info"]    { background: #dbeafe; color: #1e3a8a; }
+.mp-banner[data-level="warning"] { background: #fef3c7; color: #92400e; }
+.mp-banner[data-level="block"]   { background: #fee2e2; color: #991b1b; font-weight: 500; }
+
+/* Legacy (kann später raus, derzeit nicht mehr im HTML referenziert) */
+.mp-pending-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.mp-pending-card {
+	background: var(--mp-surface-hover); padding: 4px 8px;
+	border-radius: 4px; font-size: 12px;
+}
+
+/* === Pending-UI v2 (2026-05-15 Redesign) === */
+.mp-pending-header {
+	display: flex; align-items: center; justify-content: space-between;
+	margin-bottom: var(--mp-sp-2);
+}
+.mp-pending-header h2 { margin: 0; font-size: 16px; }
+.mp-pending-total {
+	display: inline-block; margin-left: 6px;
+	background: #2563eb; color: #fff;
+	font-size: 11px; padding: 1px 7px; border-radius: 9px;
+	min-width: 16px; text-align: center;
+}
+
+.mp-pending-filters {
+	display: flex; flex-wrap: wrap; gap: 4px;
+	margin: 0 0 var(--mp-sp-2) 0;
+}
+.mp-pending-filter {
+	font-size: 12px; padding: 4px 9px;
+	background: var(--mp-bg);
+	border: 1px solid var(--mp-border);
+	border-radius: 12px;
+	color: var(--mp-text-muted);
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+.mp-pending-filter:hover { color: var(--mp-text); border-color: var(--mp-text-muted); }
+.mp-pending-filter.is-active {
+	background: var(--mp-text);
+	color: var(--mp-bg);
+	border-color: var(--mp-text);
+}
+.mp-pending-filter span {
+	margin-left: 4px; font-weight: 600;
+	opacity: 0.75;
+}
+
+.mp-pending-bulk-actions { margin-bottom: var(--mp-sp-2); }
+
+.mp-pending-list {
+	list-style: none; padding: 0; margin: 0;
+	display: flex; flex-direction: column; gap: 6px;
+}
+
+.mp-pending-card-v2 {
+	border: 1px solid var(--mp-border);
+	border-radius: 6px;
+	background: var(--mp-bg);
+	overflow: hidden;
+}
+.mp-pending-card-v2[data-has-error="true"] {
+	border-color: #fca5a5; background: #fef2f2;
+}
+.mp-pending-card-v2.is-expanded { border-color: var(--mp-text-muted); }
+
+.mp-pending-card-head {
+	display: flex; align-items: center; gap: 8px;
+	padding: 8px 10px;
+	cursor: pointer;
+	font-size: 13px;
+}
+.mp-pending-card-icon {
+	font-size: 14px; flex-shrink: 0;
+}
+.mp-pending-card-title {
+	flex: 1; min-width: 0;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mp-pending-card-title strong { font-weight: 600; }
+.mp-pending-card-target {
+	color: var(--mp-text-muted);
+	font-size: 12px;
+	margin-left: 4px;
+}
+.mp-pending-card-affected {
+	display: inline-block;
+	background: var(--mp-surface-hover);
+	border: 1px solid var(--mp-border);
+	color: var(--mp-text-muted);
+	font-size: 11px; font-weight: 600;
+	padding: 1px 7px;
+	border-radius: 9px;
+	min-width: 18px; text-align: center;
+}
+.mp-pending-card-expand {
+	background: transparent; border: none;
+	color: var(--mp-text-muted);
+	font-size: 14px; padding: 2px 4px;
+	cursor: pointer;
+}
+
+.mp-pending-card-body {
+	padding: 0 10px 10px 36px;
+	border-top: 1px solid var(--mp-border);
+	font-size: 12px;
+}
+.mp-pending-card-body[data-hidden="true"] { display: none; }
+.mp-pending-card-meta {
+	display: flex; gap: 8px; align-items: baseline;
+	margin: 8px 0;
+	flex-wrap: wrap;
+}
+.mp-pending-conf {
+	background: #e0e7ff; color: #3730a3;
+	padding: 1px 6px; border-radius: 9px;
+	font-size: 11px; font-weight: 600;
+}
+
+.mp-pending-rule-list-header {
+	display: flex; align-items: center; justify-content: space-between;
+	margin: 8px 0 4px 0;
+	font-weight: 500;
+}
+.mp-pending-rule-toolbar { display: flex; gap: 6px; }
+.mp-btn-link {
+	background: transparent; border: none;
+	color: #2563eb;
+	font-size: 11px; cursor: pointer;
+	padding: 2px 6px; border-radius: 4px;
+}
+.mp-btn-link:hover { background: var(--mp-surface-hover); }
+
+.mp-pending-rule-list {
+	list-style: none; padding: 0; margin: 0;
+	max-height: 320px;
+	overflow-y: auto;
+	display: flex; flex-direction: column; gap: 2px;
+	border: 1px solid var(--mp-border);
+	border-radius: 4px;
+	background: var(--mp-bg);
+	padding: 4px;
+}
+.mp-pending-rule-list li {
+	display: flex; align-items: center; gap: 6px;
+	padding: 3px 4px;
+	font-size: 12px;
+}
+.mp-pending-rule-list li:hover { background: var(--mp-surface-hover); }
+.mp-pending-rule-list input[type="checkbox"] {
+	/* CSS-Override gegen den globalen `input { width: 100%; padding: 8px 10px }`
+	   aus Zeile 76 — sonst nimmt jede Checkbox die ganze Zeilenbreite und
+	   verdeckt das Subject-Label. */
+	width: auto !important;
+	padding: 0 !important;
+	margin: 0;
+	background: transparent;
+	flex-shrink: 0;
+}
+.mp-pending-rule-list label {
+	flex: 1; min-width: 0; cursor: pointer;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.mp-pending-card-actions {
+	display: flex; gap: 6px; margin-top: 10px;
+}
+
+/* Rule/Move-Summary im Card-Body — Folder + Match-Signals explizit */
+.mp-pending-rule-summary,
+.mp-pending-move-summary {
+	margin: 8px 0;
+	padding: 8px;
+	background: var(--mp-surface-hover);
+	border-radius: 4px;
+	font-size: 12px;
+	display: flex; flex-direction: column; gap: 4px;
+}
+.mp-pending-rule-label {
+	color: var(--mp-text-muted);
+	font-size: 11px;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	margin-right: 4px;
+}
+.mp-pending-rule-summary code,
+.mp-pending-move-summary code {
+	background: var(--mp-bg);
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-size: 11px;
+	font-family: var(--mp-font-mono);
+}
+.mp-pending-rule-signal {
+	margin-right: 4px;
+}
+
+.mp-pending-empty { padding: 12px; text-align: center; }
+.mp-error-text { color: #b91c1c; font-size: 11px; margin-top: 6px; }
+
+/* Sprint 6b: KI-Vorschlag-Badge an Sub-Label-Auto-Sort-Rules.
+   Carry-Over DA-Impl 6b-4: button-Element + on-click toggle, damit
+   Touch-Devices das Tooltip ebenfalls erreichen. */
+.mp-badge-ki {
+	display: inline-block;
+	margin-left: 4px;
+	padding: 1px 6px;
+	background: #e0e7ff;
+	color: #3730a3;
+	border: none;
+	border-radius: 8px;
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	cursor: pointer;
+	font-family: inherit;
+}
+.mp-badge-ki:hover { background: #c7d2fe; }
+
+.mp-badge-tip {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 4px 8px;
+	background: #1e1b4b;
+	color: #e0e7ff;
+	border-radius: 6px;
+	font-size: 11px;
+	max-width: 280px;
+	line-height: 1.4;
+}
+.mp-badge-tip[data-hidden="true"] { display: none; }

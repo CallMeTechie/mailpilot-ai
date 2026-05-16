@@ -1,0 +1,61 @@
+/* ---------------------------------------------------------- */
+/* Modal dialog — replaces native confirm()/alert() because     */
+/* Office task panes silently suppress them on many hosts.      */
+/* ---------------------------------------------------------- */
+.mp-modal-overlay {
+	position: fixed; inset: 0;
+	background: rgba(15, 23, 42, 0.55);
+	display: flex; align-items: center; justify-content: center;
+	z-index: 1100;
+	padding: 16px;
+	animation: mp-fade-in 120ms ease-out;
+}
+.mp-modal-overlay[data-hidden="true"] { display: none; }
+.mp-modal {
+	background: var(--mp-bg, #fff);
+	color: var(--mp-text, #0f172a);
+	border-radius: 8px;
+	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+	max-width: 420px; width: 100%;
+	max-height: calc(100vh - 32px);
+	display: flex; flex-direction: column;
+	overflow: hidden;
+}
+.mp-modal-title {
+	margin: 0;
+	padding: 16px 20px 8px;
+	font-size: 16px; font-weight: 600;
+}
+.mp-modal-body {
+	padding: 0 20px 16px;
+	overflow-y: auto;
+	white-space: pre-line;
+	font-size: 14px;
+	line-height: 1.45;
+}
+.mp-modal-actions {
+	display: flex; justify-content: flex-end; gap: 8px;
+	padding: 12px 20px;
+	border-top: 1px solid var(--mp-border, #e2e8f0);
+	background: var(--mp-surface, #f8fafc);
+}
+.mp-modal-actions .mp-btn { flex-shrink: 0; }
+@keyframes mp-fade-in {
+	from { opacity: 0; }
+	to   { opacity: 1; }
+}
+
+/* Progress-Bar im Modal */
+.mp-progress-bar {
+	width: 100%;
+	height: 8px;
+	background: var(--mp-border, #e2e8f0);
+	border-radius: 4px;
+	overflow: hidden;
+	margin-bottom: 10px;
+}
+.mp-progress-fill {
+	height: 100%;
+	background: var(--mp-accent, #2563eb);
+	transition: width 200ms ease-out;
+}

@@ -1,0 +1,55 @@
+/* ============================================================
+   MailPilot AI — Task Pane Stylesheet
+   CallMeTechie.de Design System, light mode primary
+   Inspired by Linear / Notion / Stripe
+   ============================================================ */
+
+:root {
+	/* Palette — Slate base */
+	--mp-bg:             #f8fafc; /* slate-50 */
+	--mp-surface:        #ffffff;
+	--mp-surface-hover:  #f1f5f9; /* slate-100 */
+	--mp-border:         #e2e8f0; /* slate-200 */
+	--mp-border-strong:  #cbd5e1; /* slate-300 */
+
+	--mp-text:           #0f172a; /* slate-900 */
+	--mp-text-muted:     #64748b; /* slate-500 */
+	--mp-text-subtle:    #94a3b8; /* slate-400 */
+
+	/* Semantic */
+	--mp-primary:        #2563eb; /* blue-600 */
+	--mp-primary-hover:  #1d4ed8;
+	--mp-primary-bg:     #eff6ff;
+
+	--mp-direct:         #ef4444;
+	--mp-action:         #f97316;
+	--mp-cc:             #3b82f6;
+	--mp-newsletter:     #94a3b8;
+	--mp-auto:           #64748b;
+	--mp-noise:          #cbd5e1;
+
+	--mp-danger:         #dc2626;
+	--mp-danger-bg:      #fef2f2;
+
+	/* Typography */
+	--mp-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--mp-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+	/* Geometry */
+	--mp-radius:       8px;
+	--mp-radius-sm:    6px;
+	--mp-radius-lg:    12px;
+	--mp-shadow-sm:    0 1px 2px rgba(15, 23, 42, .04);
+	--mp-shadow:       0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+	--mp-shadow-lg:    0 4px 12px rgba(15, 23, 42, .08);
+
+	/* Space */
+	--mp-sp-1: 4px;
+	--mp-sp-2: 8px;
+	--mp-sp-3: 12px;
+	--mp-sp-4: 16px;
+	--mp-sp-5: 20px;
+	--mp-sp-6: 24px;
+	--mp-sp-8: 32px;
+}
+

@@ -7,7 +7,21 @@
 	<title>MailPilot AI</title>
 
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
-	<link rel="stylesheet" href="taskpane.css?v=20260516c">
+	<!-- Phase-4 Split: 1136-LOC-Monolith zerlegt in 12 Komponenten unter
+	     styles/. Reihenfolge ist load-order-relevant (Cascade) — niemals
+	     umsortieren ohne den CSS-Bundle-Test in tests-css/ zu pruefen. -->
+	<link rel="stylesheet" href="styles/01-tokens.css?v=20260516d">
+	<link rel="stylesheet" href="styles/02-reset.css?v=20260516d">
+	<link rel="stylesheet" href="styles/03-layout-tabs.css?v=20260516d">
+	<link rel="stylesheet" href="styles/04-sections-counters.css?v=20260516d">
+	<link rel="stylesheet" href="styles/05-bulk-actions.css?v=20260516d">
+	<link rel="stylesheet" href="styles/06-sync-progress.css?v=20260516d">
+	<link rel="stylesheet" href="styles/07-modal.css?v=20260516d">
+	<link rel="stylesheet" href="styles/08-toast.css?v=20260516d">
+	<link rel="stylesheet" href="styles/09-mail-list.css?v=20260516d">
+	<link rel="stylesheet" href="styles/10-buttons-fields.css?v=20260516d">
+	<link rel="stylesheet" href="styles/11-autosort-correction.css?v=20260516d">
+	<link rel="stylesheet" href="styles/12-overlay-today-pending.css?v=20260516d">
 </head>
 <body>
 	<header class="mp-header">

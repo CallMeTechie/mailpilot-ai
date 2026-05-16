@@ -1,0 +1,245 @@
+#alias-suggestions[data-hidden="true"]
+#correct-section .mp-checkbox-row
+#correct-section .mp-field
+#correct-section .mp-field label
+#correct-section .mp-field select
+#correct-section textarea
+*
+.mp-action-text
+.mp-actions
+.mp-autosort-table
+.mp-autosort-table input.autosort-folder
+.mp-autosort-table td
+.mp-autosort-table th
+.mp-badge
+.mp-badge-ki
+.mp-badge-ki:hover
+.mp-badge-tip
+.mp-badge-tip[data-hidden="true"]
+.mp-badge[data-label="action"]
+.mp-badge[data-label="auto"]
+.mp-badge[data-label="cc"]
+.mp-badge[data-label="direct"]
+.mp-badge[data-label="newsletter"]
+.mp-badge[data-label="noise"]
+.mp-banner
+.mp-banner[data-hidden="true"]
+.mp-banner[data-level="block"]
+.mp-banner[data-level="info"]
+.mp-banner[data-level="warning"]
+.mp-btn
+.mp-btn-danger
+.mp-btn-danger:hover
+.mp-btn-ghost
+.mp-btn-ghost:hover
+.mp-btn-link
+.mp-btn-link:hover
+.mp-btn-primary
+.mp-btn-primary:hover
+.mp-btn-secondary
+.mp-btn-secondary:hover
+.mp-btn:disabled
+.mp-budget-crit
+.mp-budget-warn
+.mp-chip
+.mp-chip-remove
+.mp-chip-remove:hover
+.mp-chips
+.mp-chips-suggest .mp-chip-suggest
+.mp-chips-suggest .mp-chip-suggest:hover
+.mp-counter
+.mp-counter-dot
+.mp-counter-label
+.mp-counter-value
+.mp-counter:active
+.mp-counter:focus-visible
+.mp-counter:hover
+.mp-counters
+.mp-danger .mp-btn + .mp-btn
+.mp-draft-box
+.mp-draft-box.is-stale
+.mp-draft-box[data-hidden="true"]
+.mp-draft-header
+.mp-draft-text
+.mp-empty
+.mp-empty .mp-btn
+.mp-error-hint
+.mp-error-text
+.mp-field
+.mp-field .mp-btn
+.mp-field-row
+.mp-field-row > input
+.mp-field-row > select
+.mp-footer
+.mp-footer #status-text
+.mp-footer-stat
+.mp-footer-stat[data-hidden="true"]
+.mp-from
+.mp-header
+.mp-header-icon
+.mp-header-icon.is-spinning svg
+.mp-header-icon:hover
+.mp-headline
+.mp-headline h1
+.mp-icon-btn
+.mp-icon-btn svg
+.mp-icon-btn-danger
+.mp-icon-btn-danger:hover
+.mp-icon-btn-ghost
+.mp-icon-btn-ghost:hover
+.mp-icon-btn-primary
+.mp-icon-btn-primary:hover
+.mp-icon-btn.is-running
+.mp-icon-btn.is-running svg
+.mp-icon-btn.is-running::after
+.mp-icon-btn:active
+.mp-icon-btn:disabled
+.mp-icon-btn:focus-visible
+.mp-icon-btn:hover
+.mp-list
+.mp-list button.remove
+.mp-list button.remove:hover
+.mp-list li
+.mp-loader
+.mp-mail-from
+.mp-mail-header
+.mp-mail-item
+.mp-mail-item:hover
+.mp-mail-list
+.mp-mail-subject
+.mp-mail-summary
+.mp-mail-top
+.mp-main
+.mp-modal
+.mp-modal-actions
+.mp-modal-actions .mp-btn
+.mp-modal-body
+.mp-modal-overlay
+.mp-modal-overlay[data-hidden="true"]
+.mp-modal-title
+.mp-mode
+.mp-mode-title
+.mp-modes
+.mp-muted
+.mp-panel
+.mp-panel.is-active
+.mp-pending-bulk-actions
+.mp-pending-card
+.mp-pending-card-actions
+.mp-pending-card-affected
+.mp-pending-card-body
+.mp-pending-card-body[data-hidden="true"]
+.mp-pending-card-expand
+.mp-pending-card-head
+.mp-pending-card-icon
+.mp-pending-card-meta
+.mp-pending-card-target
+.mp-pending-card-title
+.mp-pending-card-title strong
+.mp-pending-card-v2
+.mp-pending-card-v2.is-expanded
+.mp-pending-card-v2[data-has-error="true"]
+.mp-pending-conf
+.mp-pending-counts
+.mp-pending-empty
+.mp-pending-filter
+.mp-pending-filter span
+.mp-pending-filter.is-active
+.mp-pending-filter:hover
+.mp-pending-filters
+.mp-pending-header
+.mp-pending-header h2
+.mp-pending-list
+.mp-pending-move-summary
+.mp-pending-move-summary code
+.mp-pending-rule-label
+.mp-pending-rule-list
+.mp-pending-rule-list input[type="checkbox"]
+.mp-pending-rule-list label
+.mp-pending-rule-list li
+.mp-pending-rule-list li:hover
+.mp-pending-rule-list-header
+.mp-pending-rule-signal
+.mp-pending-rule-summary
+.mp-pending-rule-summary code
+.mp-pending-rule-toolbar
+.mp-pending-total
+.mp-prio-pill
+.mp-prio-pill[data-priority="3"]
+.mp-prio-pill[data-priority="4"]
+.mp-prio-pill[data-priority="5"]
+.mp-priority
+.mp-progress-bar
+.mp-progress-fill
+.mp-section
+.mp-section > h2
+.mp-section > h3
+.mp-settings-content
+.mp-settings-head
+.mp-settings-overlay
+.mp-settings-overlay[data-hidden="true"]
+.mp-settings-subtabs
+.mp-settings-title
+.mp-spinner
+.mp-subpanel
+.mp-subpanel.is-active
+.mp-subtab
+.mp-subtab-count
+.mp-subtab-count[data-hidden="true"]
+.mp-subtab.is-active
+.mp-subtab:hover
+.mp-subtle
+.mp-summary-text
+.mp-switch
+.mp-switch input
+.mp-switch input:checked + span
+.mp-switch input:checked + span::before
+.mp-switch span
+.mp-switch span::before
+.mp-sync-progress
+.mp-sync-progress-label
+.mp-sync-progress-row
+.mp-sync-progress-text
+.mp-tab
+.mp-tab-badge
+.mp-tab-badge[data-hidden="true"]
+.mp-tab-icon
+.mp-tab-label
+.mp-tab.is-active
+.mp-tab:hover
+.mp-tabs
+.mp-toast
+.mp-toast-stack
+.mp-toast.is-leaving
+.mp-toast.mp-toast-error
+.mp-toast.mp-toast-info
+.mp-toast.mp-toast-success
+.mp-today-card
+.mp-today-card-from
+.mp-today-card-head
+.mp-today-card-summary
+.mp-today-count
+.mp-today-head
+.mp-today-head h1
+.mp-today-list
+.mp-today-range
+.mp-today-range-btn
+.mp-today-range-btn.is-active
+.mp-today-section
+.mp-today-section > summary
+.mp-worker-ok
+.mp-worker-stale
+:root
+[data-hidden="true"]
+body
+button
+h1
+h2
+h3
+h4
+html
+input
+input:focus
+p
+textarea
+textarea:focus

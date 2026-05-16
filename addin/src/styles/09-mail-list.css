@@ -1,0 +1,79 @@
+/* --- Mail list --- */
+.mp-mail-list {
+	list-style: none; margin: 0; padding: 0;
+	display: flex; flex-direction: column; gap: var(--mp-sp-2);
+}
+
+.mp-mail-item {
+	background: var(--mp-surface);
+	border: 1px solid var(--mp-border);
+	border-radius: var(--mp-radius);
+	padding: var(--mp-sp-3);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+.mp-mail-item:hover {
+	border-color: var(--mp-border-strong);
+	box-shadow: var(--mp-shadow);
+}
+
+.mp-mail-top {
+	display: flex; align-items: center; gap: var(--mp-sp-2);
+	margin-bottom: 4px;
+}
+
+.mp-badge {
+	font-size: 11px; font-weight: 500;
+	padding: 2px 8px;
+	border-radius: 10px;
+	text-transform: uppercase; letter-spacing: 0.03em;
+	display: inline-flex; align-items: center; gap: 4px;
+}
+.mp-badge[data-label="direct"]     { background: #fee2e2; color: #991b1b; }
+.mp-badge[data-label="action"]     { background: #ffedd5; color: #9a3412; }
+.mp-badge[data-label="cc"]         { background: #dbeafe; color: #1e40af; }
+.mp-badge[data-label="newsletter"] { background: #f1f5f9; color: #475569; }
+.mp-badge[data-label="auto"]       { background: #e2e8f0; color: #334155; }
+.mp-badge[data-label="noise"]      { background: #f8fafc; color: #64748b; }
+
+.mp-priority {
+	font-size: 11px; color: var(--mp-text-subtle);
+	margin-left: auto;
+}
+
+.mp-mail-from { font-size: 12px; color: var(--mp-text-muted); }
+.mp-mail-subject { font-weight: 500; margin: 2px 0; }
+.mp-mail-summary { font-size: 13px; color: var(--mp-text-muted); }
+
+/* --- Current mail panel --- */
+.mp-mail-header {
+	display: flex; align-items: center; gap: var(--mp-sp-2);
+	margin-bottom: var(--mp-sp-2);
+}
+
+.mp-from {
+	font-size: 13px; color: var(--mp-text-muted);
+	margin-bottom: var(--mp-sp-4);
+}
+
+.mp-summary-text {
+	background: var(--mp-surface);
+	border: 1px solid var(--mp-border);
+	border-radius: var(--mp-radius);
+	padding: var(--mp-sp-3);
+	white-space: pre-wrap;
+}
+
+.mp-action-text {
+	background: #fff7ed;
+	border: 1px solid #fed7aa;
+	border-radius: var(--mp-radius);
+	padding: var(--mp-sp-3);
+	color: #9a3412;
+}
+
+.mp-actions {
+	display: flex; gap: var(--mp-sp-2);
+	flex-wrap: wrap;
+}
+
