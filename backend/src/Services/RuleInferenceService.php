@@ -159,7 +159,11 @@ final class RuleInferenceService
 					'folder_name'       => $folder,
 					'match_signals'     => array_values(array_map('strval', $signals)),
 					'affected_mail_ids' => array_column($matches, 'id'),
-					'affected_subjects' => array_slice(array_column($matches, 'subject'), 0, 10),
+					// 2026-05-16: array_slice(..., 0, 10) entfernt — die
+					// Pending-Card-UI (v2) zeigt jetzt alle Subjects als
+					// Checkbox-Liste. backfill_max=100 begrenzt $matches
+					// ohnehin auf < 100 Einträge.
+					'affected_subjects' => array_column($matches, 'subject'),
 					'confidence'        => $confidence,
 					'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
 				],
