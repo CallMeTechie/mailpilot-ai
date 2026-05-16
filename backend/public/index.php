@@ -41,22 +41,24 @@ $router->post('/api/v1/drafts/{id}/dismiss',     'MailController@dismissDraft');
 $router->post('/api/v1/sync',                    'SyncController@trigger');
 $router->get ('/api/v1/sync/status/{id}',        'SyncController@status');
 
-$router->get ('/api/v1/settings/user',           'SettingsController@getUser');
-$router->patch('/api/v1/settings/user',          'SettingsController@updateUser');
-$router->get ('/api/v1/settings/vip',            'SettingsController@listVip');
-$router->post('/api/v1/settings/vip',            'SettingsController@addVip');
-$router->delete('/api/v1/settings/vip/{id}',     'SettingsController@deleteVip');
-$router->get ('/api/v1/settings/redaction',      'SettingsController@listRedaction');
-$router->post('/api/v1/settings/redaction',      'SettingsController@addRedaction');
-$router->get ('/api/v1/settings/auto-sort',      'SettingsController@listAutoSort');
-$router->patch('/api/v1/settings/auto-sort',     'SettingsController@updateAutoSort');
-$router->post('/api/v1/settings/auto-sort/apply-now', 'SettingsController@applyAutoSortNow');
-$router->delete('/api/v1/settings/auto-sort/sub/{label}/{name}', 'SettingsController@deleteAutoSortSub');
-$router->post('/api/v1/settings/rescore-all',        'SettingsController@rescoreAll');
-$router->get   ('/api/v1/settings/sub-labels',       'SettingsController@listSubLabels');
-$router->post  ('/api/v1/settings/sub-labels',       'SettingsController@addSubLabel');
-$router->patch ('/api/v1/settings/sub-labels/{id}',  'SettingsController@updateSubLabel');
-$router->delete('/api/v1/settings/sub-labels/{id}',  'SettingsController@deleteSubLabel');
+// Phase-2 Split: 6 fokussierte Controller statt einem 633-LOC-Monolith.
+// API-URLs bleiben identisch — nur Handler-Strings zeigen auf neue Klassen.
+$router->get ('/api/v1/settings/user',           'UserSettingsController@getUser');
+$router->patch('/api/v1/settings/user',          'UserSettingsController@updateUser');
+$router->get ('/api/v1/settings/vip',            'VipController@listVip');
+$router->post('/api/v1/settings/vip',            'VipController@addVip');
+$router->delete('/api/v1/settings/vip/{id}',     'VipController@deleteVip');
+$router->get ('/api/v1/settings/redaction',      'RedactionController@listRedaction');
+$router->post('/api/v1/settings/redaction',      'RedactionController@addRedaction');
+$router->get ('/api/v1/settings/auto-sort',      'AutoSortController@listAutoSort');
+$router->patch('/api/v1/settings/auto-sort',     'AutoSortController@updateAutoSort');
+$router->post('/api/v1/settings/auto-sort/apply-now', 'AutoSortController@applyAutoSortNow');
+$router->delete('/api/v1/settings/auto-sort/sub/{label}/{name}', 'AutoSortController@deleteAutoSortSub');
+$router->post('/api/v1/settings/rescore-all',        'AutoSortController@rescoreAll');
+$router->get   ('/api/v1/settings/sub-labels',       'SubLabelController@listSubLabels');
+$router->post  ('/api/v1/settings/sub-labels',       'SubLabelController@addSubLabel');
+$router->patch ('/api/v1/settings/sub-labels/{id}',  'SubLabelController@updateSubLabel');
+$router->delete('/api/v1/settings/sub-labels/{id}',  'SubLabelController@deleteSubLabel');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');
@@ -73,10 +75,10 @@ $router->post('/api/v1/pending/{id}/approve',        'PendingController@approve'
 $router->post('/api/v1/pending/{id}/reject',         'PendingController@reject');
 
 // Sprint 6c — Modus-Toggles (3 × 3)
-$router->get ('/api/v1/settings/modes',              'SettingsController@getModes');
-$router->post('/api/v1/settings/modes',              'SettingsController@saveModes');
+$router->get ('/api/v1/settings/modes',              'ModesController@getModes');
+$router->post('/api/v1/settings/modes',              'ModesController@saveModes');
 // Sprint 6f — Auto-Reply-Backlog-Trigger
-$router->post('/api/v1/settings/auto-reply/include-backlog', 'SettingsController@includeAutoReplyBacklog');
+$router->post('/api/v1/settings/auto-reply/include-backlog', 'ModesController@includeAutoReplyBacklog');
 
 // Sprint 6d — Reason-Capture für Move-Korrekturen (Privacy-gated)
 $router->post('/api/v1/me/auto-sort-corrections/{id}/reason', 'MeController@setCorrectionReason');

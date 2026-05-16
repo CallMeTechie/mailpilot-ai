@@ -8,7 +8,12 @@ use MailPilot\Controllers\BriefingController;
 use MailPilot\Controllers\MailController;
 use MailPilot\Controllers\MeController;
 use MailPilot\Controllers\PendingController;
-use MailPilot\Controllers\SettingsController;
+use MailPilot\Controllers\Settings\AutoSortController;
+use MailPilot\Controllers\Settings\ModesController;
+use MailPilot\Controllers\Settings\RedactionController;
+use MailPilot\Controllers\Settings\SubLabelController;
+use MailPilot\Controllers\Settings\UserSettingsController;
+use MailPilot\Controllers\Settings\VipController;
 use MailPilot\Controllers\SyncController;
 use MailPilot\Controllers\TodayController;
 use MailPilot\Http\Exceptions\HttpException;
@@ -90,16 +95,22 @@ final class Router
 	{
 		[$controllerName, $methodName] = explode('@', $handler);
 		$class = match ($controllerName) {
-			'HealthController'   => \MailPilot\Controllers\HealthController::class,
-			'AuthController'     => AuthController::class,
-			'BriefingController' => BriefingController::class,
-			'MailController'     => MailController::class,
-			'SyncController'     => SyncController::class,
-			'SettingsController' => SettingsController::class,
-			'MeController'       => MeController::class,
-			'PendingController'  => PendingController::class,
-			'TodayController'    => TodayController::class,
-			default              => throw new \RuntimeException("Unknown controller: {$controllerName}"),
+			'HealthController'        => \MailPilot\Controllers\HealthController::class,
+			'AuthController'          => AuthController::class,
+			'BriefingController'      => BriefingController::class,
+			'MailController'          => MailController::class,
+			'SyncController'          => SyncController::class,
+			'MeController'            => MeController::class,
+			'PendingController'       => PendingController::class,
+			'TodayController'         => TodayController::class,
+			// Phase-2 Split: SettingsController in 6 fokussierte Controller.
+			'UserSettingsController'  => UserSettingsController::class,
+			'VipController'           => VipController::class,
+			'RedactionController'     => RedactionController::class,
+			'AutoSortController'      => AutoSortController::class,
+			'SubLabelController'      => SubLabelController::class,
+			'ModesController'         => ModesController::class,
+			default                   => throw new \RuntimeException("Unknown controller: {$controllerName}"),
 		};
 
 		try {
