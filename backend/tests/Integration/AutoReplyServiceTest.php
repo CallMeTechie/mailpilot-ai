@@ -89,6 +89,13 @@ final class AutoReplyServiceTest extends TestCase
 
 	public function testDisabledByDefaultExitsEarly(): void
 	{
+		// truncateAll() laesst system_settings bewusst stehen (pscore-Seed
+		// haengt davon ab). Andere Tests in derselben Suite setzen
+		// autoreply_enabled='1' und persistieren das ueber Test-Grenzen —
+		// Reihenfolgen-Abhaengigkeit. Hier explizit auf '0', damit der
+		// Default-Pfad unabhaengig von Test-Order greift.
+		$this->setSetting('autoreply_enabled', '0');
+
 		$res = $this->makeService(new FakeGraphClient(), new FakeClaudeClient())->tick();
 		$this->assertSame(['disabled' => 1], $res['skipped']);
 		$this->assertSame(0, $res['generated']);
