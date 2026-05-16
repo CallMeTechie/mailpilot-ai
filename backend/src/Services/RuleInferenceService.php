@@ -283,8 +283,10 @@ final class RuleInferenceService
 	/**
 	 * Sucht Mails die zu den match_signals der extrahierten Regel passen.
 	 * Signal-Format: "from_domain:example.com", "subject_contains:wort",
-	 * "sender_email:foo@bar.de". Mehrere Signale werden via OR verknüpft —
-	 * der Approval-Schritt im Pending-Tab gibt User die finale Kontrolle.
+	 * "sender_email:foo@bar.de". Mehrere Signale werden via AND verknüpft —
+	 * eine Mail muss ALLE Signale erfüllen. (2026-05-16-Fix: vorher OR,
+	 * was bei [from_domain:github.com, subject_contains:gatecontrol] alle
+	 * Github-Mails matched, nicht nur die für GateControl.)
 	 *
 	 * Range schränkt nach received_at ein (last_30_days/all/future_only).
 	 * future_only liefert immer leere Liste (kein Backfill nötig).
@@ -298,10 +300,10 @@ final class RuleInferenceService
 			return [];
 		}
 
-		$where    = ['m.tenant_id = :t', 'mb.user_id = :u', 'm.deleted_at IS NULL'];
-		$params   = [':t' => $tenantId, ':u' => $userId];
-		$signalOr = [];
-		$idx      = 0;
+		$where     = ['m.tenant_id = :t', 'mb.user_id = :u', 'm.deleted_at IS NULL'];
+		$params    = [':t' => $tenantId, ':u' => $userId];
+		$signalAnd = [];
+		$idx       = 0;
 		foreach ($signals as $s) {
 			if (!is_string($s) || !str_contains($s, ':')) continue;
 			[$kind, $value] = explode(':', $s, 2);
@@ -311,25 +313,28 @@ final class RuleInferenceService
 			$ph = ':sig' . $idx++;
 			switch ($kind) {
 				case 'from_domain':
-					$signalOr[]  = "m.from_email LIKE {$ph}";
+					$signalAnd[] = "m.from_email LIKE {$ph}";
 					$params[$ph] = '%@' . $value;
 					break;
 				case 'subject_contains':
-					$signalOr[]  = "m.subject LIKE {$ph}";
+					$signalAnd[] = "m.subject LIKE {$ph}";
 					$params[$ph] = '%' . $value . '%';
 					break;
 				case 'sender_email':
-					$signalOr[]  = "m.from_email = {$ph}";
+					$signalAnd[] = "m.from_email = {$ph}";
 					$params[$ph] = $value;
 					break;
 				default:
 					$idx--;
 			}
 		}
-		if ($signalOr === []) {
+		if ($signalAnd === []) {
 			return [];
 		}
-		$where[] = '(' . implode(' OR ', $signalOr) . ')';
+		// AND-Verknüpfung: Mail muss ALLE Signale erfüllen.
+		foreach ($signalAnd as $clause) {
+			$where[] = $clause;
+		}
 
 		if ($range === 'last_30_days') {
 			$where[] = 'm.received_at >= (UTC_TIMESTAMP(3) - INTERVAL 30 DAY)';
