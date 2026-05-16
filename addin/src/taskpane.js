@@ -972,6 +972,16 @@ function buildRuleSuggestionBody(body, item) {
 	listHeader.appendChild(toolbar);
 	body.appendChild(listHeader);
 
+	// 2026-05-16: Debug — wenn das Add-in lädt, sehen wir in der Konsole
+	// genau was der API geliefert hat. Falls subjects[] tatsächlich leer
+	// ankommt obwohl DB sie hat, ist's ein Backend-Response-Bug.
+	console.log('[pending v3] buildRuleSuggestionBody', {
+		itemId:        item.id,
+		affectedCount: affectedIds.length,
+		subjectCount:  subjects.length,
+		firstSubject:  subjects[0] ?? '(keine)',
+	});
+
 	const list = document.createElement('ul');
 	list.className = 'mp-pending-rule-list';
 	const checkboxes = [];
@@ -983,15 +993,26 @@ function buildRuleSuggestionBody(body, item) {
 		cb.value = mailId;
 		cb.id = `pending-mail-${item.id}-${i}`;
 		checkboxes.push(cb);
-		const label = document.createElement('label');
-		label.htmlFor = cb.id;
+		// 2026-05-16: Span statt label — label-Element rendert in manchen
+		// Edge-Webview-Versionen seltsam mit checked-state. Plus Inline-
+		// Style als Fail-Safe gegen unbekannte CSS-Overrides.
+		const lbl = document.createElement('span');
+		lbl.className = 'mp-pending-rule-label-text';
+		lbl.style.flex = '1';
+		lbl.style.minWidth = '0';
+		lbl.style.overflow = 'hidden';
+		lbl.style.textOverflow = 'ellipsis';
+		lbl.style.whiteSpace = 'nowrap';
+		lbl.style.color = 'inherit';
+		lbl.style.fontSize = '12px';
 		// Fallback-Kaskade: Subject > kurze Mail-ID > '(ohne Betreff)'.
-		// Marc sah vorher 11 leere Labels weil der Payload-Cap bei 10
-		// Subjects liegt; jetzt mind. die kurze ID damit man unterscheidet.
-		label.textContent = subjects[i]
-			|| (mailId ? '(Mail ' + mailId.substring(0, 8) + '…)' : '(ohne Betreff)');
+		const text = subjects[i] || (mailId ? '(Mail ' + mailId.substring(0, 8) + '…)' : '(ohne Betreff)');
+		lbl.textContent = text;
+		// Klick auf den Span togglet die Checkbox — wie label[for=...].
+		lbl.style.cursor = 'pointer';
+		lbl.addEventListener('click', () => { cb.checked = !cb.checked; });
 		liEntry.appendChild(cb);
-		liEntry.appendChild(label);
+		liEntry.appendChild(lbl);
 		list.appendChild(liEntry);
 	});
 	body.appendChild(list);
