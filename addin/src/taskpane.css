@@ -1051,6 +1051,16 @@ textarea {
 	font-size: 12px;
 }
 .mp-pending-rule-list li:hover { background: var(--mp-surface-hover); }
+.mp-pending-rule-list input[type="checkbox"] {
+	/* CSS-Override gegen den globalen `input { width: 100%; padding: 8px 10px }`
+	   aus Zeile 76 — sonst nimmt jede Checkbox die ganze Zeilenbreite und
+	   verdeckt das Subject-Label. */
+	width: auto !important;
+	padding: 0 !important;
+	margin: 0;
+	background: transparent;
+	flex-shrink: 0;
+}
 .mp-pending-rule-list label {
 	flex: 1; min-width: 0; cursor: pointer;
 	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

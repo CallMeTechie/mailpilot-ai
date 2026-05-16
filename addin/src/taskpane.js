@@ -972,16 +972,6 @@ function buildRuleSuggestionBody(body, item) {
 	listHeader.appendChild(toolbar);
 	body.appendChild(listHeader);
 
-	// 2026-05-16: Debug — wenn das Add-in lädt, sehen wir in der Konsole
-	// genau was der API geliefert hat. Falls subjects[] tatsächlich leer
-	// ankommt obwohl DB sie hat, ist's ein Backend-Response-Bug.
-	console.log('[pending v3] buildRuleSuggestionBody', {
-		itemId:        item.id,
-		affectedCount: affectedIds.length,
-		subjectCount:  subjects.length,
-		firstSubject:  subjects[0] ?? '(keine)',
-	});
-
 	const list = document.createElement('ul');
 	list.className = 'mp-pending-rule-list';
 	const checkboxes = [];
@@ -992,6 +982,15 @@ function buildRuleSuggestionBody(body, item) {
 		cb.checked = true;
 		cb.value = mailId;
 		cb.id = `pending-mail-${item.id}-${i}`;
+		// 2026-05-16 ROOT CAUSE: globaler `input { width: 100%; padding: 8px 10px }`
+		// in taskpane.css:76 macht Checkboxen ~36px breit und schiebt das
+		// Label aus dem Container. Inline-Reset killt das definitiv.
+		cb.style.width = 'auto';
+		cb.style.padding = '0';
+		cb.style.margin = '0';
+		cb.style.background = 'transparent';
+		cb.style.border = '';
+		cb.style.flexShrink = '0';
 		checkboxes.push(cb);
 		// 2026-05-16: Span statt label — label-Element rendert in manchen
 		// Edge-Webview-Versionen seltsam mit checked-state. Plus Inline-
