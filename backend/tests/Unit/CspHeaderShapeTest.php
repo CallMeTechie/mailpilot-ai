@@ -34,6 +34,22 @@ final class CspHeaderShapeTest extends TestCase
 		$this->assertStringContainsString("frame-ancestors 'none'", $this->nginxConf);
 	}
 
+	public function testNginxPhpLocationAlsoSetsSecurityHeaders(): void
+	{
+		// nginx-Quirk: try_files in `location /` macht internal rewrite zu
+		// /index.php, dann matched `location ~ \.php$`. Ohne Header-Wiederholung
+		// im PHP-Block bekommen API-Responses keine CSP/HSTS/X-Frame-Options.
+		// Test pinnt dass der PHP-Block die Default-Header hat.
+		$pos = strpos($this->nginxConf, 'location ~ \\.php');
+		$this->assertNotFalse($pos, 'PHP-Location-Block muss existieren');
+		$phpBlock = substr($this->nginxConf, $pos, 1500);
+		$this->assertStringContainsString('X-Content-Type-Options "nosniff" always', $phpBlock,
+			'PHP-Location braucht X-Content-Type-Options (sonst keine Header in API-Responses)');
+		$this->assertStringContainsString("default-src 'none'", $phpBlock,
+			'PHP-Location braucht default-CSP');
+		$this->assertStringContainsString('X-Frame-Options "DENY" always', $phpBlock);
+	}
+
 	public function testNginxAddinAllowsOfficeJs(): void
 	{
 		$this->assertStringContainsString('appsforoffice.microsoft.com', $this->nginxConf,
