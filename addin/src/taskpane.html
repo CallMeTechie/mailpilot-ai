@@ -6,7 +6,23 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MailPilot AI</title>
 
+	<!-- Phase-H9 — History-API-Workaround (MS-empfohlen).
+	     Office.js ersetzt window.history.replaceState/pushState mit null.
+	     Wir cachen sie davor, restoren danach — schuetzt eventuell spaeter
+	     eingebauten Router. Aktuelles Tab-System nutzt das nicht, aber
+	     der Workaround tut nicht weh. Doku-Referenz:
+	     learn.microsoft.com/de-de/office/dev/add-ins/develop/connect-to-javascript-frameworks -->
+	<script>
+		window._historyCache = {
+			replaceState: window.history.replaceState,
+			pushState: window.history.pushState
+		};
+	</script>
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+	<script>
+		window.history.replaceState = window._historyCache.replaceState;
+		window.history.pushState = window._historyCache.pushState;
+	</script>
 	<!-- Phase-4 Split: 1136-LOC-Monolith zerlegt in 12 Komponenten unter
 	     styles/. Reihenfolge ist load-order-relevant (Cascade) — niemals
 	     umsortieren ohne den CSS-Bundle-Test in tests-css/ zu pruefen. -->
