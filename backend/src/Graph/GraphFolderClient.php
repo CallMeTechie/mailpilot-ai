@@ -69,18 +69,83 @@ final class GraphFolderClient
 	/**
 	 * Resolved "A/B/C"-Path zu leaf-folder-id, erstellt fehlende Segmente.
 	 * Idempotent.
+	 *
+	 * Phase-H7 — Path-Traversal-Sanity: $path kann aus Claude-Output
+	 * stammen (sub_label-Discovery → folder_default.<primary>/<candidate>).
+	 * Reject Segmente die als Path-Escape interpretierbar waeren.
+	 *
+	 * @throws InvalidArgumentException bei leerem oder unsicherem Pfad
 	 */
 	public function ensurePath(string $accessToken, string $path): string
 	{
-		$segments = array_values(array_filter(array_map('trim', explode('/', $path)), static fn(string $s): bool => $s !== ''));
-		if ($segments === []) {
-			throw new InvalidArgumentException('empty folder path');
-		}
+		$segments = self::validateAndSplitPath($path);
 		$parentId = null;
 		foreach ($segments as $name) {
 			$found = $this->findChildByName($accessToken, $name, $parentId);
 			$parentId = $found ?? $this->createChild($accessToken, $name, $parentId);
 		}
 		return (string)$parentId;
+	}
+
+	/**
+	 * Splittet "/"-getrennten Pfad in Segmente und prueft jedes Segment
+	 * auf Path-Traversal-Tricks. Static, damit der Test ohne Transport-
+	 * Dependency aufrufen kann.
+	 *
+	 * Verboten in einem Segment:
+	 *   - leer (nach trim)
+	 *   - '.' oder '..' (Parent-Folder-Trick)
+	 *   - leading/trailing '.' (Hidden-Folder)
+	 *   - Control-Chars (< 0x20 oder DEL)
+	 *   - Backslash, NUL-Byte, Newlines (Path-Injection in Graph-API-URL)
+	 *   - laenger als 64 Zeichen pro Segment (Graph-Limit)
+	 *
+	 * Erlaubt: Unicode-Letters/Digits + Whitespace + '-' '_' '(' ')' '&' '+' '.'
+	 * (Punkt nur INNEN, nicht am Anfang/Ende).
+	 *
+	 * @return list<string>
+	 * @throws InvalidArgumentException
+	 */
+	public static function validateAndSplitPath(string $path): array
+	{
+		if ($path === '' || trim($path) === '') {
+			throw new InvalidArgumentException('empty folder path');
+		}
+		if (str_starts_with($path, '/')) {
+			throw new InvalidArgumentException('absolute folder path not allowed (no leading slash)');
+		}
+		if (str_contains($path, "\0")) {
+			throw new InvalidArgumentException('null byte in folder path');
+		}
+		if (str_contains($path, '\\')) {
+			throw new InvalidArgumentException('backslash in folder path');
+		}
+
+		$segments = array_values(array_filter(
+			array_map('trim', explode('/', $path)),
+			static fn(string $s): bool => $s !== '',
+		));
+		if ($segments === []) {
+			throw new InvalidArgumentException('empty folder path');
+		}
+
+		foreach ($segments as $seg) {
+			if ($seg === '.' || $seg === '..') {
+				throw new InvalidArgumentException("path traversal segment forbidden: {$seg}");
+			}
+			if (str_starts_with($seg, '.') || str_ends_with($seg, '.')) {
+				throw new InvalidArgumentException("folder segment cannot start/end with dot: {$seg}");
+			}
+			if (mb_strlen($seg) > 64) {
+				throw new InvalidArgumentException("folder segment exceeds 64 chars: {$seg}");
+			}
+			if (preg_match('/[\x00-\x1F\x7F]/', $seg) === 1) {
+				throw new InvalidArgumentException("control char in folder segment: {$seg}");
+			}
+			if (preg_match('/^[\p{L}\p{N}\s\-_().&+]+$/u', $seg) !== 1) {
+				throw new InvalidArgumentException("invalid char in folder segment: {$seg}");
+			}
+		}
+		return $segments;
 	}
 }
