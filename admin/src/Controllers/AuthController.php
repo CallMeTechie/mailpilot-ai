@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace MailPilot\Admin\Controllers;
 
+use MailPilot\Admin\Security\AdminLoginAttemptRepository;
+
 final class AuthController extends BaseController
 {
 	public function showLogin(array $params): void
@@ -14,18 +16,33 @@ final class AuthController extends BaseController
 	{
 		$user = (string)($_POST['username'] ?? '');
 		$pass = (string)($_POST['password'] ?? '');
+		$ip   = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+
+		// Phase-H5 — Brute-Force-Schutz: 5 fails/15min pro IP → Lockout.
+		$attempts = new AdminLoginAttemptRepository($this->kernel->get(\PDO::class));
+		if ($attempts->isLocked($ip)) {
+			$retryAfter = max(1, $attempts->secondsUntilUnlock($ip));
+			header('Retry-After: ' . $retryAfter);
+			$this->redirect('/admin/login?error=locked');
+			return;
+		}
 
 		$admins = (array)$this->kernel->config['admin']['admins'];
 		$hash = $admins[$user] ?? null;
+		$success = $hash !== null && password_verify($pass, (string)$hash);
 
-		if ($hash === null || !password_verify($pass, (string)$hash)) {
+		// Versuch IMMER protokollieren (success und fail). Bei success
+		// loescht der Repo die alten failures fuer diese IP.
+		$attempts->record($ip, $user, $success);
+
+		if (!$success) {
 			// Constant-ish delay
 			usleep(random_int(100_000, 400_000));
 			$this->redirect('/admin/login?error=invalid');
 			return;
 		}
 
-		if (!$this->kernel->isIpAllowed((string)($_SERVER['REMOTE_ADDR'] ?? ''))) {
+		if (!$this->kernel->isIpAllowed($ip)) {
 			$this->redirect('/admin/login?error=ip_blocked');
 			return;
 		}
@@ -39,7 +56,7 @@ final class AuthController extends BaseController
 			VALUES ("admin.login", "admin", :meta, :ip, UTC_TIMESTAMP(3))')
 			->execute([
 				':meta' => json_encode(['user' => $user]),
-				':ip'   => $_SERVER['REMOTE_ADDR'] ?? '',
+				':ip'   => $ip,
 			]);
 
 		$this->redirect('/admin/');

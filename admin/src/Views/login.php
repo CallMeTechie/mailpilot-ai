@@ -6,7 +6,9 @@
 	<?php if ($error): ?>
 		<div class="flash flash-error">
 			<?= $error === 'invalid' ? 'Benutzername oder Passwort falsch.'
-				: ($error === 'ip_blocked' ? 'Zugriff von dieser IP nicht erlaubt.' : 'Fehler') ?>
+				: ($error === 'ip_blocked' ? 'Zugriff von dieser IP nicht erlaubt.'
+				: ($error === 'locked' ? 'Zu viele Fehlversuche von dieser IP. Bitte in einigen Minuten erneut versuchen.'
+				: 'Fehler')) ?>
 		</div>
 	<?php endif; ?>
 
