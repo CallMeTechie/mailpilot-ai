@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace MailPilot\Graph;
 
-use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 /**
@@ -14,13 +13,14 @@ use RuntimeException;
  * konsumiert. OAuth nutzt einen separaten Token-Endpoint (siehe
  * GraphOAuthClient), deshalb nicht hier.
  *
- * Ausgegliedert aus GraphClient (Phase-3 split).
+ * Ausgegliedert aus GraphClient (Phase-3 split). Kein Logger-Dep —
+ * Logging-Pfade liegen in den Domain-Clients (GraphMailClient kennt
+ * den Kontext fuer aussagekraeftige Log-Lines, dieser Transport nicht).
  */
 final class GraphHttpTransport
 {
-	public function __construct(
-		private readonly LoggerInterface $logger,
-	) {
+	public function __construct()
+	{
 	}
 
 	/**

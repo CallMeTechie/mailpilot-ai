@@ -39,7 +39,7 @@ class GraphClient
 		string $scopes,
 		\Psr\Log\LoggerInterface $logger,
 	) {
-		$http        = new GraphHttpTransport($logger);
+		$http        = new GraphHttpTransport();
 		$this->oauth = new GraphOAuthClient($clientId, $clientSecret, $redirectUri, $tenant, $scopes);
 		$this->mail  = new GraphMailClient($http, $logger);
 		$this->folder = new GraphFolderClient($http);

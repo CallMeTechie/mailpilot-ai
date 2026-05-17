@@ -50,7 +50,11 @@ final class MailScoringService
 		\MailPilot\Repositories\SubLabelRepository $subLabels,
 		\MailPilot\Repositories\AutoSortRepository $autoSortRules,
 		private readonly PromptRepository $prompts,
-		private readonly SettingsRepository $settings,
+		// Nach Phase-1-Split wandern alle SettingsRepository-Nutzungen in
+		// ScoringPromptBuilder / SubLabelDiscoverer / ActionOwnerResolver.
+		// Hier nur noch durchreichen, keine Property-Speicherung (PHPStan
+		// L5: "never read, only written").
+		SettingsRepository $settings,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
 		private readonly \Psr\Log\LoggerInterface $logger,
