@@ -5,8 +5,16 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
 
-# Security headers
+# Security headers (Apache-Backup, Production nutzt nginx — siehe
+# docker/nginx.conf fuer die definitive Konfiguration).
+#
+# Phase-H4 — Default-Pfade: kein script, kein iframe (API-only).
+# Fuer /addin/ ueberschreibt nginx das CSP mit office.js-Whitelist;
+# auf Apache muesste das via separater <LocationMatch> passieren — hier
+# nicht enthalten, weil Production nginx fährt.
 Header set X-Content-Type-Options "nosniff"
-Header set X-Frame-Options "SAMEORIGIN"
+Header set X-Frame-Options "DENY"
+Header set X-Permitted-Cross-Domain-Policies "none"
 Header set Referrer-Policy "strict-origin-when-cross-origin"
 Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+Header set Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
