@@ -17,6 +17,29 @@ final class RedactionService
 		['pattern' => '/\b[A-Z]{2}\d{2}[A-Z0-9 ]{11,30}\b/',             'replacement' => '[IBAN-REDACTED]',  'label' => 'iban_intl'],
 		['pattern' => '/\b(?:\d[ -]?){13,19}\b/',                        'replacement' => '[CC-REDACTED]',    'label' => 'cc'],
 		['pattern' => '/\b\d{3}-\d{2}-\d{4}\b/',                         'replacement' => '[SSN-REDACTED]',   'label' => 'ssn'],
+
+		// Phase-H6 — Prompt-Injection-Defense. Eine boesartige Mail koennte
+		// versuchen Claude's System-Prompt zu ueberschreiben. Output-
+		// Validation (validateLabel, sub_label-Whitelist, priority-Clamp)
+		// faengt die meisten Wirkungen ab, aber redacten ist defense-in-
+		// depth und macht Log-Forensik einfacher (geredactete Strings
+		// sind auf einen Blick als Versuch erkennbar).
+		//
+		// Patterns auf Englisch + Deutsch. Multi-line (s-flag entfaellt,
+		// weil wir auf Wort-Folge matchen, nicht ueber Zeilen). Case-
+		// insensitive (i) + Unicode (u).
+		['pattern' => '/ignore\s+(all\s+)?(previous|prior|preceding|above)\s+instructions?/iu',  'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_ignore'],
+		['pattern' => '/(forget|disregard|override|nullify)\s+(all\s+)?(previous|prior|preceding|above)/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_forget'],
+		['pattern' => '/(system|developer)\s*[:>]?\s*(prompt|instructions?|message)/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_system'],
+		['pattern' => '/you\s+are\s+now\s+(a|an|the)?\s*[a-z]+/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_role_swap'],
+		['pattern' => '/\b(jailbreak|DAN\s+mode|developer\s+mode|admin\s+mode)\b/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_jailbreak'],
+		// Deutsch
+		['pattern' => '/ignoriere\s+(alle\s+)?(vorherigen?|bisherigen?|obigen?)\s+(anweisungen?|instruktionen?)/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_ignore_de'],
+		['pattern' => '/vergiss\s+(alle\s+)?(vorherigen?|bisherigen?|obigen?)/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_forget_de'],
+		['pattern' => '/du\s+bist\s+(jetzt|nun)\s+(ein|eine)/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_role_swap_de'],
+		// XML/Token-Tags die manche LLMs als Steuersequenzen interpretieren
+		['pattern' => '/<\|?(im_start|im_end|system|assistant|user|tool_use|tool_result)\|?>/i', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_tokens'],
+		['pattern' => '/<\/?(instructions?|prompt|system)>/iu', 'replacement' => '[INJECTION-REDACTED]', 'label' => 'pi_xml_tags'],
 	];
 
 	/**
