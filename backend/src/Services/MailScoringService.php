@@ -319,6 +319,10 @@ final class MailScoringService
 			'action_owner_confidence' => null,
 			'action_owner_source'     => null,
 			'priority'        => (int)($cached['priority'] ?? 2),
+			// Phase 3b: KI-Felder aus Cache uebernehmen. Prompt-Version-Bump
+			// 1.3 → 1.4 wirft alte Cache-Eintraege ohne diese Felder weg.
+			'folder_segments' => self::sanitizeFolderSegments($cached['folder_segments'] ?? null),
+			'inbox_score'     => self::sanitizeInboxScore($cached['inbox_score'] ?? null),
 			'summary'         => $this->truncate((string)($cached['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($cached['reasoning'] ?? ''), 200),
 			'prompt_version'  => $promptVersionTag,
@@ -360,12 +364,54 @@ final class MailScoringService
 			'action_owner_confidence' => $aoc,
 			'action_owner_source'     => $aos,
 			'priority'        => max(1, min(5, (int)($result['priority'] ?? 2))),
+			// Phase 3b: KI-Vorschlaege fuer Sortier-Hierarchie + Inbox-Pin-Score.
+			'folder_segments' => self::sanitizeFolderSegments($result['folder_segments'] ?? null),
+			'inbox_score'     => self::sanitizeInboxScore($result['inbox_score'] ?? null),
 			'summary'         => $this->truncate((string)($result['summary'] ?? ''), 200),
 			'reasoning'       => $this->truncate((string)($result['reasoning'] ?? ''), 200),
 			'prompt_version'  => $promptVersionTag,
 			'model'           => $model,
 			'cached'          => 0,
 		];
+	}
+
+	/**
+	 * Phase 3b — KI liefert max 3 Segments, je max 64 Zeichen, non-empty.
+	 * Alles drueber wird abgeschnitten; ungueltige Eintraege fallen raus.
+	 * Bei leerer/ungueltiger Eingabe: null (= „keine Sortier-Vorgabe", Mail
+	 * bleibt in Inbox bis User-Regel greift).
+	 *
+	 * @param mixed $raw
+	 * @return list<string>|null
+	 */
+	private static function sanitizeFolderSegments(mixed $raw): ?array
+	{
+		if (!is_array($raw)) {
+			return null;
+		}
+		$out = [];
+		foreach ($raw as $seg) {
+			if (!is_string($seg)) continue;
+			$s = trim($seg);
+			if ($s === '') continue;
+			if (mb_strlen($s) > 64) $s = mb_substr($s, 0, 64);
+			$out[] = $s;
+			if (count($out) >= 3) break;
+		}
+		return $out === [] ? null : $out;
+	}
+
+	/**
+	 * Phase 3b — clamp 0-100, null wenn ungueltig/fehlt. Aufrufer
+	 * (Phase 4: AutoSortService) muss null als „keine KI-Aussage" handhaben.
+	 */
+	private static function sanitizeInboxScore(mixed $raw): ?int
+	{
+		if ($raw === null || $raw === '') return null;
+		if (!is_int($raw) && !is_float($raw) && !(is_string($raw) && is_numeric($raw))) {
+			return null;
+		}
+		return max(0, min(100, (int)$raw));
 	}
 
 	private function validateLabel(string $label): string

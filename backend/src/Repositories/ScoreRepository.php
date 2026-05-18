@@ -30,10 +30,12 @@ final class ScoreRepository
 		$sql = 'INSERT INTO mail_scores
 			(id, tenant_id, mail_id, label, sub_label, action_required,
 			 action_owner, action_owner_confidence, action_owner_source,
-			 priority, summary, reasoning, prompt_version, model, cached, spoof_suspect, scored_at)
+			 priority, summary, reasoning, prompt_version, model, cached, spoof_suspect,
+			 folder_segments, inbox_score, scored_at)
 			VALUES (:id, :tenant_id, :mail_id, :label, :sub_label, :action_required,
 			 :action_owner, :action_owner_confidence, :action_owner_source,
-			 :priority, :summary, :reasoning, :pv, :model, :cached, :spoof_suspect, UTC_TIMESTAMP(3))
+			 :priority, :summary, :reasoning, :pv, :model, :cached, :spoof_suspect,
+			 :folder_segments, :inbox_score, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
 				label                   = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),                label,                   VALUES(label)),
 				sub_label               = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("sub_label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),            sub_label,               VALUES(sub_label)),
@@ -48,10 +50,19 @@ final class ScoreRepository
 				model           = VALUES(model),
 				cached          = VALUES(cached),
 				spoof_suspect   = VALUES(spoof_suspect),
+				folder_segments = VALUES(folder_segments),
+				inbox_score     = VALUES(inbox_score),
 				scored_at       = VALUES(scored_at)';
 
 		$stmt = $this->db->prepare($sql);
 		foreach ($scores as $s) {
+			// Phase 3b: folder_segments als JSON-Spalte. Null wenn KI keinen
+			// Vorschlag liefert — AutoSortService faellt dann auf legacy-
+			// label-Pfad zurueck (Phase 4 implementiert die Konsumierung).
+			$segments = $s['folder_segments'] ?? null;
+			$segmentsJson = is_array($segments) && $segments !== []
+				? json_encode(array_values($segments), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+				: null;
 			$stmt->execute([
 				':id'              => $s['id'],
 				':tenant_id'       => $s['tenant_id'],
@@ -71,6 +82,10 @@ final class ScoreRepository
 				// Phase 3a: spoof_suspect default 0 fuer Aufrufer die das
 				// Feld noch nicht setzen (Cache-Hits ohne LookalikeDetector-Lauf).
 				':spoof_suspect'   => isset($s['spoof_suspect']) ? (int)(bool)$s['spoof_suspect'] : 0,
+				':folder_segments' => $segmentsJson,
+				':inbox_score'     => isset($s['inbox_score']) && is_int($s['inbox_score'])
+					? max(0, min(100, $s['inbox_score']))
+					: null,
 			]);
 		}
 	}
