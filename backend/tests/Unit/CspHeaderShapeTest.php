@@ -67,20 +67,31 @@ final class CspHeaderShapeTest extends TestCase
 
 		$this->assertStringContainsString('Content-Security-Policy', $addinBlock,
 			'Add-in-Location braucht empirische CSP');
-		$this->assertStringContainsString('https://appsforoffice.microsoft.com', $addinBlock,
-			'script-src muss appsforoffice.microsoft.com fuer office.js zulassen');
-		$this->assertStringContainsString('https://ajax.aspnetcdn.com', $addinBlock,
-			'script-src muss ajax.aspnetcdn.com fuer MicrosoftAjax.js zulassen (Legacy MS-CDN)');
-		$this->assertStringContainsString("connect-src 'self'", $addinBlock,
-			'connect-src self reicht (alle Mailpilot-API-Calls sind same-origin)');
-		// Nur den script-src-Wert pruefen (bis zum naechsten Semikolon),
-		// nicht andere Direktiven die 'unsafe-inline' legitim haben (style-src).
-		if (preg_match('/script-src ([^;]+);/', $addinBlock, $m)) {
-			$this->assertStringNotContainsString("'unsafe-inline'", $m[1],
-				'script-src darf KEIN unsafe-inline haben — H9 ist in history-shim-*.js ausgelagert');
-		} else {
-			$this->fail('script-src direktive nicht gefunden');
-		}
+		// Extrahiere NUR die echte add_header-Direktive (nicht Kommentare die
+		// das Wort 'script-src' enthalten). Pattern matched den Quoted-Wert
+		// von 'add_header Content-Security-Policy "...";'.
+		$this->assertSame(1,
+			preg_match('/add_header Content-Security-Policy "([^"]+)"/', $addinBlock, $cspMatch),
+			'CSP-Direktive im Add-in-Block muss existieren',
+		);
+		$csp = $cspMatch[1];
+
+		// Hosts in der CSP (egal welche Direktive)
+		$this->assertStringContainsString('https://appsforoffice.microsoft.com', $csp,
+			'CSP muss appsforoffice.microsoft.com whitelisten');
+		$this->assertStringContainsString('https://ajax.aspnetcdn.com', $csp,
+			'CSP muss ajax.aspnetcdn.com fuer MicrosoftAjax.js whitelisten');
+
+		// Direktive-spezifische Pruefungen via Sub-Match in $csp
+		$this->assertSame(1, preg_match('/script-src ([^;]+)/', $csp, $sm), 'script-src nicht gefunden');
+		$this->assertStringNotContainsString("'unsafe-inline'", $sm[1],
+			'script-src darf KEIN unsafe-inline haben — H9 ist in history-shim-*.js ausgelagert');
+
+		$this->assertSame(1, preg_match('/connect-src ([^;]+)/', $csp, $ccm), 'connect-src nicht gefunden');
+		$this->assertStringContainsString("'self'", $ccm[1]);
+		$this->assertStringContainsString('https://ajax.aspnetcdn.com', $ccm[1],
+			'connect-src braucht ajax.aspnetcdn.com — MS-Ajax laedt Resources via XHR');
+		$this->assertStringContainsString('https://appsforoffice.microsoft.com', $ccm[1]);
 		$this->assertStringNotContainsString('X-Frame-Options', $addinBlock,
 			'Add-in-Location darf KEIN X-Frame-Options haben — Add-in muss iframe-bar sein');
 		$this->assertStringNotContainsString('frame-ancestors', $addinBlock,
