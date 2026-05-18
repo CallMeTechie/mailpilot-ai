@@ -164,6 +164,22 @@
 .mp-pending-rule-summary code
 .mp-pending-rule-toolbar
 .mp-pending-total
+.mp-pin-actions
+.mp-pin-card
+.mp-pin-card.is-fading
+.mp-pin-card.is-spoof
+.mp-pin-count
+.mp-pin-done
+.mp-pin-done:disabled
+.mp-pin-from
+.mp-pin-head
+.mp-pin-list
+.mp-pin-score
+.mp-pin-section h2
+.mp-pin-spoof
+.mp-pin-spoof-banner
+.mp-pin-spoof-banner[data-hidden="true"]
+.mp-pin-subject
 .mp-prio-pill
 .mp-prio-pill[data-priority="3"]
 .mp-prio-pill[data-priority="4"]

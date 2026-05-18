@@ -29,6 +29,7 @@
 	<link rel="stylesheet" href="styles/10-buttons-fields.css?v=20260516d">
 	<link rel="stylesheet" href="styles/11-autosort-correction.css?v=20260516d">
 	<link rel="stylesheet" href="styles/12-overlay-today-pending.css?v=20260516d">
+	<link rel="stylesheet" href="styles/13-pin-list.css?v=20260518a">
 </head>
 <body>
 	<header class="mp-header">
@@ -115,6 +116,17 @@
 							<span class="mp-counter-value" id="c-noise">0</span>
 							<span class="mp-counter-label">Noise</span>
 						</button>
+					</div>
+
+					<!-- Phase 5 (Marc 2026-05-18): Pin-Liste — Mails mit hohem
+					     inbox_score warten auf User-Done-Klick. Ueber Top-Priorität
+					     platziert, weil eilig. -->
+					<div class="mp-section mp-pin-section">
+						<h2>
+							In deiner Inbox: <span id="pinned-count" class="mp-pin-count">0</span>
+						</h2>
+						<div id="pinned-spoof-banner" class="mp-pin-spoof-banner" data-hidden="true" role="alert"></div>
+						<ul class="mp-pin-list" id="pinned-list"></ul>
 					</div>
 
 					<div class="mp-section">

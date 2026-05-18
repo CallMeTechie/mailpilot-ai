@@ -156,6 +156,8 @@ export const api = {
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
 		correctScore:  (id, payload) => request('POST', `/mails/${id}/correct-score`, payload),
 		correctOwner:  (id, owner)   => request('POST', `/mails/${id}/correct-owner`, { action_owner: owner }),
+		// Phase 5: User klickt „Erledigt — verschieben" auf einer Pin-Card.
+		done:          (id)          => request('POST', `/mails/${id}/done`),
 		bulkAction:    (action, label, since) => request('POST',
 			`/mails/bulk/${encodeURIComponent(action)}`,
 			{ label, since: since ?? null }),

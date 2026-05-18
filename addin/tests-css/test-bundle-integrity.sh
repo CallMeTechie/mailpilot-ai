@@ -38,6 +38,7 @@ expected=(
   "10-buttons-fields.css"
   "11-autosort-correction.css"
   "12-overlay-today-pending.css"
+  "13-pin-list.css"
 )
 
 # (1) Components-Existenz

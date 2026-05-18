@@ -1521,6 +1521,122 @@ function renderBriefing(data) {
 		li.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
 		list.appendChild(li);
 	});
+
+	// Phase 5 (Marc 2026-05-18): Pin-Liste oben im Briefing. Mails mit
+	// hohem inbox_score warten auf User-Done-Klick.
+	renderPinnedList(data.pinned ?? []);
+}
+
+/**
+ * Phase 5 — Inbox-Pin-Cards. Pro Card: Score-Badge, Spoof-Badge,
+ * From, Subject, Done-Button mit Pfad-Vorschau-Chip.
+ */
+function renderPinnedList(items) {
+	const root = document.getElementById('pinned-list');
+	if (!root) return;  // HTML-Element kommt in Phase 5c — kein Crash bei alter UI
+	root.replaceChildren();
+
+	const spoofCount = items.filter((m) => m.spoof_suspect).length;
+	const banner = document.getElementById('pinned-spoof-banner');
+	if (banner) {
+		banner.dataset.hidden = spoofCount === 0 ? 'true' : 'false';
+		banner.textContent = spoofCount === 0
+			? ''
+			: `⚠ ${spoofCount} verdächtige${spoofCount === 1 ? 'r' : ''} Absender in der Inbox — Lookalike-Domains`;
+	}
+
+	const countEl = document.getElementById('pinned-count');
+	if (countEl) countEl.textContent = String(items.length);
+
+	if (items.length === 0) {
+		const empty = document.createElement('li');
+		empty.className = 'mp-muted';
+		empty.textContent = 'Keine wichtigen Mails in deiner Inbox — schöner Posteingang.';
+		root.appendChild(empty);
+		return;
+	}
+
+	for (const m of items) {
+		root.appendChild(buildPinnedCard(m));
+	}
+}
+
+function buildPinnedCard(m) {
+	const li = document.createElement('li');
+	li.className = 'mp-pin-card';
+	if (m.spoof_suspect) li.classList.add('is-spoof');
+	li.dataset.mailId = m.mail_id;
+
+	// Head: Score + Sender + Spoof-Badge
+	const head = document.createElement('div');
+	head.className = 'mp-pin-head';
+	const score = document.createElement('span');
+	score.className = 'mp-pin-score';
+	score.textContent = `${m.inbox_score}`;
+	score.title = 'Inbox-Wichtigkeits-Score';
+	head.appendChild(score);
+	if (m.spoof_suspect) {
+		const spoof = document.createElement('span');
+		spoof.className = 'mp-pin-spoof';
+		spoof.textContent = '⚠ Verdächtig';
+		spoof.title = 'Lookalike-Domain — könnte Phishing sein';
+		head.appendChild(spoof);
+	}
+	const from = document.createElement('span');
+	from.className = 'mp-pin-from';
+	from.textContent = m.sender_display_name || m.from_name || m.from_email;
+	head.appendChild(from);
+	li.appendChild(head);
+
+	// Subject
+	const subj = document.createElement('div');
+	subj.className = 'mp-pin-subject';
+	subj.textContent = m.subject || '(ohne Betreff)';
+	li.appendChild(subj);
+
+	// Aktionen
+	const actions = document.createElement('div');
+	actions.className = 'mp-pin-actions';
+
+	const openBtn = document.createElement('button');
+	openBtn.className = 'mp-btn mp-btn-ghost';
+	openBtn.textContent = 'Öffnen';
+	openBtn.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
+	actions.appendChild(openBtn);
+
+	const doneBtn = document.createElement('button');
+	doneBtn.className = 'mp-btn mp-btn-primary mp-pin-done';
+	const previewSuffix = m.preview_path ? ` → ${m.preview_path}` : ' → Inbox (kein Pfad)';
+	doneBtn.textContent = `Erledigt${previewSuffix}`;
+	doneBtn.title = m.preview_path
+		? `Verschiebt nach ${m.preview_path}`
+		: 'KI hat keinen Ordner vorgeschlagen — bleibt in Inbox, nur als erledigt markiert.';
+	doneBtn.addEventListener('click', () => markPinnedDone(m.mail_id, li));
+	actions.appendChild(doneBtn);
+
+	li.appendChild(actions);
+	return li;
+}
+
+async function markPinnedDone(mailId, cardEl) {
+	const btn = cardEl?.querySelector('.mp-pin-done');
+	if (btn) { btn.disabled = true; btn.textContent = 'Verschiebe…'; }
+	try {
+		const res = await api.mails.done(mailId);
+		cardEl?.classList.add('is-fading');
+		setTimeout(() => cardEl?.remove(), 250);
+		if (res?.moved) {
+			showToast(`Verschoben nach ${res.folder}`, 'success', 4000);
+		} else {
+			showToast('Als erledigt markiert — bleibt in Inbox (kein Ordner-Vorschlag).', 'info', 4500);
+		}
+		// Counter-Cards koennten sich verschoben haben — Briefing-Refresh.
+		state.briefingLoaded = false;
+		loadBriefing();
+	} catch (err) {
+		if (btn) { btn.disabled = false; btn.textContent = 'Erledigt'; }
+		handleError(err);
+	}
 }
 
 // ============================================================

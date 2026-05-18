@@ -13,6 +13,7 @@ async function loadModes
 async function loadPending
 async function loadSettings
 async function loadToday
+async function markPinnedDone
 async function openFilteredList
 async function persistAliases
 async function persistKeywords
@@ -43,6 +44,7 @@ function buildIconElement
 function buildLabelTd
 function buildMailListItem
 function buildPendingCard
+function buildPinnedCard
 function buildRuleSuggestionBody
 function buildTodayCard
 function clearBusy
@@ -87,6 +89,7 @@ function renderKeywordChips
 function renderList
 function renderPending
 function renderPendingList
+function renderPinnedList
 function renderSubLabels
 function renderTodaySection
 function resetCurrentMailUi
