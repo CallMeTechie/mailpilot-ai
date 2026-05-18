@@ -21,9 +21,16 @@ use Psr\Log\LoggerInterface;
  *
  *   - confidence < floor               → Pending
  *   - autosort_move_mode != 'auto'     → Pending
- *   - backfill_range != 'future_only'  → Pending (Bulk-Approve regelt Move)
- *   - matches > backfill_max           → Pending
+ *   - backfill_range == 'all'          → Pending (zu viele Mails, immer fragen)
+ *   - matches > backfill_max           → Pending (Mass-Move-Schutz)
  *   - sonst                            → Regel anlegen, action=applied
+ *
+ * 2026-05-18 Marc-Bug-Fix: range=last_30_days fuehrte vorher auch zu Pending,
+ * weil $autoApplyOnly zusaetzlich $range==='future_only' verlangt hat. Damit
+ * landete praktisch jede Korrektur im Pending Tab, obwohl der User „Sofort
+ * verschieben" gewaehlt hatte. Neue Logik: range != 'all' reicht — der
+ * AutoSortService::backfillForMailbox-Worker holt die last_30_days-matches
+ * im naechsten Sweep nach.
  *
  * Sync-Move wird bewusst NICHT gemacht — würde den HTTP-Request bei 30+
  * Mails über 30s halten. Pending-Approval triggert den existierenden
@@ -144,7 +151,8 @@ final class RuleInferenceService
 		$moveMode        = $this->settings->getString('autosort_move_mode', 'suggest');
 		$autoApplyOnly   = $confidence >= $confidenceFloor
 			&& $moveMode === 'auto'
-			&& $range === 'future_only';
+			&& $range !== 'all'
+			&& count($matches) <= $backfillCap;
 
 		// Pending sobald irgendeine Schutzbedingung greift. DA-R1 Crit 2:
 		// range=all immer Pending. DA-R2 Med 3: ein einziges Pending mit
@@ -186,7 +194,10 @@ final class RuleInferenceService
 			];
 		}
 
-		// 10) Auto-Apply (range=future_only, kein Backfill nötig)
+		// 10) Auto-Apply. Bei range=last_30_days holt der AutoSort-Backfill-
+		// Worker die jetzt-matchenden Mails im naechsten Sweep nach (siehe
+		// AutoSortService::backfillForMailbox). Bei range=future_only ist
+		// nichts nachzuholen — die Rule greift fuer alle kuenftigen Mails.
 		$this->rules->upsert($tenantId, $userId, $label, $subLabel, true, $folder);
 		$this->logger->info('rule_inference.applied', [
 			'label'      => $label,
@@ -388,10 +399,10 @@ final class RuleInferenceService
 		int $confidence, int $floor, string $moveMode, string $range, int $matchCount, int $cap,
 	): string {
 		$reasons = [];
-		if ($confidence < $floor)     $reasons[] = "confidence<{$floor}";
-		if ($moveMode !== 'auto')     $reasons[] = "mode={$moveMode}";
-		if ($range !== 'future_only') $reasons[] = "range={$range}";
-		if ($matchCount > $cap)       $reasons[] = "matches>{$cap}";
+		if ($confidence < $floor) $reasons[] = "confidence<{$floor}";
+		if ($moveMode !== 'auto') $reasons[] = "mode={$moveMode}";
+		if ($range === 'all')     $reasons[] = "range=all";
+		if ($matchCount > $cap)   $reasons[] = "matches>{$cap}";
 		return implode(',', $reasons);
 	}
 }

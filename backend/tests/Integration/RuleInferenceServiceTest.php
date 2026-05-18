@@ -107,6 +107,31 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->assertSame(1,             (int)$rules[0]['enabled']);
 	}
 
+	/**
+	 * 2026-05-18 Marc-Bug-Fix: vor dem Fix landete diese Konstellation immer
+	 * im Pending Tab, obwohl der User "Sofort verschieben" gewaehlt hatte.
+	 * Default-Range last_30_days + auto-mode muss jetzt direkt applied sein.
+	 */
+	public function testLast30DaysWithHighConfidenceAndAutoModeAppliesImmediately(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$mailId    = $this->insertMail($tenantId, $mailboxId, ['from_email' => 'noreply@mbnet-it.com']);
+
+		$this->setSetting('autosort_move_mode', 'auto');
+		$this->setSetting('rule_inference_backfill_range', 'last_30_days');
+
+		$claude = new FakeClaudeClient();
+		$this->scriptDefaultRule($claude, 95);
+
+		$result = $this->makeService($claude)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
+
+		$this->assertSame('applied', $result['action'],
+			'last_30_days + auto + confidence>=floor + matches<=cap MUSS direkt anwenden — User-Wunsch „Sofort verschieben"');
+		$pendings = (int)$this->pdo()->query("SELECT COUNT(*) FROM pending_actions WHERE kind='rule_suggestion'")->fetchColumn();
+		$this->assertSame(0, $pendings, 'Keine Pending-Action erzeugen wenn direkt applied');
+	}
+
 	public function testFuzzyMergeReusesExistingSubLabel(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();
