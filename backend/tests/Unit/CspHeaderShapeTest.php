@@ -50,57 +50,33 @@ final class CspHeaderShapeTest extends TestCase
 		$this->assertStringContainsString('X-Frame-Options "DENY" always', $phpBlock);
 	}
 
-	public function testAddinLocationHasEmpiricalCsp(): void
+	public function testAddinLocationHasNoCspButKeepsDefenseInDepth(): void
 	{
-		// 2026-05-18 H4-Re: CSP basierend auf Marcs Outlook-Desktop-
-		// Network-Tab empirisch aufgebaut. Konkrete Hosts:
-		//   - appsforoffice.microsoft.com (office.js + outlook-win32 + strings + telemetry)
-		//   - ajax.aspnetcdn.com (MicrosoftAjax.js, Legacy-CDN!)
-		// Alle fetches sind same-origin → connect-src 'self' reicht.
-		// KEIN frame-ancestors / X-Frame-Options (Outlook-WebView2-Origin
-		// undokumentiert, Whitelisting wuerde iframe brechen).
+		// 2026-05-18 FINAL: Add-in CSP komplett entfernt. Versuche mit
+		// empirischer Allowlist + H9-Revert brachen jeweils MS-Ajax-Init
+		// (Sys.CultureInfo._parse TypeError). Outlook-Desktop-WebView2
+		// zeigt CSP-Warnings nicht zuverlaessig in der Console an, deshalb
+		// war Debugging unmoeglich. Pragmatisch: keine CSP, andere
+		// Defense-in-depth-Header bleiben aktiv. API-Pfade haben weiterhin
+		// strikte CSP (default-src 'none').
 		$pos = strpos($this->nginxConf, 'location ~ ^/addin/');
 		$this->assertNotFalse($pos, 'Add-in-Location-Block muss existieren');
 		$end = strpos($this->nginxConf, "\n\t\t}", $pos);
 		$this->assertNotFalse($end, 'Add-in-Block-Ende nicht gefunden');
 		$addinBlock = substr($this->nginxConf, $pos, $end - $pos);
 
-		$this->assertStringContainsString('Content-Security-Policy', $addinBlock,
-			'Add-in-Location braucht empirische CSP');
-		// Extrahiere NUR die echte add_header-Direktive (nicht Kommentare die
-		// das Wort 'script-src' enthalten). Pattern matched den Quoted-Wert
-		// von 'add_header Content-Security-Policy "...";'.
-		$this->assertSame(1,
-			preg_match('/add_header Content-Security-Policy "([^"]+)"/', $addinBlock, $cspMatch),
-			'CSP-Direktive im Add-in-Block muss existieren',
+		$this->assertSame(0,
+			preg_match('/add_header Content-Security-Policy/', $addinBlock),
+			'Add-in-Block darf KEINE CSP setzen — bricht MS-Ajax-Init',
 		);
-		$csp = $cspMatch[1];
-
-		// Hosts in der CSP (egal welche Direktive)
-		$this->assertStringContainsString('https://appsforoffice.microsoft.com', $csp,
-			'CSP muss appsforoffice.microsoft.com whitelisten');
-		$this->assertStringContainsString('https://ajax.aspnetcdn.com', $csp,
-			'CSP muss ajax.aspnetcdn.com fuer MicrosoftAjax.js whitelisten');
-
-		// Direktive-spezifische Pruefungen via Sub-Match in $csp
-		$this->assertSame(1, preg_match('/script-src ([^;]+)/', $csp, $sm), 'script-src nicht gefunden');
-		$this->assertStringNotContainsString("'unsafe-inline'", $sm[1],
-			'script-src darf KEIN unsafe-inline haben — H9 ist in history-shim-*.js ausgelagert');
-
-		$this->assertSame(1, preg_match('/connect-src ([^;]+)/', $csp, $ccm), 'connect-src nicht gefunden');
-		$this->assertStringContainsString("'self'", $ccm[1]);
-		$this->assertStringContainsString('https://ajax.aspnetcdn.com', $ccm[1],
-			'connect-src braucht ajax.aspnetcdn.com — MS-Ajax laedt Resources via XHR');
-		$this->assertStringContainsString('https://appsforoffice.microsoft.com', $ccm[1]);
 		$this->assertStringNotContainsString('X-Frame-Options', $addinBlock,
 			'Add-in-Location darf KEIN X-Frame-Options haben — Add-in muss iframe-bar sein');
-		$this->assertStringNotContainsString('frame-ancestors', $addinBlock,
-			'Add-in-Location darf KEIN frame-ancestors haben — Outlook-WebView2-Origin undokumentiert');
 
 		// Defense-in-depth-Header bleiben
 		$this->assertStringContainsString('X-Content-Type-Options "nosniff" always', $addinBlock);
 		$this->assertStringContainsString('Strict-Transport-Security', $addinBlock);
 		$this->assertStringContainsString('Referrer-Policy', $addinBlock);
+		$this->assertStringContainsString('Cache-Control', $addinBlock);
 	}
 
 	public function testTaskpaneHasNoInlineOrHistoryShimScripts(): void
