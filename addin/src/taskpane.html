@@ -6,13 +6,14 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MailPilot AI</title>
 
-	<!-- Phase-H9 (CSP-clean) — History-API-Workaround in 2 external files
-	     ausgelagert. Erlaubt strikte CSP `script-src 'self' …` ohne
-	     `'unsafe-inline'`. Reihenfolge ist load-order-relevant: shim-before
-	     MUSS synchron vor office.js, shim-after synchron danach. -->
-	<script src="history-shim-before.js"></script>
+	<!-- H9 reverted 2026-05-18: history-shim-Files brachen MicrosoftAjax-Init
+	     (Sys.CultureInfo._parse TypeError nach Sys.Res-undefined-Lookup).
+	     Aktuelles Add-in nutzt keinen Router → history-Workaround nicht
+	     gebraucht. Wenn spaeter Router eingebaut wird: NICHT via separate
+	     shim-files (timing-sensitive!), stattdessen Router-Init innerhalb
+	     Office.onReady() laufen lassen, dort history-Methoden vom
+	     _historyCache nur wenn null restoren. -->
 	<script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
-	<script src="history-shim-after.js"></script>
 	<!-- Phase-4 Split: 1136-LOC-Monolith zerlegt in 12 Komponenten unter
 	     styles/. Reihenfolge ist load-order-relevant (Cascade) — niemals
 	     umsortieren ohne den CSS-Bundle-Test in tests-css/ zu pruefen. -->

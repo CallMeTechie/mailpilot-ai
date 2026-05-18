@@ -103,24 +103,16 @@ final class CspHeaderShapeTest extends TestCase
 		$this->assertStringContainsString('Referrer-Policy', $addinBlock);
 	}
 
-	public function testHistoryShimFilesExist(): void
+	public function testTaskpaneHasNoInlineOrHistoryShimScripts(): void
 	{
-		// Phase-H9 (CSP-clean) — inline scripts ausgelagert.
-		$before = __DIR__ . '/../../../addin/src/history-shim-before.js';
-		$after  = __DIR__ . '/../../../addin/src/history-shim-after.js';
-		$this->assertFileExists($before, 'history-shim-before.js muss existieren (sonst bricht taskpane.html)');
-		$this->assertFileExists($after,  'history-shim-after.js muss existieren');
-		$this->assertStringContainsString('_historyCache', file_get_contents($before));
-		$this->assertStringContainsString('replaceState', file_get_contents($after));
-	}
-
-	public function testTaskpaneHtmlReferencesExternalShimsNotInlineScripts(): void
-	{
+		// 2026-05-18: H9 reverted. history-shim-Files brachen MicrosoftAjax-
+		// Init (Sys.CultureInfo._parse TypeError). Add-in nutzt keinen
+		// Router → history-Workaround nicht gebraucht. Test pinnt dass
+		// taskpane.html NICHT mehr auf shim-Files referenziert und KEINE
+		// inline-script-Bloecke mit echtem Code hat.
 		$html = file_get_contents(__DIR__ . '/../../../addin/src/taskpane.html');
-		$this->assertStringContainsString('history-shim-before.js', $html);
-		$this->assertStringContainsString('history-shim-after.js', $html);
-		// Es darf KEIN inline <script>...</script> mit echtem Code mehr da sein.
-		// Der office.js-Tag ist external (src=), nicht inline.
+		$this->assertStringNotContainsString('history-shim-before.js', $html);
+		$this->assertStringNotContainsString('history-shim-after.js', $html);
 		$this->assertSame(0, preg_match_all('/<script>\s*(?:window|var|let|const|function)/', $html),
 			'Inline <script>-Bloecke mit Code im taskpane.html — bricht strikte CSP');
 	}
