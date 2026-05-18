@@ -39,6 +39,7 @@ use MailPilot\Services\RedactionService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
 use MailPilot\Services\RuleInferenceService;
+use MailPilot\Services\Sender\FolderPathBuilder;
 use MailPilot\Services\Sender\LookalikeDetector;
 use MailPilot\Services\Sender\SenderResolver;
 use MailPilot\Services\SyncService;
@@ -167,6 +168,9 @@ class Kernel
 			LookalikeDetector::class  => new LookalikeDetector(
 				$this->get(SenderRepository::class),
 				$this->get(Logger::class),
+			),
+			FolderPathBuilder::class  => new FolderPathBuilder(
+				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 			),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],

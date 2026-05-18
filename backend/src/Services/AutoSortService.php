@@ -70,6 +70,26 @@ final class AutoSortService
 		$priority       = (int)   ($score['priority']        ?? 0);
 		$actionRequired = (bool)  ($score['action_required'] ?? false);
 		$actionOwner    = (string)($score['action_owner']    ?? '');
+		$inboxScore     = isset($score['inbox_score']) && is_numeric($score['inbox_score'])
+			? max(0, min(100, (int)$score['inbox_score']))
+			: null;
+		$userCleared    = !empty($mail['user_cleared_at']);
+		$forceMove      = !empty($score['force_move']);  // vom Done-Endpoint gesetzt
+
+		// Phase 4 (Marc 2026-05-18): Inbox-Pin via KI-Inbox-Score.
+		// Wenn der inbox_score ueber der Schwelle liegt UND der User die
+		// Mail NICHT als „Erledigt" markiert hat → kein Auto-Move. Erst
+		// nach User-Done darf die Mail verschoben werden.
+		// Die alten Label/Priority-Schutzschichten unten bleiben als
+		// Fallback fuer Mails ohne KI-Score (z.B. legacy data vor 3b).
+		if (!$forceMove && !$userCleared && $inboxScore !== null) {
+			$threshold = $this->settings !== null
+				? max(0, min(100, $this->settings->getInt('inbox_pin_threshold', 70)))
+				: 70;
+			if ($inboxScore >= $threshold) {
+				return ['moved' => false, 'reason' => 'inbox_pinned', 'inbox_score' => $inboxScore, 'threshold' => $threshold];
+			}
+		}
 
 		// High-Prio-Schutz erweitert (2026-05-15 Bug-Fund):
 		//   alte Logik:  (label IN direct/action) AND priority>=4 → protected
@@ -80,10 +100,12 @@ final class AutoSortService
 		//                muss — action_required + action_owner='user'. Labels
 		//                sind KI-fehleranfällig; action_owner ist die echte
 		//                Aussage „du musst hier ran".
-		if (in_array($label, ['direct', 'action'], true) && $priority >= 4) {
+		// Force-Move (Done-Endpoint) ueberspringt auch diese Schicht, damit
+		// der User explizit verschieben kann was er als „erledigt" markiert.
+		if (!$forceMove && in_array($label, ['direct', 'action'], true) && $priority >= 4) {
 			return ['moved' => false, 'reason' => 'high_priority_protected'];
 		}
-		if ($actionRequired && $actionOwner === 'user' && $priority >= 4) {
+		if (!$forceMove && $actionRequired && $actionOwner === 'user' && $priority >= 4) {
 			return ['moved' => false, 'reason' => 'user_action_required'];
 		}
 
@@ -278,6 +300,81 @@ final class AutoSortService
 				->execute([':m' => $mail['id'], ':t' => $tenantId, ':cap' => $retryCap]);
 
 			return ['moved' => false, 'reason' => 'graph_error'];
+		}
+	}
+
+	/**
+	 * Phase 4 (Marc 2026-05-18) — manueller Move auf einen explizit
+	 * uebergebenen Folder-Pfad. Wird vom Done-Endpoint aufgerufen,
+	 * NACHDEM mails.user_cleared_at gesetzt wurde.
+	 *
+	 * Macht kein Rule-Lookup, kein Pin-Check — der Aufrufer entscheidet
+	 * dass jetzt verschoben wird. Setzt auto_sorted_at + cleared_at,
+	 * refresht ms_message_id wenn Graph eine neue Immutable-ID liefert.
+	 *
+	 * @param array<string,mixed> $mail (id, ms_message_id, tenant_id)
+	 * @return array{moved:bool, folder?:string, reason?:string}
+	 */
+	public function applyManualMove(
+		string $accessToken,
+		string $tenantId,
+		string $userId,
+		array $mail,
+		string $folderPath,
+	): array {
+		$msMessageId = (string)($mail['ms_message_id'] ?? '');
+		if ($msMessageId === '') {
+			return ['moved' => false, 'reason' => 'missing_message_id'];
+		}
+		$folderPath = trim($folderPath);
+		if ($folderPath === '') {
+			return ['moved' => false, 'reason' => 'empty_folder_path'];
+		}
+
+		try {
+			$folderId = $this->graph->ensureFolderPath($accessToken, $folderPath);
+			$newMsId  = $this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
+
+			// ms_message_id-Refresh (AQMk-IDs aendern sich nach Move).
+			// Selbe Logik wie im applyToScoredMail-Pfad.
+			if ($newMsId !== null && $newMsId !== $msMessageId) {
+				try {
+					$this->db->prepare('UPDATE mails
+						SET ms_message_id = :new
+						WHERE id = :id AND tenant_id = :t')
+						->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
+				} catch (\PDOException $e) {
+					if ($e->getCode() === '23000') {
+						$this->db->prepare('UPDATE mails
+							SET deleted_at = UTC_TIMESTAMP(3)
+							WHERE id = :id AND tenant_id = :t AND deleted_at IS NULL')
+							->execute([':id' => $mail['id'], ':t' => $tenantId]);
+					} else {
+						throw $e;
+					}
+				}
+			}
+
+			$this->db->prepare('UPDATE mail_scores
+				SET auto_sorted_at = UTC_TIMESTAMP(3),
+				    cleared_at = UTC_TIMESTAMP(3)
+				WHERE mail_id = :m AND tenant_id = :t')
+				->execute([':m' => $mail['id'], ':t' => $tenantId]);
+
+			$this->logger->info('autosort.manual_moved', [
+				'user'    => $userId,
+				'mail_id' => (string)$mail['id'],
+				'folder'  => $folderPath,
+			]);
+			return ['moved' => true, 'folder' => $folderPath];
+		} catch (\Throwable $e) {
+			$this->logger->warning('autosort.manual_failed', [
+				'user'    => $userId,
+				'mail_id' => (string)$mail['id'],
+				'folder'  => $folderPath,
+				'err'     => $e->getMessage(),
+			]);
+			return ['moved' => false, 'reason' => 'graph_error', 'error' => $e->getMessage()];
 		}
 	}
 

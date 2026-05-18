@@ -208,6 +208,20 @@ final class MailRepository
 	}
 
 	/**
+	 * Phase 4 — User klickt „Erledigt — verschieben". Setzt user_cleared_at
+	 * idempotent (zweiter Klick aktualisiert NICHT). Aufrufer (MailController)
+	 * triggert anschliessend den Folder-Move via AutoSortService.
+	 */
+	public function markUserDone(string $tenantId, string $mailId): bool
+	{
+		$stmt = $this->db->prepare('UPDATE mails
+			SET user_cleared_at = UTC_TIMESTAMP(3)
+			WHERE id = :id AND tenant_id = :t AND user_cleared_at IS NULL');
+		$stmt->execute([':id' => $mailId, ':t' => $tenantId]);
+		return $stmt->rowCount() > 0;
+	}
+
+	/**
 	 * Purge body_text older than retention days.
 	 */
 	public function purgeOldBodies(int $retentionDays): int

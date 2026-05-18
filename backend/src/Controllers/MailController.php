@@ -16,6 +16,8 @@ use MailPilot\Services\MailSummaryService;
 use MailPilot\Services\QuotaExceededException;
 use MailPilot\Services\ReplyDraftService;
 use MailPilot\Services\RuleInferenceService;
+use MailPilot\Services\Sender\FolderPathBuilder;
+use MailPilot\Services\Sender\SenderResolver;
 use MailPilot\Services\TokenService;
 
 final class MailController extends BaseController
@@ -365,6 +367,86 @@ final class MailController extends BaseController
 			$response['rule_inference'] = $ruleResult;
 		}
 		Response::json($response);
+	}
+
+	/**
+	 * Phase 4 (Marc 2026-05-18) — User klickt „Erledigt — verschieben".
+	 *
+	 * Flow:
+	 *   1. mails.user_cleared_at setzen (idempotent).
+	 *   2. Score-Felder folder_segments laden.
+	 *   3. SenderResolver liefert Sender-Bucket (root_folder_name).
+	 *   4. FolderPathBuilder baut finalen Pfad. Wenn null → kein Move,
+	 *      bleibt in Inbox (KI hatte keinen Sortier-Vorschlag).
+	 *   5. AutoSortService::applyManualMove fuehrt den Graph-Move aus.
+	 *
+	 * Response: { ok, moved:bool, folder?:string, reason?:string }
+	 */
+	public function markUserDone(array $params, array $body): void
+	{
+		$ctx    = $this->requireAuth();
+		$mailId = (string)($params['id'] ?? '');
+		if ($mailId === '') {
+			throw HttpException::badRequest('VALIDATION', 'Mail-ID fehlt');
+		}
+
+		$mail = $this->kernel->get(MailRepository::class)->findById($ctx['tenant_id'], $mailId);
+		if ($mail === null) {
+			throw HttpException::notFound('NOT_FOUND', 'Mail nicht gefunden');
+		}
+
+		// 1) Idempotent done-Marker setzen.
+		$this->kernel->get(MailRepository::class)->markUserDone($ctx['tenant_id'], $mailId);
+
+		// 2) Score laden, um folder_segments zu bekommen.
+		$pdo = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare('SELECT folder_segments FROM mail_scores
+			WHERE mail_id = :id AND tenant_id = :t LIMIT 1');
+		$stmt->execute([':id' => $mailId, ':t' => $ctx['tenant_id']]);
+		$scoreRow = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+		$segments = null;
+		if (isset($scoreRow['folder_segments']) && $scoreRow['folder_segments'] !== null) {
+			$decoded = json_decode((string)$scoreRow['folder_segments'], true);
+			if (is_array($decoded)) {
+				$segments = array_values(array_map('strval', $decoded));
+			}
+		}
+
+		// 3) Sender-Bucket holen — registriert ggf. einen neuen Bucket,
+		// haengt registrable Domain an existierenden an.
+		$bucket = $this->kernel->get(SenderResolver::class)
+			->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
+
+		// 4) Pfad bauen. Wenn keine Empfehlung → return ohne Move.
+		$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+		if ($folderPath === null) {
+			Response::json([
+				'ok'     => true,
+				'moved'  => false,
+				'reason' => 'no_folder_suggestion',
+				'cleared_at' => gmdate('Y-m-d\TH:i:s\Z'),
+			]);
+			return;
+		}
+
+		// 5) Graph-Move ausfuehren. Mailbox aus mail.mailbox_id finden, Token holen.
+		$mailboxes = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+			->findByUser($ctx['tenant_id'], $ctx['user_id']);
+		$mb = null;
+		foreach ($mailboxes as $cand) {
+			if ((string)$cand['id'] === (string)$mail['mailbox_id']) { $mb = $cand; break; }
+		}
+		if ($mb === null) {
+			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Postfach der Mail nicht verfuegbar');
+		}
+		$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+
+		$result = $this->kernel->get(\MailPilot\Services\AutoSortService::class)
+			->applyManualMove($token, $ctx['tenant_id'], $ctx['user_id'], $mail, $folderPath);
+
+		Response::json(['ok' => true] + $result + [
+			'cleared_at' => gmdate('Y-m-d\TH:i:s\Z'),
+		]);
 	}
 
 	/**

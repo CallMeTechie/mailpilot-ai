@@ -34,6 +34,7 @@ $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');
 $router->post('/api/v1/mails/{id}/correct-score','MailController@correctScore');
+$router->post('/api/v1/mails/{id}/done',          'MailController@markUserDone');
 // Sprint 6f — Auto-Reply-Drafts
 $router->get ('/api/v1/mails/{id}/drafts/active','MailController@getActiveDraft');
 $router->post('/api/v1/drafts/{id}/dismiss',     'MailController@dismissDraft');
