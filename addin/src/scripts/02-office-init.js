@@ -33,7 +33,13 @@ Office.onReady((info) => {
 	}
 
 	// Path 1: postMessage (works when window.opener survived).
+	// 2026-05-18 Security-Hardening (CWE-345): Origin-Whitelist erzwingen.
+	// Der Auth-Popup laeuft auf demselben Backend-Origin wie das Add-in
+	// (localStorage-Handoff funktioniert ohnehin nur same-origin). Ohne
+	// diesen Check koennte jede Seite, die das Add-in im iframe einbettet,
+	// ein gefaktes 'mp-auth-complete'-Token injizieren.
 	window.addEventListener('message', (event) => {
+		if (event.origin !== window.location.origin) return;
 		if (event.data?.type === 'mp-auth-complete' && event.data.token) {
 			setToken(event.data.token);
 			setStatus('Angemeldet — lade Briefing…');
@@ -57,5 +63,17 @@ Office.onReady((info) => {
 	);
 
 	onItemChanged();
+
+	// 2026-05-18 Marc-Wunsch: Wenn das TaskPane mit einem aktiven Mail-
+	// Kontext geoeffnet wird (User klickt eine Mail an, Outlook oeffnet
+	// das Pane mit), direkt den „Diese Mail"-Tab zeigen — nicht erst auf
+	// Briefing landen und dann manuell wechseln muessen. Ohne Item-Kontext
+	// bleibt der Default-Tab (Briefing) aktiv.
+	try {
+		const item = Office.context.mailbox.item;
+		if (item && item.itemId) {
+			document.querySelector('.mp-tab[data-tab="current"]')?.click();
+		}
+	} catch (_) { /* kein Item-Kontext — Briefing bleibt aktiv */ }
 });
 
