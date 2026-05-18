@@ -75,7 +75,13 @@ abstract class TestCase extends BaseTestCase
 			'pending_actions',
 			'auto_sort_corrections',
 			// 0025: Sprint-6g Quota-Counter
-			'usage_counters'];
+			'usage_counters',
+			// 0031/0032: Sort-Refactor Phase 2 — senders + sender_projects.
+			// FK CASCADE auf tenant_id wuerde greifen, aber tenants wird
+			// vor den Sub-Tabellen truncated und FK_CHECKS=0 deaktiviert
+			// CASCADE — daher explizit wischen.
+			'sender_projects',
+			'senders'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

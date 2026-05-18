@@ -20,6 +20,7 @@ use MailPilot\Repositories\RedactionRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\PromptRepository;
+use MailPilot\Repositories\SenderRepository;
 use MailPilot\Repositories\SubLabelRepository;
 use MailPilot\Repositories\SummaryRepository;
 use MailPilot\Repositories\UsageCounterRepository;
@@ -38,6 +39,8 @@ use MailPilot\Services\RedactionService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
 use MailPilot\Services\RuleInferenceService;
+use MailPilot\Services\Sender\LookalikeDetector;
+use MailPilot\Services\Sender\SenderResolver;
 use MailPilot\Services\SyncService;
 use MailPilot\Services\TokenService;
 use Monolog\Handler\StreamHandler;
@@ -114,6 +117,7 @@ class Kernel
 			),
 			CorrectionRepository::class => new CorrectionRepository($this->get(PDO::class)),
 			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
+			SenderRepository::class   => new SenderRepository($this->get(PDO::class)),
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
@@ -152,6 +156,18 @@ class Kernel
 				$this->get(PendingActionRepository::class),
 			),
 			RedactionService::class   => new RedactionService(),
+			// Sort-Refactor Phase 2 — Domain-Layer. PSL liegt unter backend/var/psl/
+			// und wird vom Image-Build (COPY backend/) mitgenommen. Kernel.php
+			// liegt in backend/src/Http/, daher 2× dirname() → backend/.
+			SenderResolver::class     => new SenderResolver(
+				dirname(__DIR__, 2) . '/var/psl/public_suffix_list.dat',
+				$this->get(SenderRepository::class),
+				$this->get(Logger::class),
+			),
+			LookalikeDetector::class  => new LookalikeDetector(
+				$this->get(SenderRepository::class),
+				$this->get(Logger::class),
+			),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],
 				(string)$this->config['app']['jwt_issuer'],

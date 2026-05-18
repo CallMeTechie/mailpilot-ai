@@ -12,8 +12,13 @@ docker/.env.*
 .env.local
 .env.*.local
 
-# Logs / runtime
-backend/var/
+# Logs / runtime — backend/var/ ist gemischt:
+#   - log/, phpstan/ : runtime, ignorieren
+#   - psl/           : build-time Resource (Mozilla Public Suffix List),
+#                      muss commited werden, wird vom SenderResolver geladen
+backend/var/log/
+backend/var/phpstan/
+backend/var/cache/
 *.log
 
 # Editor / IDE / agent

@@ -11,7 +11,8 @@
 		"ext-openssl": "*",
 		"firebase/php-jwt": "^7.0",
 		"vlucas/phpdotenv": "^5.6",
-		"monolog/monolog": "^3.5"
+		"monolog/monolog": "^3.5",
+		"jeremykendall/php-domain-parser": "^6.4"
 	},
 	"require-dev": {
 		"phpunit/phpunit": "^11.0",
