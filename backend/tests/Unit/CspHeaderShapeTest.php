@@ -50,14 +50,28 @@ final class CspHeaderShapeTest extends TestCase
 		$this->assertStringContainsString('X-Frame-Options "DENY" always', $phpBlock);
 	}
 
-	public function testNginxAddinAllowsOfficeJs(): void
+	public function testAddinLocationHasNoCspButKeepsOtherHeaders(): void
 	{
-		$this->assertStringContainsString('appsforoffice.microsoft.com', $this->nginxConf,
-			'Add-in script-src muss office.js CDN allowlisten');
-		$this->assertStringContainsString('outlook.office.com', $this->nginxConf,
-			'frame-ancestors muss outlook.office.com fuer Add-in zulassen');
-		$this->assertStringContainsString('outlook.live.com', $this->nginxConf,
-			'frame-ancestors muss outlook.live.com fuer Personal-Accounts zulassen');
+		// 2026-05-18 hotfix: Add-in-CSP entfernt nach Production-Bruch.
+		// MS dokumentiert keine offizielle CSP fuer Office Add-ins;
+		// Office.js init-Calls + Outlook-Desktop-WebView2-frame-ancestor
+		// wurden geblockt. Andere Defense-in-depth-Header bleiben.
+		$pos = strpos($this->nginxConf, 'location ~ ^/addin/');
+		$this->assertNotFalse($pos, 'Add-in-Location-Block muss existieren');
+		// Slice nur bis zum schliessenden '}' (vor dem naechsten Location-Block).
+		$end = strpos($this->nginxConf, "\n\t\t}", $pos);
+		$this->assertNotFalse($end, 'Add-in-Block-Ende nicht gefunden');
+		$addinBlock = substr($this->nginxConf, $pos, $end - $pos);
+
+		$this->assertStringNotContainsString('Content-Security-Policy', $addinBlock,
+			'Add-in-Location darf KEINE CSP haben — bricht Office.js');
+		$this->assertStringNotContainsString('X-Frame-Options', $addinBlock,
+			'Add-in-Location darf KEIN X-Frame-Options haben — Add-in muss iframe-bar sein');
+
+		// Defense-in-depth-Header bleiben
+		$this->assertStringContainsString('X-Content-Type-Options "nosniff" always', $addinBlock);
+		$this->assertStringContainsString('Strict-Transport-Security', $addinBlock);
+		$this->assertStringContainsString('Referrer-Policy', $addinBlock);
 	}
 
 	public function testNginxHasHstsAndNosniff(): void
