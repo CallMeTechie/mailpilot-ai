@@ -13,6 +13,8 @@ use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Services\Scoring\ActionOwnerResolver;
 use MailPilot\Services\Scoring\ScoringPromptBuilder;
 use MailPilot\Services\Scoring\SubLabelDiscoverer;
+use MailPilot\Services\Sender\LookalikeDetector;
+use MailPilot\Services\Sender\SenderResolver;
 use MailPilot\Util\Uuid;
 
 /**
@@ -60,6 +62,11 @@ final class MailScoringService
 		private readonly \Psr\Log\LoggerInterface $logger,
 		?\MailPilot\Repositories\PendingActionRepository $pendingActions = null,
 		?\MailPilot\Repositories\AutoSortCorrectionRepository $autoSortCorrections = null,
+		// Phase 3a (2026-05-18): Sender-Layer optional, damit aelteren Tests
+		// die ohne Resolver konstruieren weiterhin gruen sind. In Prod sind
+		// beide via Kernel verdrahtet — siehe Kernel::get(MailScoringService).
+		private readonly ?SenderResolver $senderResolver = null,
+		private readonly ?LookalikeDetector $lookalikeDetector = null,
 	) {
 		$this->promptBuilder = new ScoringPromptBuilder($settings, $corrections, $autoSortCorrections);
 		$this->actionOwner = new ActionOwnerResolver(
@@ -135,8 +142,74 @@ final class MailScoringService
 			$this->actionOwner->resolveForCacheHits($userProfile, $cacheHits, $scored);
 		}
 
+		// Phase 3a: Sender-Bucket + Spoof-Erkennung. Mutiert $scored in-place
+		// (haengt spoof_suspect-Flag an jede Row, wenn Resolver verfuegbar).
+		$this->enrichScoresWithSender($tenantId, $mails, $scored);
+
 		$this->scores->upsertMany($scored);
 		return $scored;
+	}
+
+	/**
+	 * Phase 3a — pro gescorter Mail den SenderResolver aufrufen (legt
+	 * Bucket bei Bedarf an) und neue Sender durch den LookalikeDetector
+	 * laufen lassen. Schreibt spoof_suspect zurueck in die Score-Row.
+	 *
+	 * Tolerant gegenueber nicht-injizierten Services (alte Tests) — dann
+	 * No-op, spoof_suspect bleibt 0. Fehler werden geloggt und schlucken
+	 * den Score-Pfad NICHT ab — Scoring ist wichtiger als Bucket-Hygiene.
+	 *
+	 * @param list<array<string,mixed>> $mails
+	 * @param list<array<string,mixed>> $scored mutiert in-place
+	 */
+	private function enrichScoresWithSender(string $tenantId, array $mails, array &$scored): void
+	{
+		if ($this->senderResolver === null) {
+			return;
+		}
+		// Index mails by id fuer schnellen Lookup pro Score-Row.
+		$mailById = [];
+		foreach ($mails as $m) {
+			if (isset($m['id'])) {
+				$mailById[(string)$m['id']] = $m;
+			}
+		}
+
+		foreach ($scored as &$row) {
+			$mid = (string)($row['mail_id'] ?? '');
+			$mail = $mailById[$mid] ?? null;
+			if ($mail === null) continue;
+			$from = (string)($mail['from_email'] ?? '');
+			if ($from === '') continue;
+
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, $from);
+				if ($bucket === null) {
+					continue;
+				}
+				// Wenn bucket frisch unknown ist, durch den LookalikeDetector
+				// schicken — der flippt trust_status ggf. auf suspected_spoof.
+				if ($bucket['trust_status'] === 'unknown' && $this->lookalikeDetector !== null) {
+					$result = $this->lookalikeDetector->check(
+						$tenantId,
+						(string)$bucket['id'],
+						(string)$bucket['sender_key'],
+					);
+					if ($result['spoof'] ?? false) {
+						$row['spoof_suspect'] = 1;
+						continue;
+					}
+				}
+				$row['spoof_suspect'] = $bucket['trust_status'] === 'suspected_spoof' ? 1 : 0;
+			} catch (\Throwable $e) {
+				$this->logger->warning('scoring.sender_enrich_failed', [
+					'mail_id' => $mid,
+					'from'    => $from,
+					'err'     => $e->getMessage(),
+				]);
+			}
+		}
+		unset($row);
 	}
 
 	private function contentHash(array $mail): string

@@ -197,6 +197,11 @@ class Kernel
 				$this->get(Logger::class),
 				$this->get(PendingActionRepository::class),
 				$this->get(AutoSortCorrectionRepository::class),
+				// Phase 3a: Sender-Resolver + Lookalike-Detector werden vor
+				// upsertMany in scoreBatch aufgerufen → registriert neue
+				// Absender + flippt spoof_suspect bei Lookalike-Treffer.
+				$this->get(SenderResolver::class),
+				$this->get(LookalikeDetector::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

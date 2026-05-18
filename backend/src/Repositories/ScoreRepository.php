@@ -30,10 +30,10 @@ final class ScoreRepository
 		$sql = 'INSERT INTO mail_scores
 			(id, tenant_id, mail_id, label, sub_label, action_required,
 			 action_owner, action_owner_confidence, action_owner_source,
-			 priority, summary, reasoning, prompt_version, model, cached, scored_at)
+			 priority, summary, reasoning, prompt_version, model, cached, spoof_suspect, scored_at)
 			VALUES (:id, :tenant_id, :mail_id, :label, :sub_label, :action_required,
 			 :action_owner, :action_owner_confidence, :action_owner_source,
-			 :priority, :summary, :reasoning, :pv, :model, :cached, UTC_TIMESTAMP(3))
+			 :priority, :summary, :reasoning, :pv, :model, :cached, :spoof_suspect, UTC_TIMESTAMP(3))
 			ON DUPLICATE KEY UPDATE
 				label                   = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),                label,                   VALUES(label)),
 				sub_label               = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("sub_label", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL),            sub_label,               VALUES(sub_label)),
@@ -47,6 +47,7 @@ final class ScoreRepository
 				prompt_version  = VALUES(prompt_version),
 				model           = VALUES(model),
 				cached          = VALUES(cached),
+				spoof_suspect   = VALUES(spoof_suspect),
 				scored_at       = VALUES(scored_at)';
 
 		$stmt = $this->db->prepare($sql);
@@ -67,6 +68,9 @@ final class ScoreRepository
 				':pv'              => $s['prompt_version'],
 				':model'           => $s['model'],
 				':cached'          => $s['cached'],
+				// Phase 3a: spoof_suspect default 0 fuer Aufrufer die das
+				// Feld noch nicht setzen (Cache-Hits ohne LookalikeDetector-Lauf).
+				':spoof_suspect'   => isset($s['spoof_suspect']) ? (int)(bool)$s['spoof_suspect'] : 0,
 			]);
 		}
 	}
