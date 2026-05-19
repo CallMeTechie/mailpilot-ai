@@ -491,9 +491,16 @@ final class MailController extends BaseController
 			$bucket = $this->kernel->get(SenderResolver::class)
 				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
 			$senderRoot = $bucket['root_folder_name'] ?? null;
-			$segments   = $senderRoot !== null && $senderRoot !== ''
-				? array_merge([(string)$senderRoot], $topicSegments)
-				: $topicSegments;
+			// Phase 9e Hotfix #4 (Marc 2026-05-19): Multi-Segment-Topics sind
+			// absolute User-Pfade — Sender-Root NICHT davorsetzen. Single-
+			// Segment bleibt Sub-Topic unter Sender-Root (Default-Workflow
+			// fuer „Bewertung" o.ä.). User-Erwartung: tippt der User selbst
+			// eine Hierarchie, hat er die volle Kontrolle.
+			$segments   = count($topicSegments) >= 2
+				? $topicSegments
+				: ($senderRoot !== null && $senderRoot !== ''
+					? array_merge([(string)$senderRoot], $topicSegments)
+					: $topicSegments);
 
 			// (a) Persistieren — sticky setzen, sonst ueberschreibt naechstes Scoring.
 			$pdo->prepare('UPDATE mail_scores
