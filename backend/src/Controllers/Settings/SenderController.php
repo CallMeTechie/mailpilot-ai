@@ -32,56 +32,42 @@ final class SenderController extends BaseController
 	}
 
 	/**
-	 * Phase 9e (Marc 2026-05-19) — Topic-Vorschlaege fuer die
-	 * „Klassifikation korrigieren"-Form. Liefert distinct letzte Segmente
-	 * aus mail_scores.folder_segments aller Mails dieses Senders, sortiert
-	 * nach Haeufigkeit. Datalist im Add-in nutzt das fuer Auto-Suggest.
+	 * Phase 9e Hotfix #5 (Marc 2026-05-19) — Topic-Pfad-Vorschlaege.
+	 * Liefert distinct volle Pfade aus mail_scores.folder_segments ALLER
+	 * Mails des Tenants, sortiert nach Haeufigkeit. Datalist im Add-in
+	 * filtert browser-native waehrend des Tippens.
+	 *
+	 * `from`-Parameter wird ignoriert (war Phase-9e-Initial-Variante mit
+	 * Per-Sender-Filter) — der User soll auch Pfade vorschlagen koennen,
+	 * die bisher fuer ANDERE Sender genutzt wurden (z.B. /Familie/Mama).
 	 */
 	public function topicSuggestions(array $params, array $body): void
 	{
-		$ctx       = $this->requireAuth();
-		$fromEmail = (string)($_GET['from'] ?? '');
-		if ($fromEmail === '') {
-			throw HttpException::badRequest('VALIDATION', 'from-Parameter fehlt');
-		}
-		$bucket = $this->kernel->get(\MailPilot\Services\Sender\SenderResolver::class)
-			->resolve($ctx['tenant_id'], $fromEmail);
-		if ($bucket === null) {
-			Response::json(['items' => []]);
-			return;
-		}
-		$domains = array_values($bucket['registrable_domains'] ?? []);
-		if ($domains === []) {
-			Response::json(['items' => []]);
-			return;
-		}
-		// Festes Prepared-Statement pro Domain, dann PHP-merge. Bewusst KEIN
-		// dynamic IN(?,?,?,...) — auch wenn die Werte hier intern sind, der
-		// dynamische Platzhalter-Build ist ein Footgun fuer spaetere Aenderungen.
+		$ctx = $this->requireAuth();
 		$stmt = $this->kernel->get(\PDO::class)->prepare(
-			"SELECT s.folder_segments, COUNT(*) AS n
-			FROM mail_scores s
-			INNER JOIN mails m ON m.id = s.mail_id
-			WHERE s.tenant_id = :t
-			  AND s.folder_segments IS NOT NULL
-			  AND SUBSTRING_INDEX(m.from_email, '@', -1) = :d
-			GROUP BY s.folder_segments
+			"SELECT folder_segments, COUNT(*) AS n
+			FROM mail_scores
+			WHERE tenant_id = :t AND folder_segments IS NOT NULL
+			GROUP BY folder_segments
 			ORDER BY n DESC
-			LIMIT 100"
+			LIMIT 200"
 		);
-		$counts = [];
-		foreach ($domains as $domain) {
-			$stmt->execute([':t' => $ctx['tenant_id'], ':d' => $domain]);
-			foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-				$arr = json_decode((string)$row['folder_segments'], true);
-				if (!is_array($arr) || $arr === []) continue;
-				$topic = trim((string)end($arr));
-				if ($topic === '') continue;
-				$counts[$topic] = ($counts[$topic] ?? 0) + (int)$row['n'];
+		$stmt->execute([':t' => $ctx['tenant_id']]);
+		$paths = [];
+		foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+			$arr = json_decode((string)$row['folder_segments'], true);
+			if (!is_array($arr) || $arr === []) continue;
+			$clean = [];
+			foreach ($arr as $seg) {
+				$s = trim((string)$seg);
+				if ($s !== '') $clean[] = $s;
 			}
+			if ($clean === []) continue;
+			$path = implode('/', $clean);
+			$paths[$path] = ($paths[$path] ?? 0) + (int)$row['n'];
 		}
-		arsort($counts);
-		Response::json(['items' => array_keys($counts)]);
+		arsort($paths);
+		Response::json(['items' => array_keys($paths)]);
 	}
 
 	public function updateSender(array $params, array $body): void

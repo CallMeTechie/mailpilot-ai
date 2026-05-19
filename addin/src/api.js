@@ -195,10 +195,9 @@ export const api = {
 		toggleScoreOverride:  (id)    => request('POST',   `/settings/score-overrides/${id}/toggle`),
 		deleteScoreOverride:  (id)    => request('DELETE', `/settings/score-overrides/${id}`),
 	},
-	// Phase 9e — Topic-Suggestions fuer „Klassifikation korrigieren"-Datalist
+	// Phase 9e Hotfix #5 — Tenant-weite Pfad-Vorschlaege fuer Datalist
 	senders: {
-		topicSuggestions: (fromEmail) =>
-			request('GET', `/senders/topic-suggestions?from=${encodeURIComponent(fromEmail)}`),
+		topicSuggestions: () => request('GET', '/senders/topic-suggestions'),
 	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),

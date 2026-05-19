@@ -1713,20 +1713,20 @@ function updateDoneIcon(previewPath) {
 }
 
 /**
- * Phase 9e — Topic-Vorschlaege fuer die datalist im „Klassifikation
- * korrigieren"-Form. Distinct letzte folder_segments-Eintraege bisheriger
- * Mails desselben Senders, sortiert nach Haeufigkeit.
+ * Phase 9e Hotfix #5 — Pfad-Vorschlaege fuer die datalist im
+ * „Klassifikation korrigieren"-Form. Liefert distinct volle Pfade aus
+ * allen Mails des Tenants, sortiert nach Haeufigkeit. Browser-native
+ * Live-Filterung beim Tippen.
  */
-async function loadTopicSuggestions(fromEmail) {
+async function loadTopicSuggestions() {
 	const dl = document.getElementById('correct-topic-suggestions');
 	if (!dl) return;
 	dl.replaceChildren();
-	if (!fromEmail) return;
 	try {
-		const res = await api.senders.topicSuggestions(fromEmail);
-		for (const topic of (res?.items ?? [])) {
+		const res = await api.senders.topicSuggestions();
+		for (const path of (res?.items ?? [])) {
 			const opt = document.createElement('option');
-			opt.value = topic;
+			opt.value = path;
 			dl.appendChild(opt);
 		}
 	} catch { /* best-effort */ }
@@ -1739,11 +1739,12 @@ function openCorrectForm() {
 	document.getElementById('correct-priority').value  = String(score.priority ?? 3);
 	document.getElementById('correct-action-required').checked = !!score.action_required;
 	document.getElementById('correct-reasoning').value = '';
-	// Phase 9e: aktuelles Topic (letztes folder_segment) vorausfuellen,
-	// damit der User es ueberschreibt statt jedes Mal neu zu tippen.
+	// Phase 9e Hotfix #5: vollen Pfad vorausfuellen statt nur letztes
+	// Segment — Marc tippt den vollen Outlook-Pfad. Datalist liefert Live-
+	// Vorschlaege fuer die bereits genutzten Pfade aus allen Mails.
 	const segs = Array.isArray(score.folder_segments) ? score.folder_segments : [];
-	document.getElementById('correct-topic').value = segs.length > 0 ? String(segs[segs.length - 1]) : '';
-	loadTopicSuggestions(state.currentMailData.from_email || '');
+	document.getElementById('correct-topic').value = segs.length > 0 ? segs.join('/') : '';
+	loadTopicSuggestions();
 	toggle('correct-section', true);
 	document.getElementById('correct-reasoning').focus();
 }

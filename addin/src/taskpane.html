@@ -270,13 +270,13 @@
 							<span>Aktion erforderlich</span>
 						</label>
 					</div>
-					<!-- Phase 9e (Marc 2026-05-19): Topic-Korrektur. Freitext mit
-					     datalist-Suggestions aus bisherigen Topics dieses Senders.
-					     „/" oder „\" als Separator → verschachtelte Unterordner
-					     (z. B. „Familie/Jenny" → /<Absender>/Familie/Jenny/). -->
-					<label for="correct-topic" class="mp-correct-extra-label">Topic / Unterordner (optional, „/" für Untergliederung)</label>
+					<!-- Phase 9e Hotfix #5 (Marc 2026-05-19): Topic ist der vollstaendige
+					     Outlook-Pfad. Datalist liefert Live-Vorschlaege aus allen
+					     bisher genutzten Pfaden (browser-native Filter beim Tippen).
+					     Max 3 Ebenen (Outlook-Pfad-Tiefen-Limit). -->
+					<label for="correct-topic" class="mp-correct-extra-label">Outlook-Pfad (optional, „/" als Separator, z. B. „Familie/Jenny")</label>
 					<input type="text" id="correct-topic" list="correct-topic-suggestions"
-						placeholder="z. B. Bewertung oder Familie/Jenny" maxlength="130" autocomplete="off">
+						placeholder="Vollständiger Pfad, z. B. Familie/Jenny" maxlength="200" autocomplete="off">
 					<datalist id="correct-topic-suggestions"></datalist>
 
 					<label for="correct-reasoning" class="mp-reasoning-hint">Begründung — <strong>Pflicht für KI-Lernen</strong> (z. B. „CI-Failure ist nur Info, keine Aktion")</label>

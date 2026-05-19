@@ -11,6 +11,7 @@ use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
+use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
 use MailPilot\Services\QuotaExceededException;
@@ -392,6 +393,9 @@ final class MailController extends BaseController
 		// in den neuen Pfad + leiten ggf. eine generelle Topic-Regel ab.
 		// Slash und Backslash sind als Pfad-Separator erlaubt (z.B. „Familie/Jenny"
 		// → Unterordner-Hierarchie). Splitten + jedes Segment einzeln validieren.
+		// Phase 9e Hotfix #5 (Marc 2026-05-19): Topic-Feld nimmt den
+		// VOLLSTAENDIGEN Pfad — kein Sender-Root-Auto-Prefix mehr. Was der
+		// User tippt, ist absolut. Max 3 Segmente (FolderPathBuilder::MAX_DEPTH).
 		$topicText = isset($body['topic']) ? trim((string)$body['topic']) : '';
 		$topicSegments = [];
 		if ($topicText !== '') {
@@ -404,8 +408,8 @@ final class MailController extends BaseController
 				}
 				$topicSegments[] = $seg;
 			}
-			if (count($topicSegments) > 2) {
-				throw HttpException::badRequest('VALIDATION', 'Topic max 2 Ebenen unterhalb des Absenders (z.B. „Familie/Jenny")');
+			if (count($topicSegments) > 3) {
+				throw HttpException::badRequest('VALIDATION', 'Topic max 3 Ebenen (z.B. „Familie/Jenny/2025")');
 			}
 		}
 
@@ -488,19 +492,12 @@ final class MailController extends BaseController
 		$movedTo       = null;
 		$topicRuleInfo = null;
 		if ($topicSegments !== []) {
-			$bucket = $this->kernel->get(SenderResolver::class)
-				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
-			$senderRoot = $bucket['root_folder_name'] ?? null;
-			// Phase 9e Hotfix #4 (Marc 2026-05-19): Multi-Segment-Topics sind
-			// absolute User-Pfade — Sender-Root NICHT davorsetzen. Single-
-			// Segment bleibt Sub-Topic unter Sender-Root (Default-Workflow
-			// fuer „Bewertung" o.ä.). User-Erwartung: tippt der User selbst
-			// eine Hierarchie, hat er die volle Kontrolle.
-			$segments   = count($topicSegments) >= 2
-				? $topicSegments
-				: ($senderRoot !== null && $senderRoot !== ''
-					? array_merge([(string)$senderRoot], $topicSegments)
-					: $topicSegments);
+			// Phase 9e Hotfix #5: Topic ist IMMER absolut. Wir nehmen genau,
+			// was der User getippt hat — keine Sender-Root-Magie. Topic-Feld
+			// im Add-in ist mit dem aktuellen vollen Pfad vorausgefuellt,
+			// damit der User entweder nur Suffixe aendert oder den ganzen
+			// Pfad ueberschreibt.
+			$segments = $topicSegments;
 
 			// (a) Persistieren — sticky setzen, sonst ueberschreibt naechstes Scoring.
 			$pdo->prepare('UPDATE mail_scores
@@ -516,10 +513,19 @@ final class MailController extends BaseController
 				]);
 			$topicApplied = $segments;
 
-			// (b) Move-Now via AutoSortService::applyManualMove.
+			// (b) Move-Now via AutoSortService::applyManualMove. Pfad direkt
+			// aus segments + optional sort_root (Setting). Outlook-Path-Sanitize
+			// (slash/backslash IN einem Segment) hat ScoreOverrideRepository
+			// schon ausgeschlossen; segments hier sind bereits validierte
+			// einzelne Folder-Namen.
 			try {
-				$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
-				if ($folderPath !== null) {
+				$folderPath = implode('/', $segments);
+				$sortRoot = trim($this->kernel->get(SettingsRepository::class)
+					->getString('sort_root', ''), '/');
+				if ($sortRoot !== '') {
+					$folderPath = $sortRoot . '/' . $folderPath;
+				}
+				if ($folderPath !== '') {
 					$mbAll = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
 						->findByUser($ctx['tenant_id'], $ctx['user_id']);
 					$mb = null;
