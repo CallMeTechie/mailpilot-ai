@@ -13,6 +13,7 @@ async function loadModes
 async function loadPending
 async function loadSettings
 async function loadToday
+async function markCurrentMailDone
 async function markPinnedDone
 async function openFilteredList
 async function persistAliases

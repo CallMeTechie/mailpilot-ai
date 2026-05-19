@@ -10,6 +10,33 @@ function initCurrentMail() {
 	document.getElementById('btn-correct')?.addEventListener('click',  openCorrectForm);
 	document.getElementById('btn-save-correction')?.addEventListener('click', saveCorrection);
 	document.getElementById('btn-cancel-correction')?.addEventListener('click', () => toggle('correct-section', false));
+	// Phase 5b (Marc 2026-05-19): Done-Button im DieseMail-Tab.
+	document.getElementById('btn-current-done')?.addEventListener('click', markCurrentMailDone);
+}
+
+/**
+ * Phase 5b — User klickt im DieseMail-Tab auf „Erledigt — verschieben".
+ * Spiegelt das Verhalten der Pin-Card-Done-Buttons im Briefing.
+ */
+async function markCurrentMailDone() {
+	if (!state.currentMailData) return;
+	const mailDbId = state.currentMailData.id;
+	const btn = document.getElementById('btn-current-done');
+	if (btn) { btn.disabled = true; btn.textContent = 'Verschiebe…'; }
+	try {
+		const res = await api.mails.done(mailDbId);
+		if (res?.moved) {
+			showToast(`Verschoben nach ${res.folder}`, 'success', 4000);
+		} else {
+			showToast('Als erledigt markiert — bleibt in Inbox (kein Ordner-Vorschlag).', 'info', 4500);
+		}
+		// Done-Section weg, Briefing reloaded sobald Tab gewechselt wird.
+		toggle('current-done-section', false);
+		state.briefingLoaded = false;
+	} catch (err) {
+		if (btn) { btn.disabled = false; btn.textContent = 'Erledigt'; }
+		handleError(err);
+	}
 }
 
 function openCorrectForm() {
@@ -209,6 +236,20 @@ function renderCurrentMail(row) {
 			'Dieser Absender erwartet eine Antwort oder Entscheidung von dir.';
 	} else {
 		toggle('current-action-section', false);
+	}
+
+	// Phase 5b: Done-Button + Pfad-Vorschau zeigen wenn die KI einen
+	// Ordner vorgeschlagen hat (preview_path != null). Ohne Vorschlag
+	// bleibt die Section ausgeblendet — Mail bleibt in Inbox.
+	const previewEl = document.getElementById('current-done-preview');
+	const doneBtn = document.getElementById('btn-current-done');
+	if (score.preview_path && doneBtn && previewEl) {
+		previewEl.textContent = `→ verschiebt nach ${score.preview_path}`;
+		doneBtn.disabled = false;
+		doneBtn.textContent = 'Erledigt';
+		toggle('current-done-section', true);
+	} else {
+		toggle('current-done-section', false);
 	}
 
 	// Office InfoBar above the mail when this is a high-priority direct/

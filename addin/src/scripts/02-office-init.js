@@ -14,7 +14,7 @@ Office.onReady((info) => {
 
 	initTabs();
 	initBriefing();
-	initToday();
+	// Phase 5b (Marc 2026-05-19): „Heute"-Tab entfernt, kein initToday() noetig.
 	initCurrentMail();
 	initSettings();
 	initSettingsOverlay();

@@ -13,9 +13,6 @@ function initTabs() {
 			if (name === 'briefing') {
 				loadBriefing();
 			}
-			if (name === 'today') {
-				loadToday();
-			}
 			if (name === 'current') {
 				onItemChanged();
 			}

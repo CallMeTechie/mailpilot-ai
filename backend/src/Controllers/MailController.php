@@ -136,7 +136,8 @@ final class MailController extends BaseController
 		}
 
 		$stmt = $pdo->prepare('SELECT m.id, m.mailbox_id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
-				s.label, s.sub_label, s.action_required, s.action_owner, s.priority, s.summary, s.scored_at
+				s.label, s.sub_label, s.action_required, s.action_owner, s.priority, s.summary, s.scored_at,
+				s.inbox_score, s.folder_segments, s.spoof_suspect
 			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.id = :id LIMIT 1');
 		$stmt->execute([':id' => $mail['id']]);
@@ -173,6 +174,31 @@ final class MailController extends BaseController
 			}
 		}
 
+		// Phase 5b: Pfad-Vorschau fuer den Done-Button im DieseMail-Tab.
+		// Identische Mechanik wie BriefingController::buildPinnedList — Sender
+		// via PSL aufloesen, FolderPathBuilder baut den finalen Pfad.
+		$segments = null;
+		if (!empty($r['folder_segments'])) {
+			$decoded = json_decode((string)$r['folder_segments'], true);
+			if (is_array($decoded)) {
+				$segments = array_values(array_map('strval', $decoded));
+			}
+		}
+		$previewPath = null;
+		if ($segments !== null && !empty($r['from_email'])) {
+			$host = strrpos((string)$r['from_email'], '@') !== false
+				? substr((string)$r['from_email'], strrpos((string)$r['from_email'], '@') + 1)
+				: '';
+			$regDomain = $host !== ''
+				? $this->kernel->get(SenderResolver::class)->registrableDomain($host)
+				: null;
+			$bucket = $regDomain !== null
+				? $this->kernel->get(\MailPilot\Repositories\SenderRepository::class)
+					->findByRegistrableDomain($ctx['tenant_id'], $regDomain)
+				: null;
+			$previewPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+		}
+
 		Response::json(['mail' => [
 			'id'             => $r['id']            ?? null,
 			'ms_message_id'  => $r['ms_message_id'] ?? null,
@@ -186,6 +212,10 @@ final class MailController extends BaseController
 				'priority'        => (int)$r['priority'],
 				'summary'         => $r['summary'],
 				'scored_at'       => $r['scored_at'],
+				// Phase 5b: KI-Felder fuer Done-Button + Spoof-Indicator
+				'inbox_score'     => $r['inbox_score'] !== null ? (int)$r['inbox_score'] : null,
+				'spoof_suspect'   => (bool)(int)($r['spoof_suspect'] ?? 0),
+				'preview_path'    => $previewPath,
 			],
 		]]);
 	}
