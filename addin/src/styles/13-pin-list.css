@@ -190,3 +190,24 @@
 	padding: 4px 8px;
 	white-space: nowrap;
 }
+
+/* ============================================================
+ * Phase 7 — Info-Banner (Auto-Sort-Migrations-Hinweis)
+ * ============================================================ */
+
+.mp-banner-info {
+	margin: 8px 0 12px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: #eff6ff;       /* blue-50 */
+	color: #1e40af;            /* blue-800 */
+	border: 1px solid #bfdbfe; /* blue-200 */
+	font-size: 13px;
+	line-height: 1.5;
+}
+.mp-banner-info code {
+	background: rgba(30, 64, 175, 0.08);
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 12px;
+}

@@ -155,6 +155,12 @@ class Kernel
 				$this->get(Logger::class),
 				$this->get(SettingsRepository::class),
 				$this->get(PendingActionRepository::class),
+				// Phase 7: Sender-zentrische Move-Pfade. Wenn folder_segments
+				// vorhanden, ueberspringt AutoSortService das Legacy-Rule-Lookup
+				// und verschiebt direkt in /Sender/Topic.
+				$this->get(SenderResolver::class),
+				$this->get(SenderRepository::class),
+				$this->get(FolderPathBuilder::class),
 			),
 			RedactionService::class   => new RedactionService(),
 			// Sort-Refactor Phase 2 — Domain-Layer. PSL liegt unter backend/var/psl/

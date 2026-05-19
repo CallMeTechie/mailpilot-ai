@@ -159,6 +159,13 @@ final class MailController extends BaseController
 			if ($mb !== null) {
 				try {
 					$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+					// Phase 7: folder_segments + inbox_score mitgeben, damit
+					// AutoSortService den Sender-Pfad statt Legacy-Rule nimmt.
+					$claudeSegments = null;
+					if (!empty($r['folder_segments'])) {
+						$decoded = json_decode((string)$r['folder_segments'], true);
+						if (is_array($decoded)) $claudeSegments = array_values(array_map('strval', $decoded));
+					}
 					$this->kernel->get(\MailPilot\Services\AutoSortService::class)
 						->applyToScoredMail($token, $ctx['tenant_id'], $ctx['user_id'], $mail, [
 							'label'           => $r['label'],
@@ -169,6 +176,8 @@ final class MailController extends BaseController
 							// nicht durchgereicht → user_action_required-
 							// Schutz griff bei Click-time-AutoSort nie.
 							'action_owner'    => $r['action_owner'] ?? '',
+							'folder_segments' => $claudeSegments,
+							'inbox_score'     => $r['inbox_score'] !== null ? (int)$r['inbox_score'] : null,
 						]);
 				} catch (\Throwable) { /* best-effort, never break the response */ }
 			}

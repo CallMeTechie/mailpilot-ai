@@ -418,6 +418,15 @@
 			<section class="mp-subpanel" data-subpanel="autosort">
 				<div class="mp-section">
 					<h2>Auto-Sort</h2>
+					<div class="mp-banner-info" role="note">
+						<strong>Seit Phase 7 (2026-05-19):</strong> Wenn die KI für eine Mail einen
+						<code>folder_segments</code>-Vorschlag liefert, wird sie in den passenden
+						<strong>Absender-Ordner</strong> verschoben (z.B. <code>/Amazon/OTP/</code>) —
+						nicht mehr in <code>/MailPilot/&lt;Label&gt;/</code>. Die Regeln unten greifen
+						nur noch als Fallback für Mails, bei denen die KI keinen Pfad findet.
+						Die alten <code>/MailPilot/...</code>-Ordner kannst du in Outlook hand-leeren
+						oder löschen.
+					</div>
 					<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
 					<table class="mp-autosort-table" id="autosort-table">
 						<thead>

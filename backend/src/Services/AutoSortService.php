@@ -6,7 +6,10 @@ namespace MailPilot\Services;
 use MailPilot\Graph\GraphClient;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\SenderRepository;
 use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Services\Sender\FolderPathBuilder;
+use MailPilot\Services\Sender\SenderResolver;
 use PDO;
 
 /**
@@ -35,6 +38,13 @@ final class AutoSortService
 		// rufen ohne; wenn nicht injiziert, falls AutoSortService durch
 		// auf den klassischen auto-Pfad zurück (Default-Modus pre-6c).
 		private readonly ?PendingActionRepository $pending = null,
+		// Phase 7 (Marc 2026-05-19): Sender-zentrischer Move-Pfad. Wenn alle
+		// drei gesetzt sind UND $score['folder_segments'] vorhanden → der
+		// Move geht in /Sender/Topic statt /MailPilot/<Label>. Optional damit
+		// Bestands-Tests + Backfill-Worker ohne diese Deps weiterlaufen.
+		private readonly ?SenderResolver $senderResolver = null,
+		private readonly ?SenderRepository $senders = null,
+		private readonly ?FolderPathBuilder $pathBuilder = null,
 	) {
 	}
 
@@ -107,6 +117,39 @@ final class AutoSortService
 		}
 		if (!$forceMove && $actionRequired && $actionOwner === 'user' && $priority >= 4) {
 			return ['moved' => false, 'reason' => 'user_action_required'];
+		}
+
+		// Phase 7 (Marc 2026-05-19): Sender-zentrischer Move-Pfad.
+		// Wenn die KI in Phase 3b folder_segments + ein erkennbarer Sender
+		// existiert, baue den Pfad ueber FolderPathBuilder (z.B. /Amazon/OTP)
+		// statt auf die Legacy auto_sort_rules zurueckzugreifen.
+		// Bestands-Rules bleiben Fallback fuer Mails ohne folder_segments
+		// (z.B. Score-Cache aus Pre-3b-Zeit, oder KI war unschluessig).
+		$senderPath = $this->resolveSenderPath($tenantId, $mail, $score);
+		if ($senderPath !== null) {
+			$mode = $this->moveMode();
+			if ($mode === 'off') {
+				return ['moved' => false, 'reason' => 'mode_off'];
+			}
+			$msMessageId = (string)($mail['ms_message_id'] ?? '');
+			if ($msMessageId === '') {
+				return ['moved' => false, 'reason' => 'missing_message_id'];
+			}
+			if ($mode === 'suggest' && $this->pending !== null) {
+				$pid = $this->pending->create($tenantId, $userId, 'move', [
+					'mail_id'       => (string)$mail['id'],
+					'ms_message_id' => $msMessageId,
+					'subject'       => (string)($mail['subject'] ?? ''),
+					'from'          => (string)($mail['from_email'] ?? ''),
+					'label'         => $label,
+					'sub_label'     => $subLabel,
+					'target_folder' => $senderPath,
+					'source'        => 'sender_path',  // Audit: kein Rule-Lookup gemacht
+				], 'suggest');
+				return ['moved' => false, 'reason' => 'pending', 'pending_id' => $pid, 'kind' => 'move'];
+			}
+			// auto-Mode → direkter Move
+			return $this->applyManualMove($accessToken, $tenantId, $userId, $mail, $senderPath);
 		}
 
 		$rule = $this->rules->findRule($tenantId, $userId, $label, $subLabel);
@@ -301,6 +344,37 @@ final class AutoSortService
 
 			return ['moved' => false, 'reason' => 'graph_error'];
 		}
+	}
+
+	/**
+	 * Phase 7 — leitet den Sender-zentrischen Folder-Pfad aus mail + score ab.
+	 * Returnt null wenn:
+	 *   - die drei Sender-Services nicht injiziert sind (Bestand-Tests),
+	 *   - $score['folder_segments'] leer/fehlt (KI hat keinen Vorschlag),
+	 *   - from_email fehlt oder PSL keine registrable Domain liefert,
+	 *   - kein Sender-Bucket existiert,
+	 *   - oder FolderPathBuilder null returnt (z.B. nur sender-segment ohne Topic).
+	 */
+	private function resolveSenderPath(string $tenantId, array $mail, array $score): ?string
+	{
+		if ($this->senderResolver === null || $this->senders === null || $this->pathBuilder === null) {
+			return null;
+		}
+		$rawSegments = $score['folder_segments'] ?? null;
+		if (!is_array($rawSegments) || $rawSegments === []) {
+			return null;
+		}
+		$from = (string)($mail['from_email'] ?? '');
+		if ($from === '') return null;
+		$at = strrpos($from, '@');
+		if ($at === false) return null;
+		$host = strtolower(substr($from, $at + 1));
+		$regDomain = $this->senderResolver->registrableDomain($host);
+		if ($regDomain === null) return null;
+		$bucket = $this->senders->findByRegistrableDomain($tenantId, $regDomain);
+		if ($bucket === null) return null;
+		$segments = array_values(array_map('strval', $rawSegments));
+		return $this->pathBuilder->build($bucket, $segments);
 	}
 
 	/**

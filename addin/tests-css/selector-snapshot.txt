@@ -23,6 +23,8 @@
 .mp-badge[data-label="newsletter"]
 .mp-badge[data-label="noise"]
 .mp-banner
+.mp-banner-info
+.mp-banner-info code
 .mp-banner[data-hidden="true"]
 .mp-banner[data-level="block"]
 .mp-banner[data-level="info"]
