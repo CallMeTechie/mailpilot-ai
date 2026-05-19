@@ -271,10 +271,12 @@
 						</label>
 					</div>
 					<!-- Phase 9e (Marc 2026-05-19): Topic-Korrektur. Freitext mit
-					     datalist-Suggestions aus bisherigen Topics dieses Senders. -->
-					<label for="correct-topic" class="mp-correct-extra-label">Topic / Unterordner (optional)</label>
+					     datalist-Suggestions aus bisherigen Topics dieses Senders.
+					     „/" oder „\" als Separator → verschachtelte Unterordner
+					     (z. B. „Familie/Jenny" → /<Absender>/Familie/Jenny/). -->
+					<label for="correct-topic" class="mp-correct-extra-label">Topic / Unterordner (optional, „/" für Untergliederung)</label>
 					<input type="text" id="correct-topic" list="correct-topic-suggestions"
-						placeholder="z. B. Bewertung" maxlength="64" autocomplete="off">
+						placeholder="z. B. Bewertung oder Familie/Jenny" maxlength="130" autocomplete="off">
 					<datalist id="correct-topic-suggestions"></datalist>
 
 					<label for="correct-reasoning" class="mp-reasoning-hint">Begründung — <strong>Pflicht für KI-Lernen</strong> (z. B. „CI-Failure ist nur Info, keine Aktion")</label>

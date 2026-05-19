@@ -390,12 +390,23 @@ final class MailController extends BaseController
 		// „Klassifikation korrigieren"-Form ein Topic eingibt, persistieren
 		// wir das als folder_segments-Override + verschieben die Mail JETZT
 		// in den neuen Pfad + leiten ggf. eine generelle Topic-Regel ab.
+		// Slash und Backslash sind als Pfad-Separator erlaubt (z.B. „Familie/Jenny"
+		// → Unterordner-Hierarchie). Splitten + jedes Segment einzeln validieren.
 		$topicText = isset($body['topic']) ? trim((string)$body['topic']) : '';
-		if (mb_strlen($topicText) > 64) {
-			throw HttpException::badRequest('VALIDATION', 'Topic max 64 Zeichen');
-		}
-		if (str_contains($topicText, '/') || str_contains($topicText, '\\')) {
-			throw HttpException::badRequest('VALIDATION', 'Topic darf kein "/" oder "\\" enthalten');
+		$topicSegments = [];
+		if ($topicText !== '') {
+			$parts = preg_split('#[/\\\\]+#', $topicText) ?: [];
+			foreach ($parts as $part) {
+				$seg = trim((string)$part);
+				if ($seg === '') continue;
+				if (mb_strlen($seg) > 64) {
+					throw HttpException::badRequest('VALIDATION', 'Topic-Segment max 64 Zeichen');
+				}
+				$topicSegments[] = $seg;
+			}
+			if (count($topicSegments) > 2) {
+				throw HttpException::badRequest('VALIDATION', 'Topic max 2 Ebenen unterhalb des Absenders (z.B. „Familie/Jenny")');
+			}
 		}
 
 		$this->kernel->get(CorrectionRepository::class)->record(
@@ -476,13 +487,13 @@ final class MailController extends BaseController
 		$topicApplied  = null;
 		$movedTo       = null;
 		$topicRuleInfo = null;
-		if ($topicText !== '') {
+		if ($topicSegments !== []) {
 			$bucket = $this->kernel->get(SenderResolver::class)
 				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
 			$senderRoot = $bucket['root_folder_name'] ?? null;
 			$segments   = $senderRoot !== null && $senderRoot !== ''
-				? [(string)$senderRoot, $topicText]
-				: [$topicText];
+				? array_merge([(string)$senderRoot], $topicSegments)
+				: $topicSegments;
 
 			// (a) Persistieren — sticky setzen, sonst ueberschreibt naechstes Scoring.
 			$pdo->prepare('UPDATE mail_scores
