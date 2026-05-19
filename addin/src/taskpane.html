@@ -495,42 +495,22 @@
 			<section class="mp-subpanel" data-subpanel="modes">
 				<div class="mp-section">
 					<h2>Wie autonom darf die KI handeln?</h2>
-					<p class="mp-muted">Drei separate Toggles. Default überall „Vorschlag" — die KI schlägt vor, du bestätigst. Schalte einzeln auf „Auto", wenn du dem Verhalten genug vertraust.</p>
+					<p class="mp-muted">Ein einziger Schalter für alle Auto-Sort-Entscheidungen: Verschieben, Topic-Discovery und Antwort-Entwürfe folgen demselben Modus.</p>
 
 					<div class="mp-modes">
 						<label class="mp-mode">
-							<span class="mp-mode-title">Mails verschieben</span>
-							<select id="mode-move">
-								<option value="off">Aus — nichts verschieben</option>
-								<option value="suggest" selected>Vorschlag — Pending-Tab</option>
-								<option value="auto">Auto — sofort verschieben</option>
+							<span class="mp-mode-title">Auto-Sort-Modus</span>
+							<select id="mode-master">
+								<option value="off">Aus — KI klassifiziert nur, macht nichts</option>
+								<option value="suggest" selected>Fragen — landet im Pending-Tab</option>
+								<option value="auto">Sofort — KI handelt direkt</option>
 							</select>
-							<small class="mp-muted" id="mode-move-hint"></small>
-						</label>
-
-						<label class="mp-mode">
-							<span class="mp-mode-title">Neue Topics anlegen</span>
-							<select id="mode-topic">
-								<option value="off">Aus — keine KI-Discovery</option>
-								<option value="suggest" selected>Vorschlag — User bestätigt</option>
-								<option value="auto">Auto — sofort anlegen</option>
-							</select>
-							<small class="mp-muted" id="mode-topic-hint"></small>
-						</label>
-
-						<label class="mp-mode">
-							<span class="mp-mode-title">Antwort-Entwürfe</span>
-							<select id="mode-reply">
-								<option value="off">Aus — nur auf Klick</option>
-								<option value="suggest" selected>Vorschlag — im Pending-Tab</option>
-								<option value="auto">Auto — als Outlook-Draft (kommt mit 6f)</option>
-							</select>
-							<small class="mp-muted">Reply ist unabhängig von Move/Topic.</small>
+							<small class="mp-muted" id="mode-master-hint"></small>
 						</label>
 					</div>
 
 					<div class="mp-actions">
-						<button class="mp-btn mp-btn-primary" id="btn-save-modes">Modi speichern</button>
+						<button class="mp-btn mp-btn-primary" id="btn-save-modes">Modus speichern</button>
 					</div>
 					<p class="mp-muted" id="modes-status"></p>
 				</div>

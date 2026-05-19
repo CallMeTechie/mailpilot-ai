@@ -409,11 +409,9 @@ function initSettingsOverlay() {
 		});
 	});
 
-	// Buttons im neuen Modi-Sub-Tab
+	// Buttons im Modi-Sub-Tab — Phase 6c reduziert auf einen Master-Select.
 	document.getElementById('btn-save-modes')?.addEventListener('click', saveModes);
-	['mode-move','mode-topic','mode-reply'].forEach((id) => {
-		document.getElementById(id)?.addEventListener('change', refreshModeHints);
-	});
+	document.getElementById('mode-master')?.addEventListener('change', refreshModeHints);
 
 	// Buttons im Pending-Sub-Tab
 	document.getElementById('btn-pending-reload')?.addEventListener('click', () => loadPending());
@@ -424,13 +422,22 @@ function initSettingsOverlay() {
 	});
 }
 
-// ----- Sprint 6c: Modi -----
+// ----- Modi (Sprint 6c-Backend, UI-Konsolidiert in Phase 6c v2 2026-05-19) -----
 async function loadModes() {
 	try {
 		const m = await api.modes.get();
-		document.getElementById('mode-move').value  = m.autosort_move_mode         ?? 'suggest';
-		document.getElementById('mode-topic').value = m.autosort_create_topic_mode ?? 'suggest';
-		document.getElementById('mode-reply').value = m.autosort_reply_mode        ?? 'suggest';
+		// Phase 6c (Marc 2026-05-19): Aus den 3 Backend-Toggles wird die
+		// vorsichtigste (= niedrigste) Stufe als Master angezeigt. So sieht
+		// der User „off" wenn auch nur ein Sub-Toggle aus ist; „auto" nur
+		// wenn alle drei auf auto stehen. Save schreibt dann alle 3 gleich.
+		const lv = { off: 0, suggest: 1, auto: 2 };
+		const inv = ['off', 'suggest', 'auto'];
+		const move  = m.autosort_move_mode         ?? 'suggest';
+		const topic = m.autosort_create_topic_mode ?? 'suggest';
+		const reply = m.autosort_reply_mode        ?? 'suggest';
+		const minLevel = Math.min(lv[move] ?? 1, lv[topic] ?? 1, lv[reply] ?? 1);
+		const master = document.getElementById('mode-master');
+		if (master) master.value = inv[minLevel] ?? 'suggest';
 		// Sprint 6g — Rule-Inference Settings
 		const riEnabled = document.getElementById('rule-inference-enabled');
 		const riRange   = document.getElementById('rule-inference-backfill-range');
@@ -563,42 +570,33 @@ async function saveRuleInference() {
 }
 
 function refreshModeHints() {
-	const lv = { off: 0, suggest: 1, auto: 2 };
-	const move  = document.getElementById('mode-move').value;
-	const topic = document.getElementById('mode-topic').value;
-	const moveHint  = document.getElementById('mode-move-hint');
-	const topicHint = document.getElementById('mode-topic-hint');
-	if (moveHint) {
-		moveHint.textContent = move === 'off'
-			? 'Mails bleiben im Inbox. KI klassifiziert weiter, verschiebt aber nicht.'
-			: (move === 'suggest' ? 'Jeder Move landet im Pending-Tab.' : 'Mails werden sofort in den Ziel-Ordner verschoben.');
-	}
-	if (topicHint) {
-		if (lv[topic] > lv[move]) {
-			topicHint.textContent = `⚠ ${topic} ist aggressiver als „${move}" für Move — Speichern wird mit 422 abgelehnt. Setze erst Move höher.`;
-			topicHint.style.color = '#b91c1c';
-		} else {
-			topicHint.style.color = '';
-			topicHint.textContent = topic === 'off'
-				? 'Keine KI-Discovery. Sub-Labels nur manuell anlegen.'
-				: (topic === 'suggest' ? 'Discovery erscheint als „KI-Vorschlag" im Auto-Sort-Tab UND im Pending-Tab.' : 'Discovery legt Folder + Rule sofort an, Mails werden ab nächstem Sync sortiert.');
-		}
-	}
+	// Phase 6c: ein Master-Select statt 3. Hint beschreibt jetzt das
+	// Gesamtverhalten (Verschieben + Topic-Discovery + Reply-Drafts).
+	const master = document.getElementById('mode-master');
+	const hint   = document.getElementById('mode-master-hint');
+	if (!master || !hint) return;
+	const v = master.value;
+	hint.textContent = v === 'off'
+		? 'KI klassifiziert weiter, macht aber nichts automatisch. Keine Moves, keine Topics, keine Drafts.'
+		: (v === 'suggest'
+			? 'Alle KI-Vorschläge (Moves, neue Topics, Antworten) landen im Pending-Tab zur Bestätigung.'
+			: 'Vertrauen voll — KI verschiebt, legt Topics an und entwirft Antworten ohne Rückfrage.');
 }
 
 async function saveModes() {
 	const status = document.getElementById('modes-status');
 	status.textContent = 'Speichere…';
 	try {
+		// Phase 6c: Master-Wert wird auf alle drei Backend-Settings gespiegelt.
+		// Backend-Hierarchie-Check (level[topic] <= level[move]) ist immer erfuellt,
+		// weil alle drei gleich sind.
+		const v = document.getElementById('mode-master').value;
 		const payload = {
-			autosort_move_mode:         document.getElementById('mode-move').value,
-			autosort_create_topic_mode: document.getElementById('mode-topic').value,
-			autosort_reply_mode:        document.getElementById('mode-reply').value,
+			autosort_move_mode:         v,
+			autosort_create_topic_mode: v,
+			autosort_reply_mode:        v,
 		};
 		const res = await api.modes.save(payload);
-		// DA-Impl-Finding 3: Bestands-Pending unter altem Modus sichtbar
-		// machen. Wenn z.B. von suggest auf auto gewechselt wird und 47
-		// pending-suggest-Moves rumliegen, würden sie sonst „verloren" gehen.
 		const ep = res?.existing_pending ?? {};
 		if ((ep.total ?? 0) > 0) {
 			status.textContent = `Gespeichert. Du hast noch ${ep.total} ausstehende Vorschläge unter dem alten Modus — bitte im Pending-Tab sichten.`;

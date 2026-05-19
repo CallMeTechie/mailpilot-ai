@@ -147,11 +147,9 @@ function initSettingsOverlay() {
 		});
 	});
 
-	// Buttons im neuen Modi-Sub-Tab
+	// Buttons im Modi-Sub-Tab — Phase 6c reduziert auf einen Master-Select.
 	document.getElementById('btn-save-modes')?.addEventListener('click', saveModes);
-	['mode-move','mode-topic','mode-reply'].forEach((id) => {
-		document.getElementById(id)?.addEventListener('change', refreshModeHints);
-	});
+	document.getElementById('mode-master')?.addEventListener('change', refreshModeHints);
 
 	// Buttons im Pending-Sub-Tab
 	document.getElementById('btn-pending-reload')?.addEventListener('click', () => loadPending());
@@ -162,13 +160,22 @@ function initSettingsOverlay() {
 	});
 }
 
-// ----- Sprint 6c: Modi -----
+// ----- Modi (Sprint 6c-Backend, UI-Konsolidiert in Phase 6c v2 2026-05-19) -----
 async function loadModes() {
 	try {
 		const m = await api.modes.get();
-		document.getElementById('mode-move').value  = m.autosort_move_mode         ?? 'suggest';
-		document.getElementById('mode-topic').value = m.autosort_create_topic_mode ?? 'suggest';
-		document.getElementById('mode-reply').value = m.autosort_reply_mode        ?? 'suggest';
+		// Phase 6c (Marc 2026-05-19): Aus den 3 Backend-Toggles wird die
+		// vorsichtigste (= niedrigste) Stufe als Master angezeigt. So sieht
+		// der User „off" wenn auch nur ein Sub-Toggle aus ist; „auto" nur
+		// wenn alle drei auf auto stehen. Save schreibt dann alle 3 gleich.
+		const lv = { off: 0, suggest: 1, auto: 2 };
+		const inv = ['off', 'suggest', 'auto'];
+		const move  = m.autosort_move_mode         ?? 'suggest';
+		const topic = m.autosort_create_topic_mode ?? 'suggest';
+		const reply = m.autosort_reply_mode        ?? 'suggest';
+		const minLevel = Math.min(lv[move] ?? 1, lv[topic] ?? 1, lv[reply] ?? 1);
+		const master = document.getElementById('mode-master');
+		if (master) master.value = inv[minLevel] ?? 'suggest';
 		// Sprint 6g — Rule-Inference Settings
 		const riEnabled = document.getElementById('rule-inference-enabled');
 		const riRange   = document.getElementById('rule-inference-backfill-range');
