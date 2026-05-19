@@ -195,6 +195,8 @@
 .mp-pin-spoof-banner
 .mp-pin-spoof-banner[data-hidden="true"]
 .mp-pin-subject
+.mp-preview-path
+.mp-preview-path[data-hidden="true"]
 .mp-prio-pill
 .mp-prio-pill[data-priority="3"]
 .mp-prio-pill[data-priority="4"]

@@ -38,21 +38,33 @@ async function markCurrentMailDone() {
 }
 
 /**
- * Phase 9e — Done-Icon Sichtbarkeit/Disable-State setzen. Wird von
- * loadCurrentMailScore aufgerufen sobald ensureScored einen preview_path
- * liefert (oder null). Icon bleibt immer im DOM (konsistente UI-Position),
- * aber disabled + Tooltip wenn kein Vorschlag.
+ * Phase 9e — Done-Icon Sichtbarkeit/Disable-State setzen + sichtbare
+ * Pfad-Vorschau unter der From-Zeile. Wird von loadCurrentMailScore
+ * aufgerufen sobald ensureScored einen preview_path liefert (oder null).
+ * Icon bleibt immer im DOM (konsistente UI-Position), aber disabled +
+ * Tooltip wenn kein Vorschlag.
  */
 function updateDoneIcon(previewPath) {
-	const btn = document.getElementById('btn-current-done');
-	if (!btn) return;
-	btn.classList.remove('is-busy');
-	if (previewPath) {
-		btn.disabled = false;
-		btn.title    = `Erledigt → ${previewPath}`;
-	} else {
-		btn.disabled = true;
-		btn.title    = 'Kein Sortier-Vorschlag verfügbar';
+	const btn  = document.getElementById('btn-current-done');
+	const prev = document.getElementById('current-preview-path');
+	if (btn) {
+		btn.classList.remove('is-busy');
+		if (previewPath) {
+			btn.disabled = false;
+			btn.title    = `Erledigt → ${previewPath}`;
+		} else {
+			btn.disabled = true;
+			btn.title    = 'Kein Sortier-Vorschlag verfügbar';
+		}
+	}
+	if (prev) {
+		if (previewPath) {
+			prev.textContent     = `📁 ${previewPath}`;
+			prev.dataset.hidden  = 'false';
+		} else {
+			prev.dataset.hidden  = 'true';
+			prev.textContent     = '';
+		}
 	}
 }
 
@@ -83,7 +95,10 @@ function openCorrectForm() {
 	document.getElementById('correct-priority').value  = String(score.priority ?? 3);
 	document.getElementById('correct-action-required').checked = !!score.action_required;
 	document.getElementById('correct-reasoning').value = '';
-	document.getElementById('correct-topic').value     = '';
+	// Phase 9e: aktuelles Topic (letztes folder_segment) vorausfuellen,
+	// damit der User es ueberschreibt statt jedes Mal neu zu tippen.
+	const segs = Array.isArray(score.folder_segments) ? score.folder_segments : [];
+	document.getElementById('correct-topic').value = segs.length > 0 ? String(segs[segs.length - 1]) : '';
 	loadTopicSuggestions(state.currentMailData.from_email || '');
 	toggle('correct-section', true);
 	document.getElementById('correct-reasoning').focus();

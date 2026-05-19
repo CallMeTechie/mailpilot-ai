@@ -181,6 +181,18 @@
 	margin-left: auto;
 }
 
+/* Phase 9e — KI-Pfad-Vorschau unter From-Zeile (current-header). */
+.mp-preview-path {
+	margin: 4px 0 0;
+	font-size: 11px;
+	color: #64748b;
+	font-family: var(--mp-font-mono, monospace);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.mp-preview-path[data-hidden="true"] { display: none; }
+
 /* ============================================================
  * Phase 6d (Marc 2026-05-19) — Sender-Subtab als Compact-Card.
  *

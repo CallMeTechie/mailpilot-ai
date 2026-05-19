@@ -251,6 +251,9 @@ final class MailController extends BaseController
 				'inbox_score'     => $r['inbox_score'] !== null ? (int)$r['inbox_score'] : null,
 				'spoof_suspect'   => (bool)(int)($r['spoof_suspect'] ?? 0),
 				'preview_path'    => $previewPath,
+				// Phase 9e (Marc 2026-05-19): segments separat, damit der
+				// Add-in das aktuelle Topic im Korrektur-Form vorausfuellt.
+				'folder_segments' => $segments,
 			],
 		]]);
 	}
