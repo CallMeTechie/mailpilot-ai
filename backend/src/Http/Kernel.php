@@ -265,6 +265,8 @@ class Kernel
 				$this->get(PendingActionRepository::class),
 				$this->get(PromptRepository::class),
 				$this->get(Logger::class),
+				// Phase 9b: inferScoreRule() braucht das Override-Repository.
+				$this->get(ScoreOverrideRepository::class),
 			),
 			SyncService::class        => new SyncService(
 				$this->get(GraphClient::class),

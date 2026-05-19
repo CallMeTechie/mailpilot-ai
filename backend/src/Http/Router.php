@@ -11,6 +11,7 @@ use MailPilot\Controllers\PendingController;
 use MailPilot\Controllers\Settings\AutoSortController;
 use MailPilot\Controllers\Settings\ModesController;
 use MailPilot\Controllers\Settings\RedactionController;
+use MailPilot\Controllers\Settings\ScoreOverrideController;
 use MailPilot\Controllers\Settings\SenderController;
 use MailPilot\Controllers\Settings\SubLabelController;
 use MailPilot\Controllers\Settings\UserSettingsController;
@@ -112,6 +113,7 @@ final class Router
 			'SubLabelController'      => SubLabelController::class,
 			'ModesController'         => ModesController::class,
 			'SenderController'        => SenderController::class,
+			'ScoreOverrideController' => ScoreOverrideController::class,
 			default                   => throw new \RuntimeException("Unknown controller: {$controllerName}"),
 		};
 

@@ -380,6 +380,7 @@ final class MailController extends BaseController
 		// ist schon committed; das Add-in zeigt nur einen weniger
 		// hilfreichen Toast.
 		$ruleResult = null;
+		$scoreRuleResult = null;
 		if ($reasoningText !== '') {
 			try {
 				$ruleResult = $this->kernel->get(RuleInferenceService::class)
@@ -394,6 +395,36 @@ final class MailController extends BaseController
 				// liefern die Korrektur-Response ohne rule_inference-Block.
 				$ruleResult = ['action' => 'error', 'reason' => $e->getMessage()];
 			}
+
+			// Phase 9b (Marc 2026-05-19): zusaetzlich Score-Override-Regel
+			// ableiten. Parallel zur Folder-Inference oben — share denselben
+			// rule_inference-Quota-Counter. Wenn Folder-Inferenz Quota frisst,
+			// kann Score-Inferenz im selben Call den 429 werfen — wir
+			// schlucken den Throw still, weil die Korrektur selbst bereits
+			// committed ist.
+			try {
+				$scoreRuleResult = $this->kernel->get(RuleInferenceService::class)
+					->inferScoreRule(
+						$ctx['tenant_id'],
+						$ctx['user_id'],
+						$mailId,
+						[
+							'label'           => $label,
+							'priority'        => $priority,
+							'action_required' => (bool)($body['action_required'] ?? false),
+						],
+						[
+							'label'           => $orig['label']           ?? null,
+							'priority'        => isset($orig['priority']) ? (int)$orig['priority'] : null,
+							'action_required' => isset($orig['action_required']) ? (bool)$orig['action_required'] : null,
+						],
+						$reasoningText,
+					);
+			} catch (QuotaExceededException $e) {
+				$scoreRuleResult = ['action' => 'skipped', 'reason' => 'quota_exceeded'];
+			} catch (\Throwable $e) {
+				$scoreRuleResult = ['action' => 'error', 'reason' => $e->getMessage()];
+			}
 		}
 
 		$response = ['ok' => true, 'score' => [
@@ -404,6 +435,9 @@ final class MailController extends BaseController
 		]];
 		if ($ruleResult !== null) {
 			$response['rule_inference'] = $ruleResult;
+		}
+		if ($scoreRuleResult !== null) {
+			$response['score_rule_inference'] = $scoreRuleResult;
 		}
 		Response::json($response);
 	}

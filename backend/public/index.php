@@ -63,6 +63,11 @@ $router->delete('/api/v1/settings/sub-labels/{id}',  'SubLabelController@deleteS
 // Phase 6a — Sender-Verwaltung (display_name, root_folder_name, trust_status)
 $router->get   ('/api/v1/settings/senders',          'SenderController@listSenders');
 $router->patch ('/api/v1/settings/senders/{id}',     'SenderController@updateSender');
+// Phase 9b — Klassifikations-Override-Regeln
+$router->get   ('/api/v1/settings/score-overrides',           'ScoreOverrideController@listRules');
+$router->post  ('/api/v1/settings/score-overrides',           'ScoreOverrideController@createRule');
+$router->post  ('/api/v1/settings/score-overrides/{id}/toggle', 'ScoreOverrideController@toggleRule');
+$router->delete('/api/v1/settings/score-overrides/{id}',      'ScoreOverrideController@deleteRule');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

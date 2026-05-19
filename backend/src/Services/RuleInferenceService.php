@@ -7,6 +7,7 @@ use MailPilot\Claude\ClaudeClient;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PromptRepository;
+use MailPilot\Repositories\ScoreOverrideRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageCounterRepository;
 use PDO;
@@ -56,6 +57,9 @@ final class RuleInferenceService
 		private readonly PendingActionRepository $pending,
 		private readonly PromptRepository        $prompts,
 		private readonly LoggerInterface         $logger,
+		// Phase 9b (Marc 2026-05-19): Score-Override-Inferenz. Optional,
+		// damit aeltere Tests die nur Folder-Inferenz testen weiter laufen.
+		private readonly ?ScoreOverrideRepository $scoreOverrides = null,
 	) {}
 
 	/**
@@ -257,9 +261,9 @@ final class RuleInferenceService
 	}
 
 	/** @return array<string,mixed>|null */
-	private function callClaude(array $vars): ?array
+	private function callClaude(array $vars, string $promptKey = 'P-RULE-EXTRACT'): ?array
 	{
-		$active = $this->prompts->getActive('P-RULE-EXTRACT');
+		$active = $this->prompts->getActive($promptKey);
 		$user   = $active['user_template'];
 		foreach ($vars as $k => $v) {
 			$user = str_replace('{{' . $k . '}}', (string)$v, $user);
@@ -404,5 +408,109 @@ final class RuleInferenceService
 		if ($range === 'all')     $reasons[] = "range=all";
 		if ($matchCount > $cap)   $reasons[] = "matches>{$cap}";
 		return implode(',', $reasons);
+	}
+
+	// ========================================================================
+	// Phase 9b — Score-Override-Inferenz (parallel zu infer() Folder-Inferenz)
+	// ========================================================================
+
+	/**
+	 * Aus einer Score-Korrektur eine generelle Klassifikations-Regel ableiten.
+	 *
+	 * Wird vom MailController::correctScore aufgerufen, wenn der User eine
+	 * reasoning-Begruendung mitgegeben hat. Schreibt die abgeleitete Regel
+	 * mit source='ki_inferred' + enabled=false an — der User muss sie im
+	 * Settings-Subtab explizit aktivieren, kein silent-apply.
+	 *
+	 * @return array<string,mixed>  shape: {action:'created'|'skipped'|'error', rule_id?:string, reason?:string, confidence?:int}
+	 */
+	public function inferScoreRule(
+		string $tenantId,
+		string $userId,
+		string $mailId,
+		array $correctedScore,
+		array $originalScore,
+		string $reasoning,
+	): array {
+		if ($this->scoreOverrides === null) {
+			return ['action' => 'skipped', 'reason' => 'no_repo_injected'];
+		}
+		if (!$this->settings->getBool('rule_inference_enabled', true)) {
+			return ['action' => 'skipped', 'reason' => 'rule_inference_disabled'];
+		}
+		$reasoning = trim($reasoning);
+		if ($reasoning === '') {
+			return ['action' => 'skipped', 'reason' => 'empty_reasoning'];
+		}
+
+		// Mail-Kontext laden — wir brauchen from_email + subject fuer den Prompt.
+		$ctx = $this->loadMailContext($tenantId, $mailId);
+		if ($ctx === null) {
+			return ['action' => 'skipped', 'reason' => 'mail_not_found'];
+		}
+		$fromDomain = $this->redactor->reduceFromToDomain((string)$ctx['from_email']);
+		$subject    = $this->redactor->redact((string)$ctx['subject']);
+		$reasoningR = $this->redactor->redactReasoning($reasoning, $this->getNameList());
+
+		// Quota wie bei infer() — gemeinsamer rule_inference-Counter.
+		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
+		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
+
+		$parsed = $this->callClaude([
+			'from_domain'        => $fromDomain,
+			'subject'            => $subject,
+			'original_label'    => (string)($originalScore['label'] ?? '?'),
+			'original_priority'  => (string)($originalScore['priority'] ?? '?'),
+			'original_action'    => !empty($originalScore['action_required']) ? 'true' : 'false',
+			'corrected_label'    => (string)($correctedScore['label'] ?? '?'),
+			'corrected_priority' => (string)($correctedScore['priority'] ?? '?'),
+			'corrected_action'   => !empty($correctedScore['action_required']) ? 'true' : 'false',
+			'reasoning'          => $reasoningR,
+		], 'P-SCORE-RULE-EXTRACT');
+
+		if ($parsed === null) {
+			return ['action' => 'error', 'reason' => 'claude_invalid_response'];
+		}
+		if (!($parsed['create_rule'] ?? false)) {
+			return [
+				'action'     => 'skipped',
+				'reason'     => (string)($parsed['reasoning_summary'] ?? 'no_pattern'),
+				'confidence' => (int)($parsed['confidence'] ?? 0),
+			];
+		}
+
+		// Repo-create validiert Match-Felder (min 1) + Regex-Syntax.
+		try {
+			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
+				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
+				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
+				'match_from_local'    => $parsed['match_from_local']    ?? null,
+				'match_label'         => $parsed['match_label']         ?? null,
+				'match_priority_min'  => $parsed['match_priority_min']  ?? null,
+				'set_priority'        => $parsed['set_priority']        ?? null,
+				'set_action_required' => $parsed['set_action_required'] ?? null,
+				'set_label'           => $parsed['set_label']           ?? null,
+				'enabled'             => false,           // User muss aktivieren
+				'source'              => 'ki_inferred',
+			]);
+		} catch (\InvalidArgumentException $e) {
+			$this->logger->info('rule_inference.score_rule_invalid', [
+				'reason' => $e->getMessage(),
+				'parsed' => $parsed,
+			]);
+			return ['action' => 'error', 'reason' => $e->getMessage()];
+		}
+
+		$this->logger->info('rule_inference.score_rule_created', [
+			'rule_id'    => $ruleId,
+			'confidence' => (int)($parsed['confidence'] ?? 0),
+			'mail_id'    => $mailId,
+		]);
+		return [
+			'action'            => 'created',
+			'rule_id'           => $ruleId,
+			'confidence'        => (int)($parsed['confidence'] ?? 0),
+			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
+		];
 	}
 }
