@@ -100,6 +100,11 @@
 .mp-icon-btn:disabled
 .mp-icon-btn:focus-visible
 .mp-icon-btn:hover
+.mp-inline-edit
+.mp-inline-edit.mp-sender-folder-text
+.mp-inline-edit.mp-sender-name-text
+.mp-inline-edit:focus
+.mp-inline-edit:hover
 .mp-list
 .mp-list button.remove
 .mp-list button.remove:hover
@@ -211,13 +216,23 @@
 .mp-section
 .mp-section > h2
 .mp-section > h3
-.mp-sender-folder
-.mp-sender-name
-.mp-sender-row
-.mp-sender-row.is-spoof
-.mp-sender-save
-.mp-sender-stem
-.mp-sender-trust
+.mp-sender-avatar
+.mp-sender-avatar img
+.mp-sender-avatar.is-fallback img
+.mp-sender-card
+.mp-sender-card.is-saving
+.mp-sender-card.is-spoof
+.mp-sender-card.is-trusted
+.mp-sender-domains
+.mp-sender-line-dom
+.mp-sender-line-fold
+.mp-sender-line-fold::before
+.mp-sender-line-name
+.mp-sender-trust-pill
+.mp-sender-trust-pill:hover
+.mp-sender-trust-pill[data-trust="suspected_spoof"]
+.mp-sender-trust-pill[data-trust="trusted"]
+.mp-sender-trust-pill[data-trust="unknown"]
 .mp-settings-content
 .mp-settings-head
 .mp-settings-overlay

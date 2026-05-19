@@ -795,6 +795,75 @@ async function loadSenders() {
 	}
 }
 
+// Phase 6d (Marc 2026-05-19) — Compact-Card statt 5-Spalten-Grid.
+// Favicon via DuckDuckGo (privacy-friendly, no-referrer), Initials-
+// Fallback bei Load-Error. Inline-Edit ohne sichtbare Textfelder:
+// Span sieht aus wie Text, Klick → Input, Blur/Enter speichert.
+
+const TRUST_CYCLE   = ['trusted', 'unknown', 'suspected_spoof'];
+const TRUST_LABEL   = { trusted: '✓ Vertraut', unknown: '∅ Unbekannt', suspected_spoof: '⚠ Verdacht' };
+
+function buildSenderAvatar(s) {
+	const wrap = document.createElement('div');
+	wrap.className = 'mp-sender-avatar';
+	const domains = Array.isArray(s.registrable_domains) ? s.registrable_domains : [];
+	const initials = (s.display_name || s.sender_key || '?').trim().slice(0, 2).toUpperCase();
+	wrap.textContent = initials;
+	if (domains.length > 0) {
+		const img = document.createElement('img');
+		img.alt = '';
+		img.loading = 'lazy';
+		img.referrerPolicy = 'no-referrer';
+		img.src = `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domains[0])}.ico`;
+		img.addEventListener('load', () => { wrap.textContent = ''; wrap.appendChild(img); });
+		img.addEventListener('error', () => { wrap.classList.add('is-fallback'); });
+	}
+	return wrap;
+}
+
+function makeInlineEdit(initial, klass, onCommit) {
+	const span = document.createElement('span');
+	span.className = `mp-inline-edit ${klass}`;
+	span.tabIndex = 0;
+	span.textContent = initial;
+	span.title = 'Klicken zum Bearbeiten';
+
+	const startEdit = () => {
+		if (span.querySelector('input')) return;
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.value = span.textContent;
+		input.maxLength = 120;
+		input.style.cssText = 'width:100%; border:none; background:transparent; font:inherit; color:inherit; padding:0;';
+		span.textContent = '';
+		span.appendChild(input);
+		input.focus();
+		input.select();
+
+		let committed = false;
+		const commit = async () => {
+			if (committed) return; committed = true;
+			const next = input.value.trim();
+			span.textContent = next || initial;
+			if (next !== '' && next !== initial) {
+				try { await onCommit(next); initial = next; }
+				catch (err) { span.textContent = initial; handleError(err); }
+			}
+		};
+		const cancel = () => { committed = true; span.textContent = initial; };
+		input.addEventListener('blur', commit);
+		input.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter')      { e.preventDefault(); input.blur(); }
+			else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+		});
+	};
+	span.addEventListener('click', startEdit);
+	span.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(); }
+	});
+	return span;
+}
+
 function renderSenders(items) {
 	const root = document.getElementById('senders-list');
 	if (!root) return;
@@ -808,80 +877,73 @@ function renderSenders(items) {
 		return;
 	}
 
-	const trustOptions = [
-		{ v: 'trusted',         t: 'Vertraut' },
-		{ v: 'unknown',         t: 'Unbekannt' },
-		{ v: 'suspected_spoof', t: 'Verdächtig' },
-	];
-
 	for (const s of items) {
 		const li = document.createElement('li');
-		li.className = 'mp-sender-row';
+		li.className = 'mp-sender-card';
 		li.dataset.senderId = s.id;
 		if (s.trust_status === 'suspected_spoof') li.classList.add('is-spoof');
+		if (s.trust_status === 'trusted')         li.classList.add('is-trusted');
 
-		// Stem-Chip (read-only)
-		const stem = document.createElement('span');
-		stem.className = 'mp-sender-stem';
-		stem.textContent = s.sender_key;
-		stem.title = (s.registrable_domains || []).join(', ');
+		li.appendChild(buildSenderAvatar(s));
 
-		// Display-Name input
-		const nameInput = document.createElement('input');
-		nameInput.type = 'text';
-		nameInput.className = 'mp-sender-name';
-		nameInput.value = s.display_name;
-		nameInput.maxLength = 120;
-		nameInput.placeholder = 'Anzeige-Name';
+		const nameLine = document.createElement('div');
+		nameLine.className = 'mp-sender-line-name';
+		nameLine.appendChild(makeInlineEdit(
+			s.display_name,
+			'mp-sender-name-text',
+			(next) => patchSender(s.id, li, { display_name: next }),
+		));
+		li.appendChild(nameLine);
 
-		// Root-folder input
-		const folderInput = document.createElement('input');
-		folderInput.type = 'text';
-		folderInput.className = 'mp-sender-folder';
-		folderInput.value = s.root_folder_name;
-		folderInput.maxLength = 120;
-		folderInput.placeholder = 'Wurzelordner';
+		const trustPill = document.createElement('button');
+		trustPill.type = 'button';
+		trustPill.className = 'mp-sender-trust-pill';
+		trustPill.dataset.trust = s.trust_status;
+		trustPill.textContent   = TRUST_LABEL[s.trust_status] || s.trust_status;
+		trustPill.title = 'Klicken zum Wechseln';
+		trustPill.addEventListener('click', async () => {
+			const idx  = TRUST_CYCLE.indexOf(trustPill.dataset.trust);
+			const next = TRUST_CYCLE[(idx + 1) % TRUST_CYCLE.length];
+			trustPill.dataset.trust = next;
+			trustPill.textContent   = TRUST_LABEL[next];
+			li.classList.toggle('is-spoof',   next === 'suspected_spoof');
+			li.classList.toggle('is-trusted', next === 'trusted');
+			await patchSender(s.id, li, { trust_status: next });
+		});
+		li.appendChild(trustPill);
 
-		// Trust-Status select
-		const trustSel = document.createElement('select');
-		trustSel.className = 'mp-sender-trust';
-		for (const o of trustOptions) {
-			const opt = document.createElement('option');
-			opt.value = o.v;
-			opt.textContent = o.t;
-			if (s.trust_status === o.v) opt.selected = true;
-			trustSel.appendChild(opt);
-		}
+		const domLine = document.createElement('div');
+		domLine.className = 'mp-sender-line-dom';
+		const domSpan = document.createElement('span');
+		domSpan.className = 'mp-sender-domains';
+		const domains = Array.isArray(s.registrable_domains) && s.registrable_domains.length > 0
+			? s.registrable_domains.join(', ')
+			: s.sender_key;
+		domSpan.textContent = domains;
+		domSpan.title       = domains;
+		domLine.appendChild(domSpan);
+		li.appendChild(domLine);
 
-		// Save-Button
-		const saveBtn = document.createElement('button');
-		saveBtn.className = 'mp-btn mp-btn-secondary mp-sender-save';
-		saveBtn.textContent = 'Speichern';
-		saveBtn.addEventListener('click', () => saveSender(s.id, li));
+		const foldLine = document.createElement('div');
+		foldLine.className = 'mp-sender-line-fold';
+		foldLine.appendChild(makeInlineEdit(
+			s.root_folder_name,
+			'mp-sender-folder-text',
+			(next) => patchSender(s.id, li, { root_folder_name: next }),
+		));
+		li.appendChild(foldLine);
 
-		li.append(stem, nameInput, folderInput, trustSel, saveBtn);
 		root.appendChild(li);
 	}
 }
 
-async function saveSender(senderId, rowEl) {
-	const name   = rowEl.querySelector('.mp-sender-name')?.value.trim()   || '';
-	const folder = rowEl.querySelector('.mp-sender-folder')?.value.trim() || '';
-	const trust  = rowEl.querySelector('.mp-sender-trust')?.value         || 'unknown';
-	const btn    = rowEl.querySelector('.mp-sender-save');
-
-	if (btn) { btn.disabled = true; btn.textContent = '…'; }
+async function patchSender(senderId, rowEl, payload) {
+	rowEl?.classList.add('is-saving');
 	try {
-		await api.settings.updateSender(senderId, {
-			display_name:     name,
-			root_folder_name: folder,
-			trust_status:     trust,
-		});
-		showToast('Absender gespeichert.', 'success', 3000);
-	} catch (err) {
-		handleError(err);
+		await api.settings.updateSender(senderId, payload);
+		showToast('Absender gespeichert.', 'success', 2000);
 	} finally {
-		if (btn) { btn.disabled = false; btn.textContent = 'Speichern'; }
+		rowEl?.classList.remove('is-saving');
 	}
 }
 

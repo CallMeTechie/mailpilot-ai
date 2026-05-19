@@ -19,6 +19,7 @@ async function loadToday
 async function markCurrentMailDone
 async function markPinnedDone
 async function openFilteredList
+async function patchSender
 async function persistAliases
 async function persistKeywords
 async function regenerateDraft
@@ -32,7 +33,6 @@ async function saveAutoSort
 async function saveCorrection
 async function saveModes
 async function saveRuleInference
-async function saveSender
 async function summarizeCurrent
 async function toggleScoreOverride
 const aliasState
@@ -43,6 +43,8 @@ const PENDING_KIND_META
 const pendingState
 const state
 const todayState
+const TRUST_CYCLE
+const TRUST_LABEL
 function approveButtonText
 function bounceToLogin
 function buildAutoSortRow
@@ -53,6 +55,7 @@ function buildPendingCard
 function buildPinnedCard
 function buildRuleSuggestionBody
 function buildScoreOverrideRow
+function buildSenderAvatar
 function buildTodayCard
 function clearBusy
 function closeFilteredList
@@ -72,6 +75,7 @@ function initSettingsOverlay
 function initTabs
 function initToday
 function labelText
+function makeInlineEdit
 function maybeShowOutlookNotification
 function mpConfirm
 function mpProgress
