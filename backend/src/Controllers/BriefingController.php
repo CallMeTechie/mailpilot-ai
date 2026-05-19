@@ -110,7 +110,9 @@ final class BriefingController extends BaseController
 	private function buildPinnedList(string $tenantId, string $userId, SettingsRepository $settings): array
 	{
 		$pdo = $this->kernel->get(PDO::class);
-		$threshold = max(0, min(100, $settings->getInt('inbox_pin_threshold', 70)));
+		// Phase 9f (Marc 2026-05-19): Pin-Liste nach priority sortiert, statt
+		// nach inbox_score. Schwelle aus dem neuen Setting inbox_pin_priority_min.
+		$minPrio = max(1, min(5, $settings->getInt('inbox_pin_priority_min', 4)));
 
 		$sql = "SELECT m.id, m.ms_message_id, m.subject, m.from_email, m.from_name, m.received_at,
 				s.inbox_score, s.spoof_suspect, s.folder_segments, s.label, s.priority
@@ -123,14 +125,14 @@ final class BriefingController extends BaseController
 			  AND m.user_cleared_at IS NULL
 			  AND s.cleared_at IS NULL
 			  AND s.auto_sorted_at IS NULL
-			  AND s.inbox_score IS NOT NULL
-			  AND s.inbox_score >= :thr
-			ORDER BY s.inbox_score DESC, m.received_at DESC
+			  AND s.priority IS NOT NULL
+			  AND s.priority >= :prio
+			ORDER BY s.priority DESC, m.received_at DESC
 			LIMIT 50";
 		$stmt = $pdo->prepare($sql);
 		$stmt->bindValue(':t', $tenantId);
 		$stmt->bindValue(':u', $userId);
-		$stmt->bindValue(':thr', $threshold, PDO::PARAM_INT);
+		$stmt->bindValue(':prio', $minPrio, PDO::PARAM_INT);
 		$stmt->execute();
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

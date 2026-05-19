@@ -86,18 +86,16 @@ final class AutoSortService
 		$userCleared    = !empty($mail['user_cleared_at']);
 		$forceMove      = !empty($score['force_move']);  // vom Done-Endpoint gesetzt
 
-		// Phase 4 (Marc 2026-05-18): Inbox-Pin via KI-Inbox-Score.
-		// Wenn der inbox_score ueber der Schwelle liegt UND der User die
-		// Mail NICHT als „Erledigt" markiert hat → kein Auto-Move. Erst
-		// nach User-Done darf die Mail verschoben werden.
-		// Die alten Label/Priority-Schutzschichten unten bleiben als
-		// Fallback fuer Mails ohne KI-Score (z.B. legacy data vor 3b).
-		if (!$forceMove && !$userCleared && $inboxScore !== null) {
-			$threshold = $this->settings !== null
-				? max(0, min(100, $this->settings->getInt('inbox_pin_threshold', 70)))
-				: 70;
-			if ($inboxScore >= $threshold) {
-				return ['moved' => false, 'reason' => 'inbox_pinned', 'inbox_score' => $inboxScore, 'threshold' => $threshold];
+		// Phase 9f (Marc 2026-05-19): Pin-Logik nutzt jetzt priority statt
+		// inbox_score — der User sieht/korrigiert priority im Add-in, also
+		// soll sie auch die Pin-Entscheidung steuern. Default-Schwelle 4
+		// (Prio 4+5 bleiben in der Inbox bis User-Done).
+		if (!$forceMove && !$userCleared) {
+			$minPrio = $this->settings !== null
+				? max(1, min(5, $this->settings->getInt('inbox_pin_priority_min', 4)))
+				: 4;
+			if ($priority >= $minPrio) {
+				return ['moved' => false, 'reason' => 'inbox_pinned_priority', 'priority' => $priority, 'min' => $minPrio];
 			}
 		}
 

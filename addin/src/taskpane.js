@@ -1569,10 +1569,12 @@ function buildPinnedCard(m) {
 	// Head: Score + Sender + Spoof-Badge
 	const head = document.createElement('div');
 	head.className = 'mp-pin-head';
+	// Phase 9f (Marc 2026-05-19): Badge zeigt jetzt Priority statt inbox_score —
+	// konsistent zur Pin-Logik und zu dem was der User korrigieren kann.
 	const score = document.createElement('span');
 	score.className = 'mp-pin-score';
-	score.textContent = `${m.inbox_score}`;
-	score.title = 'Inbox-Wichtigkeits-Score';
+	score.textContent = `P${m.priority ?? '?'}`;
+	score.title = 'Priorität (1=ignorierbar, 5=sofort)';
 	head.appendChild(score);
 	if (m.spoof_suspect) {
 		const spoof = document.createElement('span');
