@@ -138,7 +138,7 @@ final class MailController extends BaseController
 
 		$stmt = $pdo->prepare('SELECT m.id, m.mailbox_id, m.from_email, m.from_name, m.subject, m.received_at, m.ms_message_id,
 				s.label, s.sub_label, s.action_required, s.action_owner, s.priority, s.summary, s.scored_at,
-				s.inbox_score, s.folder_segments, s.spoof_suspect
+				s.inbox_score, s.folder_segments, s.spoof_suspect, s.user_corrected_fields
 			FROM mails m LEFT JOIN mail_scores s ON s.mail_id = m.id
 			WHERE m.id = :id LIMIT 1');
 		$stmt->execute([':id' => $mail['id']]);
@@ -221,18 +221,31 @@ final class MailController extends BaseController
 			}
 		}
 		$previewPath = null;
-		if ($segments !== null && !empty($r['from_email'])) {
-			$host = strrpos((string)$r['from_email'], '@') !== false
-				? substr((string)$r['from_email'], strrpos((string)$r['from_email'], '@') + 1)
-				: '';
-			$regDomain = $host !== ''
-				? $this->kernel->get(SenderResolver::class)->registrableDomain($host)
-				: null;
-			$bucket = $regDomain !== null
-				? $this->kernel->get(\MailPilot\Repositories\SenderRepository::class)
-					->findByRegistrableDomain($ctx['tenant_id'], $regDomain)
-				: null;
-			$previewPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+		if ($segments !== null) {
+			// Phase 9e Hotfix #5 (Marc 2026-05-19): User-Override-Pfade (sticky
+			// folder_segments) sind absolut — kein Sender-Root-Prefix vom
+			// FolderPathBuilder. Sonst wuerde „/Familie/Jenny" zu
+			// „/<Sender>/Jenny" verstuemmelt.
+			$userCorrFields = (string)($r['user_corrected_fields'] ?? '');
+			$isUserOverride = $userCorrFields !== '' && in_array('folder_segments', explode(',', $userCorrFields), true);
+			if ($isUserOverride) {
+				$path = implode('/', $segments);
+				$sortRoot = trim($this->kernel->get(SettingsRepository::class)
+					->getString('sort_root', ''), '/');
+				$previewPath = $sortRoot !== '' ? $sortRoot . '/' . $path : $path;
+			} elseif (!empty($r['from_email'])) {
+				$host = strrpos((string)$r['from_email'], '@') !== false
+					? substr((string)$r['from_email'], strrpos((string)$r['from_email'], '@') + 1)
+					: '';
+				$regDomain = $host !== ''
+					? $this->kernel->get(SenderResolver::class)->registrableDomain($host)
+					: null;
+				$bucket = $regDomain !== null
+					? $this->kernel->get(\MailPilot\Repositories\SenderRepository::class)
+						->findByRegistrableDomain($ctx['tenant_id'], $regDomain)
+					: null;
+				$previewPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+			}
 		}
 
 		Response::json(['mail' => [
@@ -615,7 +628,7 @@ final class MailController extends BaseController
 
 		// 2) Score laden, um folder_segments zu bekommen.
 		$pdo = $this->kernel->get(\PDO::class);
-		$stmt = $pdo->prepare('SELECT folder_segments FROM mail_scores
+		$stmt = $pdo->prepare('SELECT folder_segments, user_corrected_fields FROM mail_scores
 			WHERE mail_id = :id AND tenant_id = :t LIMIT 1');
 		$stmt->execute([':id' => $mailId, ':t' => $ctx['tenant_id']]);
 		$scoreRow = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
@@ -627,14 +640,22 @@ final class MailController extends BaseController
 			}
 		}
 
-		// 3) Sender-Bucket holen — registriert ggf. einen neuen Bucket,
-		// haengt registrable Domain an existierenden an.
-		$bucket = $this->kernel->get(SenderResolver::class)
-			->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
-
-		// 4) Pfad bauen. Wenn keine Empfehlung → return ohne Move.
-		$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
-		if ($folderPath === null) {
+		// 3) Pfad bauen. Phase 9e Hotfix #5: User-Override-Pfade (sticky
+		// folder_segments) sind absolut — kein FolderPathBuilder-Sender-Root-
+		// Prefix. KI-Vorschlaege gehen weiter ueber FolderPathBuilder.
+		$userCorrFields = (string)($scoreRow['user_corrected_fields'] ?? '');
+		$isUserOverride = $userCorrFields !== '' && in_array('folder_segments', explode(',', $userCorrFields), true);
+		if ($isUserOverride && is_array($segments) && $segments !== []) {
+			$path = implode('/', $segments);
+			$sortRoot = trim($this->kernel->get(SettingsRepository::class)
+				->getString('sort_root', ''), '/');
+			$folderPath = $sortRoot !== '' ? $sortRoot . '/' . $path : $path;
+		} else {
+			$bucket = $this->kernel->get(SenderResolver::class)
+				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
+			$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+		}
+		if ($folderPath === null || $folderPath === '') {
 			Response::json([
 				'ok'     => true,
 				'moved'  => false,
