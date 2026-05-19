@@ -195,6 +195,11 @@ export const api = {
 		toggleScoreOverride:  (id)    => request('POST',   `/settings/score-overrides/${id}/toggle`),
 		deleteScoreOverride:  (id)    => request('DELETE', `/settings/score-overrides/${id}`),
 	},
+	// Phase 9e — Topic-Suggestions fuer „Klassifikation korrigieren"-Datalist
+	senders: {
+		topicSuggestions: (fromEmail) =>
+			request('GET', `/senders/topic-suggestions?from=${encodeURIComponent(fromEmail)}`),
+	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),
 		deleteAccount: ()      => request('DELETE', '/me'),

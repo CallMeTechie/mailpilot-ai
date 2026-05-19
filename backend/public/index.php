@@ -63,6 +63,8 @@ $router->delete('/api/v1/settings/sub-labels/{id}',  'SubLabelController@deleteS
 // Phase 6a — Sender-Verwaltung (display_name, root_folder_name, trust_status)
 $router->get   ('/api/v1/settings/senders',          'SenderController@listSenders');
 $router->patch ('/api/v1/settings/senders/{id}',     'SenderController@updateSender');
+// Phase 9e — Topic-Suggestions fuer „Klassifikation korrigieren"-Datalist
+$router->get   ('/api/v1/senders/topic-suggestions', 'SenderController@topicSuggestions');
 // Phase 9b — Klassifikations-Override-Regeln
 $router->get   ('/api/v1/settings/score-overrides',           'ScoreOverrideController@listRules');
 $router->post  ('/api/v1/settings/score-overrides',           'ScoreOverrideController@createRule');

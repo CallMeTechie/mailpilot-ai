@@ -144,6 +144,17 @@ final class ScoreOverrideService
 				$changes['label'] = ['from' => $old, 'to' => $new];
 			}
 		}
+		// Phase 9e (Marc 2026-05-19): Topic-Override. Wenn die Regel
+		// folder_segments setzt, ueberschreiben wir den KI-Vorschlag —
+		// der FolderPathBuilder verarbeitet das dann im AutoSortService.
+		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []) {
+			$old = $score['folder_segments'] ?? null;
+			$new = array_values($rule['set_folder_segments']);
+			if ($old !== $new) {
+				$score['folder_segments']   = $new;
+				$changes['folder_segments'] = ['from' => $old, 'to' => $new];
+			}
+		}
 		return $changes;
 	}
 }

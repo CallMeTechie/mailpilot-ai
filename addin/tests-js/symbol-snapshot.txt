@@ -16,6 +16,7 @@ async function loadScoreOverrides
 async function loadSenders
 async function loadSettings
 async function loadToday
+async function loadTopicSuggestions
 async function markCurrentMailDone
 async function markPinnedDone
 async function openFilteredList
@@ -114,6 +115,7 @@ function showError
 function showToast
 function startAutoRefresh
 function toggle
+function updateDoneIcon
 function useDraft
 let autoRefreshTimer
 let autoSortRulesCache

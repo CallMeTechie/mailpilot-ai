@@ -523,4 +523,106 @@ final class RuleInferenceService
 			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
 		];
 	}
+
+	// ========================================================================
+	// Phase 9e — Topic-Regel-Inferenz (Marc 2026-05-19)
+	// ========================================================================
+
+	/**
+	 * Aus einer Topic-Korrektur (User hat Folder-Segments explizit gesetzt)
+	 * eine generelle Regel ableiten: „Wenn Subject zu diesem Sender so aussieht,
+	 * dann nach <topic>". Wird immer ausgefuehrt, auch ohne reasoning — bei
+	 * fehlendem reasoning erwartet der Prompt eine niedrigere Confidence.
+	 *
+	 * @param list<string> $correctedSegments z.B. ["Ebay","Bewertung"]
+	 * @return array<string,mixed> {action, rule_id?, confidence?, auto_enabled?, reasoning_summary?}
+	 */
+	public function inferTopicRule(
+		string $tenantId,
+		string $userId,
+		string $mailId,
+		array $correctedSegments,
+		string $reasoning,
+	): array {
+		if ($this->scoreOverrides === null) {
+			return ['action' => 'skipped', 'reason' => 'no_repo_injected'];
+		}
+		if (!$this->settings->getBool('rule_inference_enabled', true)) {
+			return ['action' => 'skipped', 'reason' => 'rule_inference_disabled'];
+		}
+		if ($correctedSegments === []) {
+			return ['action' => 'skipped', 'reason' => 'empty_segments'];
+		}
+
+		$ctx = $this->loadMailContext($tenantId, $mailId);
+		if ($ctx === null) {
+			return ['action' => 'skipped', 'reason' => 'mail_not_found'];
+		}
+		$fromDomain     = $this->redactor->reduceFromToDomain((string)$ctx['from_email']);
+		$subject        = $this->redactor->redact((string)$ctx['subject']);
+		$reasoningClean = trim($reasoning);
+		$reasoningR     = $reasoningClean === ''
+			? '(keine Begruendung)'
+			: $this->redactor->redactReasoning($reasoningClean, $this->getNameList());
+		$topic          = (string)end($correctedSegments);
+
+		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
+		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
+
+		$parsed = $this->callClaude([
+			'from_domain'         => $fromDomain,
+			'subject'             => $subject,
+			'corrected_topic'     => $topic,
+			'corrected_segments'  => json_encode($correctedSegments, JSON_UNESCAPED_UNICODE),
+			'reasoning'           => $reasoningR,
+		], 'P-TOPIC-RULE-EXTRACT');
+
+		if ($parsed === null) {
+			return ['action' => 'error', 'reason' => 'claude_invalid_response'];
+		}
+		if (!($parsed['create_rule'] ?? false)) {
+			return [
+				'action'     => 'skipped',
+				'reason'     => (string)($parsed['reasoning_summary'] ?? 'no_pattern'),
+				'confidence' => (int)($parsed['confidence'] ?? 0),
+			];
+		}
+
+		$confidence    = (int)($parsed['confidence'] ?? 0);
+		$autoThreshold = $this->settings->getInt('score_rule_auto_enable_threshold', 85);
+		$autoEnabled   = $confidence >= $autoThreshold;
+
+		try {
+			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
+				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
+				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
+				'match_from_local'    => $parsed['match_from_local']    ?? null,
+				'match_label'         => $parsed['match_label']         ?? null,
+				'set_folder_segments' => $correctedSegments,
+				'enabled'             => $autoEnabled,
+				'source'              => 'ki_inferred',
+			]);
+		} catch (\InvalidArgumentException $e) {
+			$this->logger->info('rule_inference.topic_rule_invalid', [
+				'reason' => $e->getMessage(),
+				'parsed' => $parsed,
+			]);
+			return ['action' => 'error', 'reason' => $e->getMessage()];
+		}
+
+		$this->logger->info('rule_inference.topic_rule_created', [
+			'rule_id'      => $ruleId,
+			'confidence'   => $confidence,
+			'auto_enabled' => $autoEnabled,
+			'mail_id'      => $mailId,
+			'topic'        => $topic,
+		]);
+		return [
+			'action'            => 'created',
+			'rule_id'           => $ruleId,
+			'confidence'        => $confidence,
+			'auto_enabled'      => $autoEnabled,
+			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
+		];
+	}
 }

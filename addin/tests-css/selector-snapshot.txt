@@ -1,5 +1,7 @@
 #alias-suggestions[data-hidden="true"]
+#correct-section #correct-topic
 #correct-section .mp-checkbox-row
+#correct-section .mp-correct-extra-label
 #correct-section .mp-field
 #correct-section .mp-field label
 #correct-section .mp-field select
@@ -60,6 +62,11 @@
 .mp-counter:hover
 .mp-counters
 .mp-danger .mp-btn + .mp-btn
+.mp-done-icon
+.mp-done-icon.is-busy
+.mp-done-icon:active:not(:disabled)
+.mp-done-icon:disabled
+.mp-done-icon:hover:not(:disabled)
 .mp-draft-box
 .mp-draft-box.is-stale
 .mp-draft-box[data-hidden="true"]
@@ -175,11 +182,10 @@
 .mp-pending-total
 .mp-pin-actions
 .mp-pin-card
+.mp-pin-card .mp-pin-done
 .mp-pin-card.is-fading
 .mp-pin-card.is-spoof
 .mp-pin-count
-.mp-pin-done
-.mp-pin-done:disabled
 .mp-pin-from
 .mp-pin-head
 .mp-pin-list
@@ -240,6 +246,8 @@
 .mp-settings-subtabs
 .mp-settings-title
 .mp-spinner
+.mp-subject-row
+.mp-subject-row h2
 .mp-subpanel
 .mp-subpanel.is-active
 .mp-subtab

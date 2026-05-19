@@ -150,11 +150,17 @@ final class MailController extends BaseController
 		// Pfad bereits erledigt, daher nur auf existing scores nachschieben.
 		if (!$wasJustScored && ($r['label'] ?? null) !== null) {
 			try {
+				$existingSegs = null;
+				if (!empty($r['folder_segments'])) {
+					$decoded = json_decode((string)$r['folder_segments'], true);
+					if (is_array($decoded)) $existingSegs = array_values(array_map('strval', $decoded));
+				}
 				$applied = $this->kernel->get(MailScoringService::class)
 					->applyOverrideToExistingScore($ctx['tenant_id'], $ctx['user_id'], $mail, [
 						'label'           => $r['label'],
 						'priority'        => isset($r['priority']) ? (int)$r['priority'] : null,
 						'action_required' => isset($r['action_required']) ? (int)(bool)$r['action_required'] : 0,
+						'folder_segments' => $existingSegs,
 					]);
 				if (($applied['matched'] ?? false) && !empty($applied['changes'])) {
 					$stmt->execute([':id' => $mail['id']]);
@@ -377,6 +383,18 @@ final class MailController extends BaseController
 
 		$reasoningText = isset($body['reasoning']) ? trim((string)$body['reasoning']) : '';
 
+		// Phase 9e (Marc 2026-05-19): Topic-Korrektur. Wenn der User in der
+		// „Klassifikation korrigieren"-Form ein Topic eingibt, persistieren
+		// wir das als folder_segments-Override + verschieben die Mail JETZT
+		// in den neuen Pfad + leiten ggf. eine generelle Topic-Regel ab.
+		$topicText = isset($body['topic']) ? trim((string)$body['topic']) : '';
+		if (mb_strlen($topicText) > 64) {
+			throw HttpException::badRequest('VALIDATION', 'Topic max 64 Zeichen');
+		}
+		if (str_contains($topicText, '/') || str_contains($topicText, '\\')) {
+			throw HttpException::badRequest('VALIDATION', 'Topic darf kein "/" oder "\\" enthalten');
+		}
+
 		$this->kernel->get(CorrectionRepository::class)->record(
 			$ctx['tenant_id'],
 			$ctx['user_id'],
@@ -447,6 +465,74 @@ final class MailController extends BaseController
 			}
 		}
 
+		// Phase 9e (Marc 2026-05-19): Topic-Apply. Wenn der User ein Topic
+		// gegeben hat: (a) folder_segments im mail_scores persistieren mit
+		// sticky-Flag, (b) Mail jetzt nach Sender-Root/<Topic> verschieben,
+		// (c) KI-Inferenz fuer eine Topic-Regel (immer, auch ohne reasoning —
+		// dann mit niedriger Confidence + enabled=false).
+		$topicApplied  = null;
+		$movedTo       = null;
+		$topicRuleInfo = null;
+		if ($topicText !== '') {
+			$bucket = $this->kernel->get(SenderResolver::class)
+				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
+			$senderRoot = $bucket['root_folder_name'] ?? null;
+			$segments   = $senderRoot !== null && $senderRoot !== ''
+				? [(string)$senderRoot, $topicText]
+				: [$topicText];
+
+			// (a) Persistieren — sticky setzen, sonst ueberschreibt naechstes Scoring.
+			$pdo->prepare('UPDATE mail_scores
+				SET folder_segments     = :fs,
+				    user_corrected_fields = CONCAT_WS(",",
+				        NULLIF(user_corrected_fields, ""), "folder_segments"),
+				    user_corrected_at   = COALESCE(user_corrected_at, UTC_TIMESTAMP(3))
+				WHERE mail_id = :id AND tenant_id = :t')
+				->execute([
+					':fs' => json_encode($segments, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+					':id' => $mailId,
+					':t'  => $ctx['tenant_id'],
+				]);
+			$topicApplied = $segments;
+
+			// (b) Move-Now via AutoSortService::applyManualMove.
+			try {
+				$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+				if ($folderPath !== null) {
+					$mbAll = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+						->findByUser($ctx['tenant_id'], $ctx['user_id']);
+					$mb = null;
+					foreach ($mbAll as $cand) {
+						if ((string)$cand['id'] === (string)$mail['mailbox_id']) { $mb = $cand; break; }
+					}
+					if ($mb !== null) {
+						$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+						$moveResult = $this->kernel->get(\MailPilot\Services\AutoSortService::class)
+							->applyManualMove($token, $ctx['tenant_id'], $ctx['user_id'], $mail, $folderPath);
+						if (!empty($moveResult['moved'])) {
+							$movedTo = $folderPath;
+						}
+					}
+				}
+			} catch (\Throwable) { /* best-effort */ }
+
+			// (c) Topic-Regel ableiten (immer, auch ohne reasoning).
+			try {
+				$topicRuleInfo = $this->kernel->get(RuleInferenceService::class)
+					->inferTopicRule(
+						$ctx['tenant_id'],
+						$ctx['user_id'],
+						$mailId,
+						$segments,
+						$reasoningText,
+					);
+			} catch (QuotaExceededException $e) {
+				$topicRuleInfo = ['action' => 'skipped', 'reason' => 'quota_exceeded'];
+			} catch (\Throwable $e) {
+				$topicRuleInfo = ['action' => 'error', 'reason' => $e->getMessage()];
+			}
+		}
+
 		$response = ['ok' => true, 'score' => [
 			'label'           => $label,
 			'priority'        => $priority,
@@ -458,6 +544,15 @@ final class MailController extends BaseController
 		}
 		if ($scoreRuleResult !== null) {
 			$response['score_rule_inference'] = $scoreRuleResult;
+		}
+		if ($topicApplied !== null) {
+			$response['topic_applied'] = $topicApplied;
+		}
+		if ($movedTo !== null) {
+			$response['moved_to'] = $movedTo;
+		}
+		if ($topicRuleInfo !== null) {
+			$response['topic_rule_inference'] = $topicRuleInfo;
 		}
 		Response::json($response);
 	}

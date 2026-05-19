@@ -95,3 +95,21 @@
 	color: var(--mp-color-accent, #2563eb);
 	font-weight: 600;
 }
+
+/* Phase 9e (Marc 2026-05-19) — Topic-Input mit datalist-Suggestions. */
+#correct-section .mp-correct-extra-label {
+	display: block;
+	margin: var(--mp-sp-2) 0 4px;
+	font-size: 12px;
+	color: var(--mp-text-muted);
+}
+#correct-section #correct-topic {
+	width: 100%;
+	box-sizing: border-box;
+	margin-bottom: var(--mp-sp-2);
+	padding: 6px 8px;
+	border: 1px solid var(--mp-border);
+	border-radius: var(--mp-radius-sm);
+	font-size: 13px;
+	font-family: inherit;
+}

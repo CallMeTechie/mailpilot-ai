@@ -40,11 +40,11 @@ final class ScoreOverrideRepository
 		$stmt = $this->db->prepare('INSERT INTO score_override_rules
 			(id, tenant_id, user_id,
 			 match_sender_key, match_subject_regex, match_from_local, match_label, match_priority_min,
-			 set_priority, set_action_required, set_label,
+			 set_priority, set_action_required, set_label, set_folder_segments,
 			 enabled, source)
 			VALUES (:id, :t, :u,
 			 :msk, :msr, :mfl, :ml, :mpm,
-			 :sp, :sar, :sl,
+			 :sp, :sar, :sl, :sfs,
 			 :en, :src)');
 		$stmt->execute([
 			':id'  => $id,
@@ -58,6 +58,7 @@ final class ScoreOverrideRepository
 			':sp'  => $this->intOrNull($data['set_priority']        ?? null, 1, 5),
 			':sar' => isset($data['set_action_required']) ? (int)(bool)$data['set_action_required'] : null,
 			':sl'  => $this->validLabelOrNull($data['set_label'] ?? null),
+			':sfs' => $this->validFolderSegmentsOrNull($data['set_folder_segments'] ?? null),
 			':en'  => isset($data['enabled']) ? (int)(bool)$data['enabled'] : 1,
 			':src' => (function() use ($data): string {
 				$src = (string)($data['source'] ?? 'user_manual');
@@ -78,7 +79,7 @@ final class ScoreOverrideRepository
 	{
 		$stmt = $this->db->prepare('SELECT id, match_sender_key, match_subject_regex, match_from_local,
 				match_label, match_priority_min,
-				set_priority, set_action_required, set_label
+				set_priority, set_action_required, set_label, set_folder_segments
 			FROM score_override_rules
 			WHERE tenant_id = :t AND user_id = :u AND enabled = 1 AND deleted_at IS NULL
 			ORDER BY created_at ASC, id ASC');
@@ -95,7 +96,7 @@ final class ScoreOverrideRepository
 	{
 		$stmt = $this->db->prepare('SELECT id, match_sender_key, match_subject_regex, match_from_local,
 				match_label, match_priority_min,
-				set_priority, set_action_required, set_label,
+				set_priority, set_action_required, set_label, set_folder_segments,
 				enabled, source, applies_count, last_applied_at, created_at, updated_at
 			FROM score_override_rules
 			WHERE tenant_id = :t AND user_id = :u AND deleted_at IS NULL
@@ -177,6 +178,50 @@ final class ScoreOverrideRepository
 	 * (sonst preg_match liefert false statt 0/1 und wir wollen das nicht
 	 * jedes Mal in apply() merken). Max-Length-Cap 255 entspricht Spalte.
 	 */
+	/**
+	 * @return list<string>|null
+	 */
+	private function decodeSegments(mixed $v): ?array
+	{
+		if ($v === null || $v === '') return null;
+		$arr = is_string($v) ? json_decode($v, true) : $v;
+		if (!is_array($arr) || $arr === []) return null;
+		return array_values(array_map('strval', $arr));
+	}
+
+	/**
+	 * Phase 9e (Marc 2026-05-19) — JSON-Array bis 3 Strings (FolderPathBuilder
+	 * MAX_DEPTH), je max 64 Zeichen, ohne Pfad-Separatoren. Akzeptiert sowohl
+	 * arrays als auch JSON-codierte Strings (KI-Inferenz liefert oft schon
+	 * decoded array, REST-Calls oft als string).
+	 */
+	private function validFolderSegmentsOrNull(mixed $v): ?string
+	{
+		if ($v === null || $v === '' || $v === []) return null;
+		$arr = is_string($v) ? json_decode($v, true) : $v;
+		if (!is_array($arr) || $arr === []) {
+			throw new \InvalidArgumentException('set_folder_segments muss ein JSON-Array sein');
+		}
+		if (count($arr) > 3) {
+			throw new \InvalidArgumentException('set_folder_segments: max 3 Segmente erlaubt');
+		}
+		$clean = [];
+		foreach ($arr as $seg) {
+			if (!is_string($seg) || $seg === '') {
+				throw new \InvalidArgumentException('set_folder_segments: jedes Segment muss ein nicht-leerer String sein');
+			}
+			$s = trim($seg);
+			if (mb_strlen($s) > 64) {
+				throw new \InvalidArgumentException('set_folder_segments: Segment max 64 Zeichen');
+			}
+			if (str_contains($s, '/') || str_contains($s, '\\')) {
+				throw new \InvalidArgumentException('set_folder_segments: kein "/" oder "\\" im Segment-Namen');
+			}
+			$clean[] = $s;
+		}
+		return json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+	}
+
 	private function validRegex(mixed $v): ?string
 	{
 		if ($v === null || $v === '') return null;
@@ -214,6 +259,7 @@ final class ScoreOverrideRepository
 			'set_priority'         => $r['set_priority']        !== null ? (int)$r['set_priority']           : null,
 			'set_action_required'  => $r['set_action_required'] !== null ? (int)(bool)$r['set_action_required'] : null,
 			'set_label'            => $r['set_label']           !== null ? (string)$r['set_label']           : null,
+			'set_folder_segments'  => $this->decodeSegments($r['set_folder_segments'] ?? null),
 			'enabled'              => isset($r['enabled'])      ? (bool)(int)$r['enabled']                   : true,
 			'source'               => $r['source']              ?? 'user_manual',
 			'applies_count'        => isset($r['applies_count'])    ? (int)$r['applies_count']               : 0,

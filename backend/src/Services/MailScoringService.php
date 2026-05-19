@@ -281,6 +281,7 @@ final class MailScoringService
 				$mutated['label']           ?? null,
 				isset($mutated['priority']) ? (int)$mutated['priority'] : null,
 				isset($mutated['action_required']) ? (int)(bool)$mutated['action_required'] : null,
+				is_array($mutated['folder_segments'] ?? null) ? $mutated['folder_segments'] : null,
 			);
 		} catch (\Throwable $e) {
 			$this->logger->warning('scoring.override_persist_failed', [

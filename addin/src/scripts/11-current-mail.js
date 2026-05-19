@@ -15,14 +15,14 @@ function initCurrentMail() {
 }
 
 /**
- * Phase 5b — User klickt im DieseMail-Tab auf „Erledigt — verschieben".
- * Spiegelt das Verhalten der Pin-Card-Done-Buttons im Briefing.
+ * Phase 5b / 9e — User klickt im DieseMail-Tab auf das Done-Icon rechts neben
+ * dem Betreff. Spiegelt das Verhalten der Pin-Card-Done-Buttons im Briefing.
  */
 async function markCurrentMailDone() {
 	if (!state.currentMailData) return;
 	const mailDbId = state.currentMailData.id;
 	const btn = document.getElementById('btn-current-done');
-	if (btn) { btn.disabled = true; btn.textContent = 'Verschiebe…'; }
+	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
 	try {
 		const res = await api.mails.done(mailDbId);
 		if (res?.moved) {
@@ -30,13 +30,50 @@ async function markCurrentMailDone() {
 		} else {
 			showToast('Als erledigt markiert — bleibt in Inbox (kein Ordner-Vorschlag).', 'info', 4500);
 		}
-		// Done-Section weg, Briefing reloaded sobald Tab gewechselt wird.
-		toggle('current-done-section', false);
 		state.briefingLoaded = false;
 	} catch (err) {
-		if (btn) { btn.disabled = false; btn.textContent = 'Erledigt'; }
+		if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
 		handleError(err);
 	}
+}
+
+/**
+ * Phase 9e — Done-Icon Sichtbarkeit/Disable-State setzen. Wird von
+ * loadCurrentMailScore aufgerufen sobald ensureScored einen preview_path
+ * liefert (oder null). Icon bleibt immer im DOM (konsistente UI-Position),
+ * aber disabled + Tooltip wenn kein Vorschlag.
+ */
+function updateDoneIcon(previewPath) {
+	const btn = document.getElementById('btn-current-done');
+	if (!btn) return;
+	btn.classList.remove('is-busy');
+	if (previewPath) {
+		btn.disabled = false;
+		btn.title    = `Erledigt → ${previewPath}`;
+	} else {
+		btn.disabled = true;
+		btn.title    = 'Kein Sortier-Vorschlag verfügbar';
+	}
+}
+
+/**
+ * Phase 9e — Topic-Vorschlaege fuer die datalist im „Klassifikation
+ * korrigieren"-Form. Distinct letzte folder_segments-Eintraege bisheriger
+ * Mails desselben Senders, sortiert nach Haeufigkeit.
+ */
+async function loadTopicSuggestions(fromEmail) {
+	const dl = document.getElementById('correct-topic-suggestions');
+	if (!dl) return;
+	dl.replaceChildren();
+	if (!fromEmail) return;
+	try {
+		const res = await api.senders.topicSuggestions(fromEmail);
+		for (const topic of (res?.items ?? [])) {
+			const opt = document.createElement('option');
+			opt.value = topic;
+			dl.appendChild(opt);
+		}
+	} catch { /* best-effort */ }
 }
 
 function openCorrectForm() {
@@ -46,6 +83,8 @@ function openCorrectForm() {
 	document.getElementById('correct-priority').value  = String(score.priority ?? 3);
 	document.getElementById('correct-action-required').checked = !!score.action_required;
 	document.getElementById('correct-reasoning').value = '';
+	document.getElementById('correct-topic').value     = '';
+	loadTopicSuggestions(state.currentMailData.from_email || '');
 	toggle('correct-section', true);
 	document.getElementById('correct-reasoning').focus();
 }
@@ -68,11 +107,13 @@ async function saveCorrection() {
 			return;
 		}
 	}
+	const topic   = document.getElementById('correct-topic').value.trim();
 	const payload = {
 		label:           document.getElementById('correct-label').value,
 		priority:        parseInt(document.getElementById('correct-priority').value, 10),
 		action_required: document.getElementById('correct-action-required').checked,
 		reasoning:       reasoning || null,
+		topic:           topic || null,
 	};
 	setStatus('Korrektur speichern…');
 	try {
@@ -100,6 +141,18 @@ async function saveCorrection() {
 				showToast(`✅ KI-Regel aktiv: „${sum}" — wirkt sofort auf neue Mails.`, 'success', 8000);
 			} else {
 				showToast(`⚙ KI-Vorschlag: „${sum}" — im Settings-Subtab „Regeln" aktivieren.`, 'info', 8000);
+			}
+		}
+		// Phase 9e (Marc 2026-05-19): Topic-Korrektur-Feedback.
+		if (res?.moved_to) {
+			showToast(`📁 Verschoben nach ${res.moved_to}`, 'success', 5000);
+		}
+		if (res?.topic_rule_inference?.action === 'created') {
+			const sum = res.topic_rule_inference.reasoning_summary || 'Topic-Pattern erkannt';
+			if (res.topic_rule_inference.auto_enabled) {
+				showToast(`✅ Topic-Regel aktiv: „${sum}" — wirkt sofort auf neue Mails.`, 'success', 8000);
+			} else {
+				showToast(`⚙ Topic-Vorschlag: „${sum}" — im Settings-Subtab „Regeln" aktivieren.`, 'info', 8000);
 			}
 		}
 		setStatus('Bereit');
@@ -264,19 +317,10 @@ function renderCurrentMail(row) {
 		toggle('current-action-section', false);
 	}
 
-	// Phase 5b: Done-Button + Pfad-Vorschau zeigen wenn die KI einen
-	// Ordner vorgeschlagen hat (preview_path != null). Ohne Vorschlag
-	// bleibt die Section ausgeblendet — Mail bleibt in Inbox.
-	const previewEl = document.getElementById('current-done-preview');
-	const doneBtn = document.getElementById('btn-current-done');
-	if (score.preview_path && doneBtn && previewEl) {
-		previewEl.textContent = `→ verschiebt nach ${score.preview_path}`;
-		doneBtn.disabled = false;
-		doneBtn.textContent = 'Erledigt';
-		toggle('current-done-section', true);
-	} else {
-		toggle('current-done-section', false);
-	}
+	// Phase 9e: Done-Icon rechts oben neben Betreff statt Section. Icon
+	// bleibt immer im DOM (konsistente Position), aber disabled mit
+	// Tooltip wenn keine Sortier-Empfehlung.
+	updateDoneIcon(score.preview_path ?? null);
 
 	// Office InfoBar above the mail when this is a high-priority direct/
 	// action mail. Visible even when the add-in pane is closed, and

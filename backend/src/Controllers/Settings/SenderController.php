@@ -31,6 +31,59 @@ final class SenderController extends BaseController
 		Response::json(['items' => $senders]);
 	}
 
+	/**
+	 * Phase 9e (Marc 2026-05-19) — Topic-Vorschlaege fuer die
+	 * „Klassifikation korrigieren"-Form. Liefert distinct letzte Segmente
+	 * aus mail_scores.folder_segments aller Mails dieses Senders, sortiert
+	 * nach Haeufigkeit. Datalist im Add-in nutzt das fuer Auto-Suggest.
+	 */
+	public function topicSuggestions(array $params, array $body): void
+	{
+		$ctx       = $this->requireAuth();
+		$fromEmail = (string)($_GET['from'] ?? '');
+		if ($fromEmail === '') {
+			throw HttpException::badRequest('VALIDATION', 'from-Parameter fehlt');
+		}
+		$bucket = $this->kernel->get(\MailPilot\Services\Sender\SenderResolver::class)
+			->resolve($ctx['tenant_id'], $fromEmail);
+		if ($bucket === null) {
+			Response::json(['items' => []]);
+			return;
+		}
+		$domains = array_values($bucket['registrable_domains'] ?? []);
+		if ($domains === []) {
+			Response::json(['items' => []]);
+			return;
+		}
+		// Festes Prepared-Statement pro Domain, dann PHP-merge. Bewusst KEIN
+		// dynamic IN(?,?,?,...) — auch wenn die Werte hier intern sind, der
+		// dynamische Platzhalter-Build ist ein Footgun fuer spaetere Aenderungen.
+		$stmt = $this->kernel->get(\PDO::class)->prepare(
+			"SELECT s.folder_segments, COUNT(*) AS n
+			FROM mail_scores s
+			INNER JOIN mails m ON m.id = s.mail_id
+			WHERE s.tenant_id = :t
+			  AND s.folder_segments IS NOT NULL
+			  AND SUBSTRING_INDEX(m.from_email, '@', -1) = :d
+			GROUP BY s.folder_segments
+			ORDER BY n DESC
+			LIMIT 100"
+		);
+		$counts = [];
+		foreach ($domains as $domain) {
+			$stmt->execute([':t' => $ctx['tenant_id'], ':d' => $domain]);
+			foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+				$arr = json_decode((string)$row['folder_segments'], true);
+				if (!is_array($arr) || $arr === []) continue;
+				$topic = trim((string)end($arr));
+				if ($topic === '') continue;
+				$counts[$topic] = ($counts[$topic] ?? 0) + (int)$row['n'];
+			}
+		}
+		arsort($counts);
+		Response::json(['items' => array_keys($counts)]);
+	}
+
 	public function updateSender(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();

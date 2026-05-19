@@ -251,6 +251,21 @@ function buildPinnedCard(m) {
 	from.className = 'mp-pin-from';
 	from.textContent = m.sender_display_name || m.from_name || m.from_email;
 	head.appendChild(from);
+
+	// Phase 9e (Marc 2026-05-19): Done-Icon rechts oben in der Card, konsistent
+	// mit current-mail-Header. Tooltip zeigt Pfad-Vorschau; disabled wenn die
+	// KI keinen Sortier-Vorschlag geliefert hat.
+	const doneIcon = document.createElement('button');
+	doneIcon.type = 'button';
+	doneIcon.className = 'mp-done-icon mp-pin-done';
+	doneIcon.setAttribute('aria-label', 'Erledigt — verschieben');
+	doneIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+	doneIcon.title = m.preview_path
+		? `Erledigt → ${m.preview_path}`
+		: 'Als erledigt markieren (kein Sortier-Vorschlag — bleibt in Inbox)';
+	doneIcon.addEventListener('click', () => markPinnedDone(m.mail_id, li));
+	head.appendChild(doneIcon);
+
 	li.appendChild(head);
 
 	// Subject
@@ -259,7 +274,7 @@ function buildPinnedCard(m) {
 	subj.textContent = m.subject || '(ohne Betreff)';
 	li.appendChild(subj);
 
-	// Aktionen
+	// Aktionen — nur noch Oeffnen (Done ist als Icon im Head).
 	const actions = document.createElement('div');
 	actions.className = 'mp-pin-actions';
 
@@ -269,23 +284,13 @@ function buildPinnedCard(m) {
 	openBtn.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
 	actions.appendChild(openBtn);
 
-	const doneBtn = document.createElement('button');
-	doneBtn.className = 'mp-btn mp-btn-primary mp-pin-done';
-	const previewSuffix = m.preview_path ? ` → ${m.preview_path}` : ' → Inbox (kein Pfad)';
-	doneBtn.textContent = `Erledigt${previewSuffix}`;
-	doneBtn.title = m.preview_path
-		? `Verschiebt nach ${m.preview_path}`
-		: 'KI hat keinen Ordner vorgeschlagen — bleibt in Inbox, nur als erledigt markiert.';
-	doneBtn.addEventListener('click', () => markPinnedDone(m.mail_id, li));
-	actions.appendChild(doneBtn);
-
 	li.appendChild(actions);
 	return li;
 }
 
 async function markPinnedDone(mailId, cardEl) {
 	const btn = cardEl?.querySelector('.mp-pin-done');
-	if (btn) { btn.disabled = true; btn.textContent = 'Verschiebe…'; }
+	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
 	try {
 		const res = await api.mails.done(mailId);
 		cardEl?.classList.add('is-fading');
@@ -295,11 +300,10 @@ async function markPinnedDone(mailId, cardEl) {
 		} else {
 			showToast('Als erledigt markiert — bleibt in Inbox (kein Ordner-Vorschlag).', 'info', 4500);
 		}
-		// Counter-Cards koennten sich verschoben haben — Briefing-Refresh.
 		state.briefingLoaded = false;
 		loadBriefing();
 	} catch (err) {
-		if (btn) { btn.disabled = false; btn.textContent = 'Erledigt'; }
+		if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
 		handleError(err);
 	}
 }

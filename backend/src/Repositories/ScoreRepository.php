@@ -106,6 +106,7 @@ final class ScoreRepository
 		?string $label,
 		?int $priority,
 		?int $actionRequired,
+		?array $folderSegments = null,
 	): void {
 		$set = [];
 		$params = [':mid' => $mailId, ':t' => $tenantId];
@@ -120,6 +121,12 @@ final class ScoreRepository
 		if ($actionRequired !== null) {
 			$set[] = 'action_required = IF(user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL, action_required, :ar)';
 			$params[':ar'] = $actionRequired;
+		}
+		// Phase 9e (Marc 2026-05-19): Topic-Override-Backfill auf existierende
+		// Scores. Sticky bei „folder_segments" in user_corrected_fields.
+		if ($folderSegments !== null && $folderSegments !== []) {
+			$set[] = 'folder_segments = IF(user_corrected_fields IS NOT NULL AND FIND_IN_SET("folder_segments", user_corrected_fields), folder_segments, :fs)';
+			$params[':fs'] = json_encode(array_values($folderSegments), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 		}
 		if ($set === []) {
 			return;
