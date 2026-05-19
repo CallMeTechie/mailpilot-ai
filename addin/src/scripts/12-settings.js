@@ -885,3 +885,133 @@ async function saveSender(senderId, rowEl) {
 	}
 }
 
+// ============================================================
+// Phase 9c — Klassifikations-Override-Regeln (Marc 2026-05-19)
+// ============================================================
+
+async function loadScoreOverrides() {
+	try {
+		const res = await api.settings.listScoreOverrides();
+		renderScoreOverrides(res?.items ?? []);
+	} catch (err) {
+		handleError(err);
+	}
+}
+
+function renderScoreOverrides(items) {
+	const root = document.getElementById('score-overrides-list');
+	if (!root) return;
+	root.replaceChildren();
+
+	if (items.length === 0) {
+		const empty = document.createElement('li');
+		empty.className = 'mp-muted';
+		empty.textContent = 'Noch keine Regeln. Korrigiere eine Mail mit Begründung — die KI leitet daraus eine Regel ab.';
+		root.appendChild(empty);
+		return;
+	}
+
+	for (const r of items) {
+		root.appendChild(buildScoreOverrideRow(r));
+	}
+}
+
+function buildScoreOverrideRow(r) {
+	const li = document.createElement('li');
+	li.className = 'mp-rule-row';
+	if (!r.enabled) li.classList.add('is-disabled');
+	if (r.source === 'ki_inferred') li.classList.add('is-ki');
+	li.dataset.ruleId = r.id;
+
+	// Head: Toggle + Quelle + Apply-Counter
+	const head = document.createElement('div');
+	head.className = 'mp-rule-head';
+
+	const toggleBtn = document.createElement('button');
+	toggleBtn.className = 'mp-rule-toggle';
+	toggleBtn.textContent = r.enabled ? '✓ Aktiv' : '⏸ Aus';
+	toggleBtn.title = r.enabled ? 'Klicken zum Deaktivieren' : 'Klicken zum Aktivieren';
+	toggleBtn.addEventListener('click', () => toggleScoreOverride(r.id, li));
+	head.appendChild(toggleBtn);
+
+	const source = document.createElement('span');
+	source.className = 'mp-rule-source';
+	source.textContent = r.source === 'ki_inferred' ? 'KI-Vorschlag' : 'Manuell';
+	head.appendChild(source);
+
+	const applies = document.createElement('span');
+	applies.className = 'mp-rule-applies';
+	applies.textContent = `${r.applies_count}× angewendet`;
+	if (r.last_applied_at) applies.title = `Zuletzt: ${r.last_applied_at}`;
+	head.appendChild(applies);
+
+	const delBtn = document.createElement('button');
+	delBtn.className = 'mp-rule-delete';
+	delBtn.textContent = '×';
+	delBtn.title = 'Regel löschen';
+	delBtn.addEventListener('click', () => deleteScoreOverride(r.id, li));
+	head.appendChild(delBtn);
+	li.appendChild(head);
+
+	// Body: Wenn (Match) → Dann (Set)
+	const body = document.createElement('div');
+	body.className = 'mp-rule-body';
+
+	const matchParts = [];
+	if (r.match_sender_key)    matchParts.push(`Absender = ${r.match_sender_key}`);
+	if (r.match_subject_regex) matchParts.push(`Subject matched ${r.match_subject_regex}`);
+	if (r.match_from_local)    matchParts.push(`Local-Part = ${r.match_from_local}`);
+	if (r.match_label)         matchParts.push(`Label = ${r.match_label}`);
+	if (r.match_priority_min != null) matchParts.push(`KI-Prio ≥ ${r.match_priority_min}`);
+
+	const setParts = [];
+	if (r.set_priority != null)        setParts.push(`Prio = ${r.set_priority}`);
+	if (r.set_action_required != null) setParts.push(`Aktion = ${r.set_action_required ? 'ja' : 'nein'}`);
+	if (r.set_label)                   setParts.push(`Label = ${r.set_label}`);
+
+	const wenn = document.createElement('div');
+	wenn.className = 'mp-rule-when';
+	wenn.innerHTML = '<strong>Wenn:</strong> ' + escape(matchParts.join(' UND ') || '—');
+	body.appendChild(wenn);
+
+	const dann = document.createElement('div');
+	dann.className = 'mp-rule-then';
+	dann.innerHTML = '<strong>Dann:</strong> ' + escape(setParts.join(', ') || '—');
+	body.appendChild(dann);
+
+	li.appendChild(body);
+	return li;
+}
+
+async function toggleScoreOverride(id, rowEl) {
+	const btn = rowEl?.querySelector('.mp-rule-toggle');
+	if (btn) { btn.disabled = true; }
+	try {
+		await api.settings.toggleScoreOverride(id);
+		// Re-Load für korrekten neuen Counter + Stylez
+		loadScoreOverrides();
+		showToast('Regel umgeschaltet.', 'success', 2500);
+	} catch (err) {
+		handleError(err);
+	} finally {
+		if (btn) { btn.disabled = false; }
+	}
+}
+
+async function deleteScoreOverride(id, rowEl) {
+	if (!await mpConfirm({
+		title: 'Regel löschen?',
+		body: 'Diese Klassifikations-Regel wird gelöscht. Künftige Mails werden wieder rein KI-klassifiziert.',
+		okLabel: 'Löschen',
+		danger: true,
+	})) return;
+	try {
+		await api.settings.deleteScoreOverride(id);
+		rowEl?.classList.add('is-fading');
+		setTimeout(() => rowEl?.remove(), 250);
+		showToast('Regel gelöscht.', 'success', 2500);
+	} catch (err) {
+		handleError(err);
+	}
+}
+

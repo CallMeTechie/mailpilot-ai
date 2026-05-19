@@ -189,6 +189,23 @@
 .mp-priority
 .mp-progress-bar
 .mp-progress-fill
+.mp-rule-applies
+.mp-rule-body
+.mp-rule-delete
+.mp-rule-head
+.mp-rule-row
+.mp-rule-row.is-disabled
+.mp-rule-row.is-disabled .mp-rule-toggle
+.mp-rule-row.is-fading
+.mp-rule-row.is-ki
+.mp-rule-row:not(.is-disabled) .mp-rule-toggle
+.mp-rule-row:not(.is-ki) .mp-rule-source
+.mp-rule-source
+.mp-rule-then
+.mp-rule-then code
+.mp-rule-toggle
+.mp-rule-when
+.mp-rule-when code
 .mp-section
 .mp-section > h2
 .mp-section > h3

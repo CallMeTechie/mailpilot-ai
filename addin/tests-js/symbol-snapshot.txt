@@ -3,6 +3,7 @@ async function applyAutoSortNow
 async function approvePending
 async function bulkApproveAllPending
 async function correctOwnerInline
+async function deleteScoreOverride
 async function dismissDraft
 async function draftCurrent
 async function includeAutoReplyBacklog
@@ -11,6 +12,7 @@ async function loadBriefing
 async function loadCurrentMailScore
 async function loadModes
 async function loadPending
+async function loadScoreOverrides
 async function loadSenders
 async function loadSettings
 async function loadToday
@@ -32,6 +34,7 @@ async function saveModes
 async function saveRuleInference
 async function saveSender
 async function summarizeCurrent
+async function toggleScoreOverride
 const aliasState
 const BULK_ACTIONS
 const keywordState
@@ -49,6 +52,7 @@ function buildMailListItem
 function buildPendingCard
 function buildPinnedCard
 function buildRuleSuggestionBody
+function buildScoreOverrideRow
 function buildTodayCard
 function clearBusy
 function closeFilteredList
@@ -93,6 +97,7 @@ function renderList
 function renderPending
 function renderPendingList
 function renderPinnedList
+function renderScoreOverrides
 function renderSenders
 function renderSubLabels
 function renderTodaySection

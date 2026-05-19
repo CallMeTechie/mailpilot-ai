@@ -190,6 +190,10 @@ export const api = {
 		// Phase 6a — Sender-Verwaltung (display_name, root_folder_name, trust_status)
 		listSenders:     ()        => request('GET',    '/settings/senders'),
 		updateSender:    (id, p)   => request('PATCH',  `/settings/senders/${id}`, p),
+		// Phase 9c — Klassifikations-Override-Regeln (Backend-Mechanik Phase 9a/9b)
+		listScoreOverrides:   ()      => request('GET',    '/settings/score-overrides'),
+		toggleScoreOverride:  (id)    => request('POST',   `/settings/score-overrides/${id}/toggle`),
+		deleteScoreOverride:  (id)    => request('DELETE', `/settings/score-overrides/${id}`),
 	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),

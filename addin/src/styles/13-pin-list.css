@@ -211,3 +211,96 @@
 	border-radius: 3px;
 	font-size: 12px;
 }
+
+/* ============================================================
+ * Phase 9c — Klassifikations-Override-Regeln (Settings-Subtab)
+ * ============================================================ */
+
+.mp-rule-row {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+	border: 1px solid var(--mp-color-border, #e2e8f0);
+	border-left: 4px solid #3b82f6;  /* blue-500 */
+	border-radius: 6px;
+	background: #fff;
+	margin-bottom: 6px;
+	transition: opacity 200ms ease, transform 200ms ease;
+}
+.mp-rule-row.is-ki      { border-left-color: #8b5cf6; }  /* violet-500 */
+.mp-rule-row.is-disabled {
+	opacity: 0.6;
+	background: #f8fafc;
+	border-left-color: #94a3b8;
+}
+.mp-rule-row.is-fading {
+	opacity: 0;
+	transform: translateX(8px);
+}
+
+.mp-rule-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.mp-rule-toggle {
+	font-size: 11px;
+	padding: 3px 8px;
+	border: 1px solid currentColor;
+	border-radius: 3px;
+	background: transparent;
+	cursor: pointer;
+}
+.mp-rule-row.is-disabled .mp-rule-toggle { color: #64748b; }
+.mp-rule-row:not(.is-disabled) .mp-rule-toggle { color: #16a34a; }  /* green-600 */
+
+.mp-rule-source {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: #ede9fe;       /* violet-100 */
+	color: #6d28d9;            /* violet-700 */
+	font-weight: 600;
+	text-transform: uppercase;
+}
+.mp-rule-row:not(.is-ki) .mp-rule-source {
+	background: #e0f2fe;       /* sky-100 */
+	color: #0369a1;            /* sky-700 */
+}
+
+.mp-rule-applies {
+	flex: 1;
+	font-size: 11px;
+	color: #64748b;
+	font-variant-numeric: tabular-nums;
+}
+
+.mp-rule-delete {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid #fca5a5;
+	border-radius: 3px;
+	background: #fff;
+	color: #b91c1c;
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mp-rule-body {
+	font-size: 12px;
+	color: #334155;
+	line-height: 1.5;
+}
+.mp-rule-when, .mp-rule-then {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mp-rule-when code, .mp-rule-then code {
+	background: #f1f5f9;
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 11px;
+}

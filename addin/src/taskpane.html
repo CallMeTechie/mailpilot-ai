@@ -333,6 +333,7 @@
 			<button class="mp-subtab is-active" data-subtab="profile"  role="tab">Profil &amp; Filter</button>
 			<button class="mp-subtab"           data-subtab="senders"  role="tab">Absender</button>
 			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
+			<button class="mp-subtab"           data-subtab="rules"    role="tab">Regeln</button>
 			<button class="mp-subtab"           data-subtab="modes"    role="tab">Modi</button>
 			<button class="mp-subtab"           data-subtab="maint"    role="tab">Wartung</button>
 			<button class="mp-subtab"           data-subtab="data"     role="tab">Daten</button>
@@ -496,6 +497,20 @@
 						<button class="mp-btn mp-btn-secondary" id="btn-autoreply-backlog">Backlog inkludieren</button>
 					</div>
 					<p class="mp-muted" id="autoreply-status"></p>
+				</div>
+			</section>
+
+			<!-- Phase 9c (Marc 2026-05-19): Klassifikations-Regeln -->
+			<section class="mp-subpanel" data-subpanel="rules">
+				<div class="mp-section">
+					<h2>Klassifikations-Regeln</h2>
+					<p class="mp-muted">
+						Deterministische Overrides. Wenn alle Match-Bedingungen einer Regel passen,
+						überschreibt sie die KI-Klassifikation auf die Werte rechts. KI-abgeleitete
+						Regeln (aus deinen Korrekturen mit Begründung) sind initial <strong>aus</strong>
+						— klick auf den Toggle um sie zu aktivieren.
+					</p>
+					<ul class="mp-list" id="score-overrides-list"></ul>
 				</div>
 			</section>
 

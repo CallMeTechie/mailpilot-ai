@@ -144,6 +144,8 @@ function initSettingsOverlay() {
 			if (name === 'autosort') loadModes();
 			// Phase 6a — Sender-Liste laden beim Tab-Switch.
 			if (name === 'senders') loadSenders();
+			// Phase 9c — Klassifikations-Regeln laden beim Tab-Switch.
+			if (name === 'rules')   loadScoreOverrides();
 		});
 	});
 

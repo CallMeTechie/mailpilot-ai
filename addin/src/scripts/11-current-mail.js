@@ -76,6 +76,13 @@ async function saveCorrection() {
 		}
 		toggle('correct-section', false);
 		showToast('Klassifikation korrigiert — die KI lernt daraus.', 'success', 5000);
+		// Phase 9c: wenn die KI eine generelle Regel abgeleitet hat, einen
+		// zweiten Toast nachschieben — die Regel ist disabled und muss
+		// explizit aktiviert werden im Settings-Subtab „Regeln".
+		if (res?.score_rule_inference?.action === 'created') {
+			const sum = res.score_rule_inference.reasoning_summary || 'Regel erkannt';
+			showToast(`⚙ KI-Vorschlag: „${sum}" — im Settings-Subtab „Regeln" aktivieren.`, 'info', 8000);
+		}
 		setStatus('Bereit');
 		// Counter cards may shift — reload briefing on next tab visit.
 		state.briefingLoaded = false;
