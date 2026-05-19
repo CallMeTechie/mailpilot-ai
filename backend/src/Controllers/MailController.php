@@ -143,6 +143,26 @@ final class MailController extends BaseController
 		$stmt->execute([':id' => $mail['id']]);
 		$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 
+		// Phase 9d (Marc 2026-05-19): Score-Override nachtraeglich auf
+		// existierende Scores anwenden. Greift fuer Mails, die VOR der
+		// Aktivierung einer Regel gescored wurden — sonst blieben sie auf
+		// dem alten KI-Score haengen. scoreBatch hat das beim wasJustScored-
+		// Pfad bereits erledigt, daher nur auf existing scores nachschieben.
+		if (!$wasJustScored && ($r['label'] ?? null) !== null) {
+			try {
+				$applied = $this->kernel->get(MailScoringService::class)
+					->applyOverrideToExistingScore($ctx['tenant_id'], $ctx['user_id'], $mail, [
+						'label'           => $r['label'],
+						'priority'        => isset($r['priority']) ? (int)$r['priority'] : null,
+						'action_required' => isset($r['action_required']) ? (int)(bool)$r['action_required'] : 0,
+					]);
+				if (($applied['matched'] ?? false) && !empty($applied['changes'])) {
+					$stmt->execute([':id' => $mail['id']]);
+					$r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: $r;
+				}
+			} catch (\Throwable) { /* best-effort */ }
+		}
+
 
 		// Click-time AutoSort: run regardless of whether this is the
 		// first score or a stale score we just retrieved. The

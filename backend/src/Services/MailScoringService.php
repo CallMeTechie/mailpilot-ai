@@ -236,6 +236,62 @@ final class MailScoringService
 		unset($row);
 	}
 
+	/**
+	 * Phase 9d (Marc 2026-05-19) — Override-Regeln auf einen bereits
+	 * persistierten Score nachtraeglich anwenden. Wird vom MailController
+	 * an Click-Time aufgerufen, damit nach Aktivieren einer neuen Regel
+	 * eine bereits gescorte Mail beim naechsten Oeffnen den neuen Score
+	 * zeigt — ohne dass wir die ganze Inbox re-scoren muessen.
+	 *
+	 * Idempotent: wenn keine Regel matched, kein DB-Write.
+	 *
+	 * @param array<string,mixed> $mail   row aus mails (incl. from_email, subject)
+	 * @param array<string,mixed> $score  row aus mail_scores (label, priority, action_required, …)
+	 * @return array{matched:bool, rule_id?:string, changes?:array<string,mixed>}
+	 */
+	public function applyOverrideToExistingScore(string $tenantId, string $userId, array $mail, array $score): array
+	{
+		if ($this->scoreOverride === null || $userId === '') {
+			return ['matched' => false];
+		}
+		$bucket = null;
+		if ($this->senderResolver !== null && !empty($mail['from_email'])) {
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, (string)$mail['from_email']);
+			} catch (\Throwable $e) {
+				$this->logger->info('scoring.override_resolve_failed', [
+					'mail_id' => (string)($mail['id'] ?? ''),
+					'err'     => $e->getMessage(),
+				]);
+			}
+		}
+		// Kopie, damit apply() in-place mutiert und wir den Diff vergleichen koennen.
+		$mutated = $score;
+		$result  = $this->scoreOverride->apply($tenantId, $userId, $mail, $mutated, $bucket);
+		if (!($result['matched'] ?? false) || empty($result['changes'])) {
+			return ['matched' => false];
+		}
+		// Persistieren — wir setzen nur die Felder, die die Regel auch
+		// aendern kann (priority, action_required, label). Bewusst KEIN
+		// upsertMany weil das ueberschreibungsfreudig ist; gezieltes UPDATE.
+		try {
+			$this->scores->updateOverrideFields(
+				(string)($mail['id'] ?? ''),
+				$tenantId,
+				$mutated['label']           ?? null,
+				isset($mutated['priority']) ? (int)$mutated['priority'] : null,
+				isset($mutated['action_required']) ? (int)(bool)$mutated['action_required'] : null,
+			);
+		} catch (\Throwable $e) {
+			$this->logger->warning('scoring.override_persist_failed', [
+				'mail_id' => (string)($mail['id'] ?? ''),
+				'err'     => $e->getMessage(),
+			]);
+			return ['matched' => false];
+		}
+		return $result;
+	}
+
 	private function contentHash(array $mail): string
 	{
 		$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');

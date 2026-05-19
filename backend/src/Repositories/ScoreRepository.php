@@ -91,6 +91,45 @@ final class ScoreRepository
 	}
 
 	/**
+	 * Phase 9d (Marc 2026-05-19) — Score-Override anwenden auf bereits
+	 * persistierten Score. Nur die Felder, die eine Override-Regel auch
+	 * setzen kann. user_corrected_fields wird NICHT angefasst — ein User-
+	 * korrigiertes Feld bleibt sticky, eine Override-Regel kann es nicht
+	 * spaeter umschreiben (sonst frustriert das eigene Korrektur-Verhalten).
+	 *
+	 * Null-Args ueberspringen das jeweilige Feld; mindestens eines muss
+	 * gesetzt sein, sonst No-op.
+	 */
+	public function updateOverrideFields(
+		string $mailId,
+		string $tenantId,
+		?string $label,
+		?int $priority,
+		?int $actionRequired,
+	): void {
+		$set = [];
+		$params = [':mid' => $mailId, ':t' => $tenantId];
+		if ($label !== null) {
+			$set[] = 'label = IF(user_corrected_fields IS NOT NULL AND FIND_IN_SET("label", user_corrected_fields), label, :label)';
+			$params[':label'] = $label;
+		}
+		if ($priority !== null) {
+			$set[] = 'priority = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("priority", user_corrected_fields)) OR (user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL), priority, :priority)';
+			$params[':priority'] = $priority;
+		}
+		if ($actionRequired !== null) {
+			$set[] = 'action_required = IF(user_corrected_fields IS NULL AND user_corrected_at IS NOT NULL, action_required, :ar)';
+			$params[':ar'] = $actionRequired;
+		}
+		if ($set === []) {
+			return;
+		}
+		$sql = 'UPDATE mail_scores SET ' . implode(', ', $set)
+			. ' WHERE mail_id = :mid AND tenant_id = :t';
+		$this->db->prepare($sql)->execute($params);
+	}
+
+	/**
 	 * @return array<string, int>
 	 */
 	public function countByLabelSince(string $tenantId, string $mailboxId, string $sinceUtc): array

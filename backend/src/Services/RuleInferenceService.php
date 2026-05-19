@@ -479,6 +479,14 @@ final class RuleInferenceService
 			];
 		}
 
+		// Phase 9d (Marc 2026-05-19): Bei hoher Confidence direkt aktivieren,
+		// statt den User zum Settings-Tab zu schicken. Schwelle ueber
+		// system_settings.score_rule_auto_enable_threshold konfigurierbar
+		// (Migration 0037; default 85 = synchron mit Prompt-Definition).
+		$confidence    = (int)($parsed['confidence'] ?? 0);
+		$autoThreshold = $this->settings->getInt('score_rule_auto_enable_threshold', 85);
+		$autoEnabled   = $confidence >= $autoThreshold;
+
 		// Repo-create validiert Match-Felder (min 1) + Regex-Syntax.
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
@@ -490,7 +498,7 @@ final class RuleInferenceService
 				'set_priority'        => $parsed['set_priority']        ?? null,
 				'set_action_required' => $parsed['set_action_required'] ?? null,
 				'set_label'           => $parsed['set_label']           ?? null,
-				'enabled'             => false,           // User muss aktivieren
+				'enabled'             => $autoEnabled,
 				'source'              => 'ki_inferred',
 			]);
 		} catch (\InvalidArgumentException $e) {
@@ -503,13 +511,15 @@ final class RuleInferenceService
 
 		$this->logger->info('rule_inference.score_rule_created', [
 			'rule_id'    => $ruleId,
-			'confidence' => (int)($parsed['confidence'] ?? 0),
+			'confidence' => $confidence,
+			'auto_enabled' => $autoEnabled,
 			'mail_id'    => $mailId,
 		]);
 		return [
 			'action'            => 'created',
 			'rule_id'           => $ruleId,
-			'confidence'        => (int)($parsed['confidence'] ?? 0),
+			'confidence'        => $confidence,
+			'auto_enabled'      => $autoEnabled,
 			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
 		];
 	}

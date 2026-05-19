@@ -54,11 +54,25 @@ async function saveCorrection() {
 	if (!state.currentMailData) return;
 	const expectedMailId = state.currentMailId;
 	const mailDbId = state.currentMailData.id;
+	const reasoning = document.getElementById('correct-reasoning').value.trim();
+	// Phase 9d (Marc 2026-05-19): Ohne Begruendung lernt die KI nichts.
+	// Statt stillem Speichern explizit nachfragen, damit Marc nicht denkt,
+	// die KI haette zugehoert. Cancel → return, OK → speichern ohne Inferenz.
+	if (reasoning === '') {
+		const proceed = window.confirm(
+			'Ohne Begründung lernt MailPilot nicht für zukünftige Mails. '
+			+ 'Nur diese eine Mail wird korrigiert.\n\nTrotzdem speichern?'
+		);
+		if (!proceed) {
+			document.getElementById('correct-reasoning').focus();
+			return;
+		}
+	}
 	const payload = {
 		label:           document.getElementById('correct-label').value,
 		priority:        parseInt(document.getElementById('correct-priority').value, 10),
 		action_required: document.getElementById('correct-action-required').checked,
-		reasoning:       document.getElementById('correct-reasoning').value.trim() || null,
+		reasoning:       reasoning || null,
 	};
 	setStatus('Korrektur speichern…');
 	try {
@@ -76,12 +90,17 @@ async function saveCorrection() {
 		}
 		toggle('correct-section', false);
 		showToast('Klassifikation korrigiert — die KI lernt daraus.', 'success', 5000);
-		// Phase 9c: wenn die KI eine generelle Regel abgeleitet hat, einen
-		// zweiten Toast nachschieben — die Regel ist disabled und muss
-		// explizit aktiviert werden im Settings-Subtab „Regeln".
+		// Phase 9c/9d: wenn die KI eine generelle Regel abgeleitet hat, Toast
+		// nachschieben. Bei hoher Confidence (>= score_rule_auto_enable_threshold,
+		// default 85) ist die Regel bereits aktiv; sonst muss der User sie im
+		// Settings-Subtab „Regeln" aktivieren.
 		if (res?.score_rule_inference?.action === 'created') {
 			const sum = res.score_rule_inference.reasoning_summary || 'Regel erkannt';
-			showToast(`⚙ KI-Vorschlag: „${sum}" — im Settings-Subtab „Regeln" aktivieren.`, 'info', 8000);
+			if (res.score_rule_inference.auto_enabled) {
+				showToast(`✅ KI-Regel aktiv: „${sum}" — wirkt sofort auf neue Mails.`, 'success', 8000);
+			} else {
+				showToast(`⚙ KI-Vorschlag: „${sum}" — im Settings-Subtab „Regeln" aktivieren.`, 'info', 8000);
+			}
 		}
 		setStatus('Bereit');
 		// Counter cards may shift — reload briefing on next tab visit.

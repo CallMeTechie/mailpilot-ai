@@ -80,3 +80,18 @@
 	margin-bottom: var(--mp-sp-2);
 	font-size: 13px;
 }
+
+/* Phase 9d (Marc 2026-05-19) — Reasoning-Hint: Begruendung ist Pflicht
+   fuer KI-Lernen. Wenn der User das Feld leer laesst, fragt das JS
+   nach (Confirm). Hint visuell hervorgehoben, sonst uebersehen. */
+#correct-section .mp-reasoning-hint {
+	display: block;
+	margin: var(--mp-sp-2) 0 4px;
+	font-size: 12px;
+	color: var(--mp-text-muted);
+	line-height: 1.4;
+}
+#correct-section .mp-reasoning-hint strong {
+	color: var(--mp-color-accent, #2563eb);
+	font-weight: 600;
+}

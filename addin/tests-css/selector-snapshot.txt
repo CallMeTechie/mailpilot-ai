@@ -3,6 +3,8 @@
 #correct-section .mp-field
 #correct-section .mp-field label
 #correct-section .mp-field select
+#correct-section .mp-reasoning-hint
+#correct-section .mp-reasoning-hint strong
 #correct-section textarea
 *
 .mp-action-text
