@@ -127,7 +127,11 @@ final class AutoSortServiceTest extends TestCase
 		);
 
 		$this->assertFalse($res['moved']);
-		$this->assertSame('high_priority_protected', $res['reason']);
+		// Phase 9f (2026-05-19): Pin-Logik nutzt jetzt Priority direkt —
+		// Prio 5 wird vom neuen inbox_pinned_priority-Pfad gefangen, bevor
+		// der Legacy-high_priority_protected-Fallback ueberhaupt erreicht
+		// wird. Funktional identisch (moved=false), nur anderer reason-String.
+		$this->assertSame('inbox_pinned_priority', $res['reason']);
 		$this->assertSame([], $graph->moveCalls, 'Must never call Graph for protected mails');
 	}
 
@@ -162,7 +166,11 @@ final class AutoSortServiceTest extends TestCase
 		);
 
 		$this->assertFalse($res['moved']);
-		$this->assertSame('user_action_required', $res['reason']);
+		// Phase 9f (2026-05-19): Prio 4 wird jetzt vom neuen Priority-Pin
+		// gefangen, bevor der Legacy-user_action_required-Fallback greift.
+		// Funktional weiterhin geschuetzt — die action_owner='user'-Logik
+		// bleibt im Code als Fallback fuer Prio<minPrio mit user-action.
+		$this->assertSame('inbox_pinned_priority', $res['reason']);
 		$this->assertSame([], $graph->moveCalls,
 			'User-action-required mails dürfen nicht verschoben werden, auch wenn label="auto"');
 	}
