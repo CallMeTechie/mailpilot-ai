@@ -332,7 +332,6 @@
 		<nav class="mp-settings-subtabs" role="tablist">
 			<button class="mp-subtab is-active" data-subtab="profile"  role="tab">Profil &amp; Filter</button>
 			<button class="mp-subtab"           data-subtab="senders"  role="tab">Absender</button>
-			<button class="mp-subtab"           data-subtab="topics"   role="tab">Topics</button>
 			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
 			<button class="mp-subtab"           data-subtab="modes"    role="tab">Modi</button>
 			<button class="mp-subtab"           data-subtab="maint"    role="tab">Wartung</button>
@@ -410,27 +409,10 @@
 				</div>
 			</section>
 
-			<!-- Topics: Unter-Kategorien -->
-			<section class="mp-subpanel" data-subpanel="topics">
-				<div class="mp-section">
-					<h2>Unter-Kategorien</h2>
-					<p class="mp-muted">Eigene Buckets unter den sechs Klassen. Die KI bekommt diese Liste mit und kann eine passende auswählen — z. B. <code>auto → GitHub CI</code> oder <code>auto → Bestellung</code>. Optional.</p>
-					<div class="mp-field mp-field-row">
-						<select id="sub-parent">
-							<option value="direct">Direkt</option>
-							<option value="action">Aktion</option>
-							<option value="cc">CC</option>
-							<option value="newsletter">Newsletter</option>
-							<option value="auto" selected>Auto</option>
-							<option value="noise">Noise</option>
-						</select>
-						<input type="text" id="sub-name" placeholder="z. B. GitHub CI" maxlength="50">
-						<input type="text" id="sub-desc" placeholder="Beschreibung (optional)" maxlength="200">
-						<button class="mp-btn mp-btn-secondary" id="btn-add-sub">Hinzufügen</button>
-					</div>
-					<ul class="mp-list" id="sub-list"></ul>
-				</div>
-			</section>
+			<!-- Phase 6b (Marc 2026-05-19): „Topics"-Subtab entfernt.
+			     Sub-Label-Discovery laeuft jetzt vollautomatisch via KI
+			     (SubLabelDiscoverer in Phase 3a/3b). User-Override falls
+			     gewuenscht: ueber den „Auto-Sort"-Subtab direkt unten. -->
 
 			<!-- Auto-Sort: Catch-all + Sub-Regeln + Apply -->
 			<section class="mp-subpanel" data-subpanel="autosort">

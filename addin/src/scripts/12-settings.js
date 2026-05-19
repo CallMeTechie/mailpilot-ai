@@ -210,52 +210,10 @@ function initSettings() {
 		} catch (err) { handleError(err); }
 	});
 
-	document.getElementById('btn-add-sub')?.addEventListener('click', async () => {
-		const parent = document.getElementById('sub-parent').value;
-		const name   = document.getElementById('sub-name').value.trim();
-		const desc   = document.getElementById('sub-desc').value.trim();
-		if (!parent || !name) return;
-		try {
-			await api.settings.addSubLabel({ parent, name, description: desc || null });
-			document.getElementById('sub-name').value = '';
-			document.getElementById('sub-desc').value = '';
-			loadSettings();
-		} catch (err) { handleError(err); }
-	});
-
-	document.getElementById('sub-list')?.addEventListener('click', async (e) => {
-		const btn = e.target.closest('button.remove');
-		if (!btn) return;
-
-		// Look the sub-label up in the cache so we can preview its name
-		// and any AutoSort rules that will cascade with it.
-		const id   = btn.dataset.id;
-		const meta = findSubLabelMetaById(id);
-		const deps = meta ? dependentRulesForSubLabel(meta.parent, meta.name) : [];
-
-		const title = meta
-			? `Unter-Kategorie "${labelText(meta.parent)} / ${meta.name}" löschen?`
-			: 'Unter-Kategorie löschen?';
-		let body = '';
-		if (deps.length > 0) {
-			const list = deps.map((r) => '• ' + r.folder_name).join('\n');
-			body = `Diese ${deps.length} Auto-Sort-Sub-Regel(n) werden mitgelöscht:\n${list}`;
-		}
-		if (!await mpConfirm({ title, body, okLabel: 'Löschen', danger: true })) return;
-
-		try {
-			const res = await api.settings.deleteSubLabel(id);
-			loadSettings();
-			const removed = (res && typeof res.deleted_rules === 'number') ? res.deleted_rules : 0;
-			showToast(
-				removed > 0
-					? `Sub-Kategorie + ${removed} Auto-Sort-Regel${removed === 1 ? '' : 'n'} entfernt`
-					: 'Sub-Kategorie entfernt',
-				'success',
-				3500,
-			);
-		} catch (err) { handleError(err); }
-	});
+	// Phase 6b (2026-05-19): „Topics"-Subtab entfernt. Die add-/delete-Handler
+	// fuer Sub-Labels sind weg; der Sub-Label-Cache (autoSortRulesCache, fuer
+	// Auto-Sort-Sub-Regeln) wird in loadSettings weiterhin gefuellt, damit
+	// der Auto-Sort-Subtab die KI-discovered Sub-Labels anzeigen kann.
 
 	document.getElementById('btn-add-autosort-sub')?.addEventListener('click', addAutoSortSubRule);
 	document.getElementById('autosort-sub-rows')?.addEventListener('click', async (e) => {
