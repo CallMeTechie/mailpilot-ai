@@ -7,6 +7,7 @@ RUN apk add --no-cache \
 		git \
 		unzip \
 		openssl \
+		icu-libs \
 	&& apk add --no-cache --virtual .build-deps \
 		$PHPIZE_DEPS \
 		autoconf \
@@ -14,9 +15,11 @@ RUN apk add --no-cache \
 		g++ \
 		make \
 		pkgconfig \
+		icu-dev \
 	&& docker-php-ext-install \
 		pdo_mysql \
 		opcache \
+		intl \
 	&& pecl install redis \
 	&& docker-php-ext-enable redis \
 	&& apk del .build-deps
