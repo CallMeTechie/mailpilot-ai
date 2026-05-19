@@ -404,6 +404,8 @@ function initSettingsOverlay() {
 			// Sprint 6g — Rule-Inference Settings liegen im Auto-Sort-Tab.
 			// Modes-Endpoint liefert beides, daher derselbe Loader.
 			if (name === 'autosort') loadModes();
+			// Phase 6a — Sender-Liste laden beim Tab-Switch.
+			if (name === 'senders') loadSenders();
 		});
 	});
 
@@ -2821,6 +2823,109 @@ function renderList(id, items, labelFn, _deleteMethod) {
 		li.innerHTML = `<span>${labelFn(item)}</span><button class="remove" data-id="${item.id}">×</button>`;
 		ul.appendChild(li);
 	});
+}
+
+// ============================================================
+// Phase 6a — Sender-Verwaltung (Marc 2026-05-19)
+// ============================================================
+
+async function loadSenders() {
+	try {
+		const res = await api.settings.listSenders();
+		renderSenders(res?.items ?? []);
+	} catch (err) {
+		handleError(err);
+	}
+}
+
+function renderSenders(items) {
+	const root = document.getElementById('senders-list');
+	if (!root) return;
+	root.replaceChildren();
+
+	if (items.length === 0) {
+		const empty = document.createElement('li');
+		empty.className = 'mp-muted';
+		empty.textContent = 'Noch keine Absender erkannt — kommt nach dem ersten Sync.';
+		root.appendChild(empty);
+		return;
+	}
+
+	const trustOptions = [
+		{ v: 'trusted',         t: 'Vertraut' },
+		{ v: 'unknown',         t: 'Unbekannt' },
+		{ v: 'suspected_spoof', t: 'Verdächtig' },
+	];
+
+	for (const s of items) {
+		const li = document.createElement('li');
+		li.className = 'mp-sender-row';
+		li.dataset.senderId = s.id;
+		if (s.trust_status === 'suspected_spoof') li.classList.add('is-spoof');
+
+		// Stem-Chip (read-only)
+		const stem = document.createElement('span');
+		stem.className = 'mp-sender-stem';
+		stem.textContent = s.sender_key;
+		stem.title = (s.registrable_domains || []).join(', ');
+
+		// Display-Name input
+		const nameInput = document.createElement('input');
+		nameInput.type = 'text';
+		nameInput.className = 'mp-sender-name';
+		nameInput.value = s.display_name;
+		nameInput.maxLength = 120;
+		nameInput.placeholder = 'Anzeige-Name';
+
+		// Root-folder input
+		const folderInput = document.createElement('input');
+		folderInput.type = 'text';
+		folderInput.className = 'mp-sender-folder';
+		folderInput.value = s.root_folder_name;
+		folderInput.maxLength = 120;
+		folderInput.placeholder = 'Wurzelordner';
+
+		// Trust-Status select
+		const trustSel = document.createElement('select');
+		trustSel.className = 'mp-sender-trust';
+		for (const o of trustOptions) {
+			const opt = document.createElement('option');
+			opt.value = o.v;
+			opt.textContent = o.t;
+			if (s.trust_status === o.v) opt.selected = true;
+			trustSel.appendChild(opt);
+		}
+
+		// Save-Button
+		const saveBtn = document.createElement('button');
+		saveBtn.className = 'mp-btn mp-btn-secondary mp-sender-save';
+		saveBtn.textContent = 'Speichern';
+		saveBtn.addEventListener('click', () => saveSender(s.id, li));
+
+		li.append(stem, nameInput, folderInput, trustSel, saveBtn);
+		root.appendChild(li);
+	}
+}
+
+async function saveSender(senderId, rowEl) {
+	const name   = rowEl.querySelector('.mp-sender-name')?.value.trim()   || '';
+	const folder = rowEl.querySelector('.mp-sender-folder')?.value.trim() || '';
+	const trust  = rowEl.querySelector('.mp-sender-trust')?.value         || 'unknown';
+	const btn    = rowEl.querySelector('.mp-sender-save');
+
+	if (btn) { btn.disabled = true; btn.textContent = '…'; }
+	try {
+		await api.settings.updateSender(senderId, {
+			display_name:     name,
+			root_folder_name: folder,
+			trust_status:     trust,
+		});
+		showToast('Absender gespeichert.', 'success', 3000);
+	} catch (err) {
+		handleError(err);
+	} finally {
+		if (btn) { btn.disabled = false; btn.textContent = 'Speichern'; }
+	}
 }
 
 // ============================================================

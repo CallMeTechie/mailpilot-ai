@@ -142,6 +142,8 @@ function initSettingsOverlay() {
 			// Sprint 6g — Rule-Inference Settings liegen im Auto-Sort-Tab.
 			// Modes-Endpoint liefert beides, daher derselbe Loader.
 			if (name === 'autosort') loadModes();
+			// Phase 6a — Sender-Liste laden beim Tab-Switch.
+			if (name === 'senders') loadSenders();
 		});
 	});
 

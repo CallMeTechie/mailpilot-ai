@@ -187,6 +187,9 @@ export const api = {
 		addSubLabel:     (payload) => request('POST',   '/settings/sub-labels', payload),
 		updateSubLabel:  (id, p)   => request('PATCH',  `/settings/sub-labels/${id}`, p),
 		deleteSubLabel:  (id)      => request('DELETE', `/settings/sub-labels/${id}`),
+		// Phase 6a — Sender-Verwaltung (display_name, root_folder_name, trust_status)
+		listSenders:     ()        => request('GET',    '/settings/senders'),
+		updateSender:    (id, p)   => request('PATCH',  `/settings/senders/${id}`, p),
 	},
 	me: {
 		export:        ()      => request('GET',    '/me/export'),

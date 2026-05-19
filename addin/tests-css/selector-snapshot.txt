@@ -190,6 +190,13 @@
 .mp-section
 .mp-section > h2
 .mp-section > h3
+.mp-sender-folder
+.mp-sender-name
+.mp-sender-row
+.mp-sender-row.is-spoof
+.mp-sender-save
+.mp-sender-stem
+.mp-sender-trust
 .mp-settings-content
 .mp-settings-head
 .mp-settings-overlay

@@ -60,6 +60,9 @@ $router->get   ('/api/v1/settings/sub-labels',       'SubLabelController@listSub
 $router->post  ('/api/v1/settings/sub-labels',       'SubLabelController@addSubLabel');
 $router->patch ('/api/v1/settings/sub-labels/{id}',  'SubLabelController@updateSubLabel');
 $router->delete('/api/v1/settings/sub-labels/{id}',  'SubLabelController@deleteSubLabel');
+// Phase 6a — Sender-Verwaltung (display_name, root_folder_name, trust_status)
+$router->get   ('/api/v1/settings/senders',          'SenderController@listSenders');
+$router->patch ('/api/v1/settings/senders/{id}',     'SenderController@updateSender');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

@@ -11,6 +11,7 @@ async function loadBriefing
 async function loadCurrentMailScore
 async function loadModes
 async function loadPending
+async function loadSenders
 async function loadSettings
 async function loadToday
 async function markCurrentMailDone
@@ -29,6 +30,7 @@ async function saveAutoSort
 async function saveCorrection
 async function saveModes
 async function saveRuleInference
+async function saveSender
 async function summarizeCurrent
 const aliasState
 const BULK_ACTIONS
@@ -91,6 +93,7 @@ function renderList
 function renderPending
 function renderPendingList
 function renderPinnedList
+function renderSenders
 function renderSubLabels
 function renderTodaySection
 function resetCurrentMailUi

@@ -140,3 +140,53 @@
 	opacity: 0.6;
 	cursor: progress;
 }
+
+/* ============================================================
+ * Phase 6a — Sender-Verwaltung Settings-Subtab
+ * ============================================================ */
+
+.mp-sender-row {
+	display: grid;
+	grid-template-columns: 80px 1fr 1fr 110px auto;
+	gap: 6px;
+	align-items: center;
+	padding: 6px 8px;
+	border: 1px solid var(--mp-color-border, #e2e8f0);
+	border-radius: 4px;
+	background: #fff;
+	margin-bottom: 4px;
+}
+.mp-sender-row.is-spoof {
+	border-left: 4px solid #f59e0b;
+	background: #fffbeb;
+}
+
+.mp-sender-stem {
+	display: inline-block;
+	padding: 2px 6px;
+	border-radius: 3px;
+	background: #1e293b;
+	color: #fff;
+	font-size: 11px;
+	font-weight: 600;
+	font-family: var(--mp-font-mono, monospace);
+	text-align: center;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.mp-sender-name,
+.mp-sender-folder,
+.mp-sender-trust {
+	font-size: 12px;
+	padding: 4px 6px;
+	border: 1px solid #cbd5e1;
+	border-radius: 3px;
+	min-width: 0;          /* erlaubt shrink in grid-cell */
+}
+
+.mp-sender-save {
+	font-size: 11px;
+	padding: 4px 8px;
+	white-space: nowrap;
+}

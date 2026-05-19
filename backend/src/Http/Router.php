@@ -11,6 +11,7 @@ use MailPilot\Controllers\PendingController;
 use MailPilot\Controllers\Settings\AutoSortController;
 use MailPilot\Controllers\Settings\ModesController;
 use MailPilot\Controllers\Settings\RedactionController;
+use MailPilot\Controllers\Settings\SenderController;
 use MailPilot\Controllers\Settings\SubLabelController;
 use MailPilot\Controllers\Settings\UserSettingsController;
 use MailPilot\Controllers\Settings\VipController;
@@ -110,6 +111,7 @@ final class Router
 			'AutoSortController'      => AutoSortController::class,
 			'SubLabelController'      => SubLabelController::class,
 			'ModesController'         => ModesController::class,
+			'SenderController'        => SenderController::class,
 			default                   => throw new \RuntimeException("Unknown controller: {$controllerName}"),
 		};
 

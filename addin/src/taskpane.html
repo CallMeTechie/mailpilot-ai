@@ -331,6 +331,7 @@
 
 		<nav class="mp-settings-subtabs" role="tablist">
 			<button class="mp-subtab is-active" data-subtab="profile"  role="tab">Profil &amp; Filter</button>
+			<button class="mp-subtab"           data-subtab="senders"  role="tab">Absender</button>
 			<button class="mp-subtab"           data-subtab="topics"   role="tab">Topics</button>
 			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
 			<button class="mp-subtab"           data-subtab="modes"    role="tab">Modi</button>
@@ -389,6 +390,23 @@
 						<button class="mp-btn mp-btn-secondary" id="btn-add-red">Hinzufügen</button>
 					</div>
 					<ul class="mp-list" id="red-list"></ul>
+				</div>
+			</section>
+
+			<!-- Phase 6a (Marc 2026-05-19): Absender-Verwaltung. Liste aller
+			     von der KI in Phase 3a registrierten Sender, mit editierbarem
+			     Display-Name, Root-Folder und Trust-Status. -->
+			<section class="mp-subpanel" data-subpanel="senders">
+				<div class="mp-section">
+					<h2>Absender</h2>
+					<p class="mp-muted">
+						Hier siehst du alle Marken/Domains, die MailPilot erkannt hat.
+						<strong>Anzeige-Name</strong> + <strong>Wurzelordner</strong> editierbar — bestimmen
+						wohin Mails dieses Absenders einsortiert werden. <strong>Trust-Status</strong>:
+						<code>vertraut</code> = darf sortiert werden, <code>unbekannt</code> = neu,
+						<code>verdächtig</code> = Lookalike-Domain (bleibt in Inbox).
+					</p>
+					<ul class="mp-list" id="senders-list"></ul>
 				</div>
 			</section>
 

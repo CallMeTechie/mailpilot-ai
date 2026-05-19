@@ -127,6 +127,28 @@ final class SenderRepository
 		$update->execute([':d' => $d, ':id' => $senderId, ':t' => $tenantId]);
 	}
 
+	/**
+	 * Phase 6a (Marc 2026-05-19) — User benennt Sender um (display_name)
+	 * oder waehlt einen anderen Outlook-Folder als Bucket-Root.
+	 * Aufrufer (SenderController) validiert die Eingaben.
+	 */
+	public function updateDisplayAndFolder(
+		string $tenantId,
+		string $senderId,
+		string $displayName,
+		string $rootFolderName,
+	): void {
+		$stmt = $this->db->prepare('UPDATE senders
+			SET display_name = :dn, root_folder_name = :fn
+			WHERE id = :id AND tenant_id = :t');
+		$stmt->execute([
+			':dn' => $displayName,
+			':fn' => $rootFolderName,
+			':id' => $senderId,
+			':t'  => $tenantId,
+		]);
+	}
+
 	public function updateTrustStatus(
 		string $tenantId,
 		string $senderId,
