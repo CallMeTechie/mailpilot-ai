@@ -81,7 +81,9 @@ abstract class TestCase extends BaseTestCase
 			// vor den Sub-Tabellen truncated und FK_CHECKS=0 deaktiviert
 			// CASCADE — daher explizit wischen.
 			'sender_projects',
-			'senders'];
+			'senders',
+			// 0035: Phase 9a — Klassifikations-Overrides.
+			'score_override_rules'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

@@ -17,6 +17,7 @@ use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
+use MailPilot\Repositories\ScoreOverrideRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\PromptRepository;
@@ -39,6 +40,7 @@ use MailPilot\Services\RedactionService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
 use MailPilot\Services\RuleInferenceService;
+use MailPilot\Services\ScoreOverrideService;
 use MailPilot\Services\Sender\FolderPathBuilder;
 use MailPilot\Services\Sender\LookalikeDetector;
 use MailPilot\Services\Sender\SenderResolver;
@@ -119,6 +121,7 @@ class Kernel
 			CorrectionRepository::class => new CorrectionRepository($this->get(PDO::class)),
 			SubLabelRepository::class => new SubLabelRepository($this->get(PDO::class)),
 			SenderRepository::class   => new SenderRepository($this->get(PDO::class)),
+			ScoreOverrideRepository::class => new ScoreOverrideRepository($this->get(PDO::class)),
 			PromptRepository::class   => new PromptRepository($this->get(PDO::class)),
 			SettingsRepository::class => new SettingsRepository($this->get(PDO::class)),
 			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
@@ -175,6 +178,11 @@ class Kernel
 				$this->get(SenderRepository::class),
 				$this->get(Logger::class),
 			),
+			// Phase 9a: Klassifikations-Overrides
+			ScoreOverrideService::class => new ScoreOverrideService(
+				$this->get(ScoreOverrideRepository::class),
+				$this->get(Logger::class),
+			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 			),
@@ -212,6 +220,8 @@ class Kernel
 				// Absender + flippt spoof_suspect bei Lookalike-Treffer.
 				$this->get(SenderResolver::class),
 				$this->get(LookalikeDetector::class),
+				// Phase 9a: Klassifikations-Overrides nach KI-Score.
+				$this->get(ScoreOverrideService::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

@@ -67,6 +67,11 @@ final class MailScoringService
 		// beide via Kernel verdrahtet — siehe Kernel::get(MailScoringService).
 		private readonly ?SenderResolver $senderResolver = null,
 		private readonly ?LookalikeDetector $lookalikeDetector = null,
+		// Phase 9a (Marc 2026-05-19): deterministische Klassifikations-
+		// Overrides. Greift NACH KI-Score, mutiert priority/action_required/
+		// label gemaess User-Regeln. Optional damit bestehende Tests
+		// unangetastet bleiben.
+		private readonly ?ScoreOverrideService $scoreOverride = null,
 	) {
 		$this->promptBuilder = new ScoringPromptBuilder($settings, $corrections, $autoSortCorrections);
 		$this->actionOwner = new ActionOwnerResolver(
@@ -144,7 +149,8 @@ final class MailScoringService
 
 		// Phase 3a: Sender-Bucket + Spoof-Erkennung. Mutiert $scored in-place
 		// (haengt spoof_suspect-Flag an jede Row, wenn Resolver verfuegbar).
-		$this->enrichScoresWithSender($tenantId, $mails, $scored);
+		// Phase 9a: zusaetzlich ScoreOverrideService — User-ID aus dem Profile.
+		$this->enrichScoresWithSender($tenantId, $userId, $mails, $scored);
 
 		$this->scores->upsertMany($scored);
 		return $scored;
@@ -162,7 +168,7 @@ final class MailScoringService
 	 * @param list<array<string,mixed>> $mails
 	 * @param list<array<string,mixed>> $scored mutiert in-place
 	 */
-	private function enrichScoresWithSender(string $tenantId, array $mails, array &$scored): void
+	private function enrichScoresWithSender(string $tenantId, string $userId, array $mails, array &$scored): void
 	{
 		if ($this->senderResolver === null) {
 			return;
@@ -182,31 +188,49 @@ final class MailScoringService
 			$from = (string)($mail['from_email'] ?? '');
 			if ($from === '') continue;
 
+			$bucketForOverride = null;
 			try {
 				$bucket = $this->senderResolver->resolve($tenantId, $from);
 				if ($bucket === null) {
-					continue;
-				}
-				// Wenn bucket frisch unknown ist, durch den LookalikeDetector
-				// schicken — der flippt trust_status ggf. auf suspected_spoof.
-				if ($bucket['trust_status'] === 'unknown' && $this->lookalikeDetector !== null) {
-					$result = $this->lookalikeDetector->check(
-						$tenantId,
-						(string)$bucket['id'],
-						(string)$bucket['sender_key'],
-					);
-					if ($result['spoof'] ?? false) {
-						$row['spoof_suspect'] = 1;
-						continue;
+					// Sender-Resolution fehlgeschlagen, trotzdem Override moeglich
+					// auf Basis von subject/from_local/label/priority.
+				} else {
+					$bucketForOverride = $bucket;
+					// Wenn bucket frisch unknown ist, durch den LookalikeDetector
+					// schicken — der flippt trust_status ggf. auf suspected_spoof.
+					if ($bucket['trust_status'] === 'unknown' && $this->lookalikeDetector !== null) {
+						$result = $this->lookalikeDetector->check(
+							$tenantId,
+							(string)$bucket['id'],
+							(string)$bucket['sender_key'],
+						);
+						if ($result['spoof'] ?? false) {
+							$row['spoof_suspect'] = 1;
+						}
+					}
+					if (!isset($row['spoof_suspect'])) {
+						$row['spoof_suspect'] = $bucket['trust_status'] === 'suspected_spoof' ? 1 : 0;
 					}
 				}
-				$row['spoof_suspect'] = $bucket['trust_status'] === 'suspected_spoof' ? 1 : 0;
 			} catch (\Throwable $e) {
 				$this->logger->warning('scoring.sender_enrich_failed', [
 					'mail_id' => $mid,
 					'from'    => $from,
 					'err'     => $e->getMessage(),
 				]);
+			}
+
+			// Phase 9a: ScoreOverride NACH dem Sender-Resolve. Mutiert $row
+			// in-place wenn eine Regel matched. Best-effort — Fehler werfen
+			// nicht den ganzen Score-Pfad raus.
+			if ($this->scoreOverride !== null && $userId !== '') {
+				try {
+					$this->scoreOverride->apply($tenantId, $userId, $mail, $row, $bucketForOverride);
+				} catch (\Throwable $e) {
+					$this->logger->warning('scoring.override_failed', [
+						'mail_id' => $mid, 'err' => $e->getMessage(),
+					]);
+				}
 			}
 		}
 		unset($row);
