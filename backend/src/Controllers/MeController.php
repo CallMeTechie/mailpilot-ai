@@ -44,6 +44,8 @@ final class MeController extends BaseController
 			'usage_daily',
 			'pending_actions',
 			'usage_counters',
+			// Phase 9a (2026-05-19): Klassifikations-Override-Regeln pro User.
+			'score_override_rules',
 		];
 	}
 
@@ -72,6 +74,8 @@ final class MeController extends BaseController
 			'pending_actions',
 			'usage_counters',
 			'reply_drafts',
+			// Phase 9a (2026-05-19): Klassifikations-Override-Regeln pro User.
+			'score_override_rules',
 		];
 	}
 
@@ -173,6 +177,13 @@ final class MeController extends BaseController
 			'usage_counters' => $fetch('SELECT kind, `date`, count, updated_at
 				FROM usage_counters WHERE user_id = :u
 				ORDER BY `date` DESC, kind', [':u' => $u]),
+			// Phase 9a (2026-05-19): User-Klassifikations-Override-Regeln.
+			'score_override_rules' => $fetch('SELECT match_sender_key, match_subject_regex,
+					match_from_local, match_label, match_priority_min,
+					set_priority, set_action_required, set_label,
+					enabled, source, applies_count, last_applied_at, created_at
+				FROM score_override_rules WHERE user_id = :u AND deleted_at IS NULL
+				ORDER BY created_at DESC', [':u' => $u]),
 		];
 
 		Response::json($export);
@@ -218,6 +229,10 @@ final class MeController extends BaseController
 			// Spalte (vorher nur FK-Cascade via mails). Explizites Hard-Delete
 			// um auch Orphan-Drafts ohne Mail-Referenz zu räumen.
 			$pdo->prepare('DELETE FROM reply_drafts WHERE user_id = :u')->execute([':u' => $u]);
+			// Phase 9a (2026-05-19) — Klassifikations-Override-Regeln. Soft-Delete
+			// statt Hard, damit Wiederherstellung im 30-Tage-Fenster moeglich ist
+			// (analog auto_sort_corrections).
+			$pdo->prepare("UPDATE score_override_rules SET deleted_at = {$now} WHERE user_id = :u")->execute([':u' => $u]);
 
 			$pdo->prepare('INSERT INTO audit_log (tenant_id, user_id, event, entity, entity_id, meta_json)
 				VALUES (:t, :u, "user.delete_request", "user", :id, NULL)')
