@@ -114,6 +114,9 @@ final class BriefingController extends BaseController
 		// nach inbox_score. Schwelle aus dem neuen Setting inbox_pin_priority_min.
 		$minPrio = max(1, min(5, $settings->getInt('inbox_pin_priority_min', 4)));
 
+		// Phase 9i (Marc 2026-05-20): Sent-Mails aus der Pinned-Liste raus —
+		// gesendete Mails sind kein „to-do", auch wenn ihre Prio hoch ist.
+		// mb.sent_folder_id wird vom AutoSortService self-healed.
 		$sql = "SELECT m.id, m.ms_message_id, m.subject, m.from_email, m.from_name, m.received_at,
 				s.inbox_score, s.spoof_suspect, s.folder_segments, s.label, s.priority
 			FROM mails m
@@ -127,6 +130,8 @@ final class BriefingController extends BaseController
 			  AND s.auto_sorted_at IS NULL
 			  AND s.priority IS NOT NULL
 			  AND s.priority >= :prio
+			  AND (mb.sent_folder_id IS NULL OR m.parent_folder_id IS NULL
+			       OR m.parent_folder_id <> mb.sent_folder_id)
 			ORDER BY s.priority DESC, m.received_at DESC
 			LIMIT 50";
 		$stmt = $pdo->prepare($sql);

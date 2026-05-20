@@ -24,6 +24,17 @@ final class GraphFolderClient
 	/**
 	 * @return array{id:string, displayName:string, parentFolderId:?string}|null
 	 */
+	/**
+	 * Phase 9i (Marc 2026-05-20) — resolve well-known folder name (z.B.
+	 * 'sentitems', 'inbox', 'deleteditems') zur Graph-Folder-ID. Graph
+	 * akzeptiert den well-known name an Stelle der ID im URL.
+	 */
+	public function resolveWellKnown(string $accessToken, string $wellKnownName): ?string
+	{
+		$row = $this->get($accessToken, $wellKnownName);
+		return $row !== null ? $row['id'] : null;
+	}
+
 	public function get(string $accessToken, string $folderId): ?array
 	{
 		$url = self::GRAPH_BASE . '/me/mailFolders/' . rawurlencode($folderId)

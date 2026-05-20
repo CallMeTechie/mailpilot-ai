@@ -147,6 +147,15 @@ class GraphClient
 		return $this->folder->get($accessToken, $folderId);
 	}
 
+	/**
+	 * Phase 9i (Marc 2026-05-20) — Well-known Folder-Namen (sentitems, inbox,
+	 * deleteditems, …) zur Graph-Folder-ID aufloesen.
+	 */
+	public function resolveWellKnownFolder(string $accessToken, string $wellKnownName): ?string
+	{
+		return $this->folder->resolveWellKnown($accessToken, $wellKnownName);
+	}
+
 	public function findChildFolderByName(string $accessToken, string $displayName, ?string $parentId = null): ?string
 	{
 		return $this->folder->findChildByName($accessToken, $displayName, $parentId);

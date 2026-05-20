@@ -97,4 +97,14 @@ class MailboxRepository
 			WHERE id = :id');
 		$stmt->execute([':d' => $deltaToken, ':id' => $id]);
 	}
+
+	/**
+	 * Phase 9i (Marc 2026-05-20) — Sent-Folder-ID cachen, damit AutoSortService
+	 * nicht bei jedem Move den Graph fragen muss. NULL wenn nicht aufloesbar.
+	 */
+	public function setSentFolderId(string $id, ?string $sentFolderId): void
+	{
+		$this->db->prepare('UPDATE mailboxes SET sent_folder_id = :s WHERE id = :id')
+			->execute([':s' => $sentFolderId, ':id' => $id]);
+	}
 }

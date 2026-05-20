@@ -164,6 +164,8 @@ class Kernel
 				$this->get(SenderResolver::class),
 				$this->get(SenderRepository::class),
 				$this->get(FolderPathBuilder::class),
+				// Phase 9i: MailboxRepository fuer Sent-Folder-Skip.
+				$this->get(MailboxRepository::class),
 			),
 			RedactionService::class   => new RedactionService(),
 			// Sort-Refactor Phase 2 — Domain-Layer. PSL liegt unter backend/var/psl/

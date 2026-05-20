@@ -45,7 +45,45 @@ final class AutoSortService
 		private readonly ?SenderResolver $senderResolver = null,
 		private readonly ?SenderRepository $senders = null,
 		private readonly ?FolderPathBuilder $pathBuilder = null,
+		// Phase 9i (Marc 2026-05-20): MailboxRepository fuer Sent-Folder-ID-
+		// Cache. Optional, damit aelteste Tests ohne weiter funktionieren.
+		private readonly ?\MailPilot\Repositories\MailboxRepository $mailboxes = null,
 	) {
+	}
+
+	/**
+	 * Phase 9i — Skip-Check fuer Sent-Mails. Vergleicht parent_folder_id
+	 * der Mail mit der Sent-Folder-ID der Mailbox (cached in mailboxes.
+	 * sent_folder_id). Bei Cache-Miss resolved via Graph + persistiert.
+	 *
+	 * Rueckgabe: true wenn die Mail in „Gesendete Elemente" liegt und der
+	 * Move daher geskippt werden soll.
+	 */
+	private function isInSentFolder(string $accessToken, array $mail): bool
+	{
+		if ($this->mailboxes === null) return false;
+		$parent = (string)($mail['parent_folder_id'] ?? '');
+		if ($parent === '') return false;
+		$mbId   = (string)($mail['mailbox_id'] ?? '');
+		$tenant = (string)($mail['tenant_id'] ?? '');
+		if ($mbId === '' || $tenant === '') return false;
+		$mb = $this->mailboxes->findById($tenant, $mbId);
+		if ($mb === null) return false;
+		$sentId = (string)($mb['sent_folder_id'] ?? '');
+		if ($sentId === '') {
+			// Self-healing: einmalig via Graph resolven + persistieren.
+			try {
+				$resolved = $this->graph->resolveWellKnownFolder($accessToken, 'sentitems');
+				if ($resolved !== null && $resolved !== '') {
+					$this->mailboxes->setSentFolderId($mbId, $resolved);
+					$sentId = $resolved;
+				}
+			} catch (\Throwable $e) {
+				$this->logger->info('autosort.sent_resolve_failed', ['err' => $e->getMessage()]);
+				return false;
+			}
+		}
+		return $sentId !== '' && $parent === $sentId;
 	}
 
 	/**
@@ -85,6 +123,14 @@ final class AutoSortService
 			: null;
 		$userCleared    = !empty($mail['user_cleared_at']);
 		$forceMove      = !empty($score['force_move']);  // vom Done-Endpoint gesetzt
+
+		// Phase 9i (Marc 2026-05-20): Sent-Mails niemals in normale Topic-
+		// Folder verschieben. Marc: „Gesendete Emails duerfen nicht in die
+		// Normalen Verzeichnisse verschoben werden". Greift auch fuer force_move
+		// damit Done/Topic-Korrektur Sent-Mails nicht aus Sent rausholt.
+		if ($this->isInSentFolder($accessToken, $mail)) {
+			return ['moved' => false, 'reason' => 'sent_folder_protected'];
+		}
 
 		// Phase 9f (Marc 2026-05-19): Pin-Logik nutzt jetzt priority statt
 		// inbox_score — der User sieht/korrigiert priority im Add-in, also
@@ -401,6 +447,13 @@ final class AutoSortService
 		$folderPath = trim($folderPath);
 		if ($folderPath === '') {
 			return ['moved' => false, 'reason' => 'empty_folder_path'];
+		}
+
+		// Phase 9i (Marc 2026-05-20): Sent-Mails niemals in normale Topic-
+		// Folder verschieben. Gilt auch fuer den manuellen Done/Topic-Pfad
+		// (User koennte irrtuemlich Sent-Mail korrigieren).
+		if ($this->isInSentFolder($accessToken, $mail)) {
+			return ['moved' => false, 'reason' => 'sent_folder_protected'];
 		}
 
 		try {
