@@ -181,6 +181,36 @@
 	margin-left: auto;
 }
 
+/* Phase 9h.4 (Marc 2026-05-20) — Bulk-Rescore-Icon im current-header. */
+.mp-rescore-icon {
+	flex-shrink: 0;
+	width: 26px; height: 26px;
+	padding: 0;
+	border: 1px solid #64748b;          /* slate-500 */
+	border-radius: 6px;
+	background: #f8fafc;                /* slate-50 */
+	color: #475569;                     /* slate-600 */
+	display: inline-flex; align-items: center; justify-content: center;
+	cursor: pointer;
+	transition: background 120ms ease, transform 120ms ease;
+}
+.mp-rescore-icon:hover:not(:disabled)  { background: #e2e8f0; transform: scale(1.05); }
+.mp-rescore-icon:active:not(:disabled) { transform: scale(0.95); }
+.mp-rescore-icon:disabled {
+	cursor: not-allowed;
+	color: #cbd5e1;
+	border-color: #e2e8f0;
+}
+.mp-rescore-icon.is-busy {
+	cursor: progress;
+	opacity: 0.7;
+	animation: mp-rescore-spin 1.2s linear infinite;
+}
+@keyframes mp-rescore-spin {
+	from { transform: rotate(0deg); }
+	to   { transform: rotate(360deg); }
+}
+
 /* Phase 9e — KI-Pfad-Vorschau unter From-Zeile (current-header). */
 .mp-preview-path {
 	margin: 4px 0 0;

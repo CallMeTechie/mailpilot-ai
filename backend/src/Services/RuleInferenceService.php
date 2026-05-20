@@ -60,6 +60,9 @@ final class RuleInferenceService
 		// Phase 9b (Marc 2026-05-19): Score-Override-Inferenz. Optional,
 		// damit aeltere Tests die nur Folder-Inferenz testen weiter laufen.
 		private readonly ?ScoreOverrideRepository $scoreOverrides = null,
+		// Phase 9h.2 (Marc 2026-05-20): SenderResolver fuer Dedup-Check
+		// (sender_key-Lookup vor Claude-Call). Optional aus selbem Grund.
+		private readonly ?\MailPilot\Services\Sender\SenderResolver $senderResolver = null,
 	) {}
 
 	/**
@@ -452,6 +455,28 @@ final class RuleInferenceService
 		$subject    = $this->redactor->redact((string)$ctx['subject']);
 		$reasoningR = $this->redactor->redactReasoning($reasoning, $this->getNameList());
 
+		// Phase 9h.2 (Marc 2026-05-20): Dedup-Check vor Claude-Call. Wenn
+		// bereits eine enabled Regel mit demselben sender_key + demselben
+		// set_priority existiert, brauchen wir keinen weiteren Claude-Call.
+		// Marc-Beispiel: 4 Duplikat-Regeln in 16 Sek nach mehrfachem CI-Failure-
+		// Korrektur — alle redundant.
+		if ($this->senderResolver !== null) {
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
+				$senderKey = (string)($bucket['sender_key'] ?? '');
+				$correctedPrio = (int)($correctedScore['priority'] ?? 0);
+				if ($senderKey !== '' && $correctedPrio > 0
+					&& $this->scoreOverrides->hasSimilarPriorityRule($tenantId, $userId, $senderKey, $correctedPrio)) {
+					$this->logger->info('rule_inference.score_rule_dedup_skip', [
+						'sender_key'    => $senderKey,
+						'set_priority'  => $correctedPrio,
+						'mail_id'       => $mailId,
+					]);
+					return ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
+				}
+			} catch (\Throwable) { /* best-effort, faellt durch zu Claude */ }
+		}
+
 		// Quota wie bei infer() — gemeinsamer rule_inference-Counter.
 		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
 		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
@@ -565,6 +590,23 @@ final class RuleInferenceService
 			? '(keine Begruendung)'
 			: $this->redactor->redactReasoning($reasoningClean, $this->getNameList());
 		$topic          = (string)end($correctedSegments);
+
+		// Phase 9h.2 (Marc 2026-05-20): Dedup-Check fuer Topic-Regeln.
+		if ($this->senderResolver !== null) {
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
+				$senderKey = (string)($bucket['sender_key'] ?? '');
+				if ($senderKey !== ''
+					&& $this->scoreOverrides->hasSimilarTopicRule($tenantId, $userId, $senderKey, $correctedSegments)) {
+					$this->logger->info('rule_inference.topic_rule_dedup_skip', [
+						'sender_key'  => $senderKey,
+						'segments'    => $correctedSegments,
+						'mail_id'     => $mailId,
+					]);
+					return ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
+				}
+			} catch (\Throwable) { /* best-effort */ }
+		}
 
 		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
 		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);

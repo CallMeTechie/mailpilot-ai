@@ -204,6 +204,11 @@
 .mp-priority
 .mp-progress-bar
 .mp-progress-fill
+.mp-rescore-icon
+.mp-rescore-icon.is-busy
+.mp-rescore-icon:active:not(:disabled)
+.mp-rescore-icon:disabled
+.mp-rescore-icon:hover:not(:disabled)
 .mp-rule-applies
 .mp-rule-body
 .mp-rule-delete

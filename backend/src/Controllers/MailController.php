@@ -351,7 +351,54 @@ final class MailController extends BaseController
 		$this->kernel->get(MailScoringService::class)
 			->scoreBatch($ctx['tenant_id'], $profile, [$mail]);
 
-		Response::json(['ok' => true]);
+		Response::json(['ok' => true, 'mail_id' => $mail['id']]);
+	}
+
+	/**
+	 * Phase 9h.4 (Marc 2026-05-20) — Bulk-Rescore aller Mails in einem
+	 * Outlook-Folder. Macht hauptsaechlich Sinn nach Aenderung der Override-
+	 * Regeln, damit existing Mails neu durch enrichScoresWithSender +
+	 * ScoreOverrideService laufen.
+	 *
+	 * Body: { folder_id: string }  - Outlook Graph parent_folder_id
+	 * Cap:  100 Mails pro Call (Sync-Request mit FPM-Timeout ~60s).
+	 */
+	public function rescoreFolder(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$folderId = trim((string)($body['folder_id'] ?? ''));
+		if ($folderId === '') {
+			throw HttpException::badRequest('VALIDATION', 'folder_id fehlt');
+		}
+		$pdo = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare('SELECT m.* FROM mails m
+			INNER JOIN mailboxes mb ON mb.id = m.mailbox_id
+			WHERE m.tenant_id = :t
+			  AND mb.user_id = :u
+			  AND m.parent_folder_id = :f
+			  AND m.deleted_at IS NULL
+			ORDER BY m.received_at DESC
+			LIMIT 100');
+		$stmt->execute([':t' => $ctx['tenant_id'], ':u' => $ctx['user_id'], ':f' => $folderId]);
+		$mails = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+		if ($mails === []) {
+			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_in_folder']);
+			return;
+		}
+		$userRow = $this->fetchUser($ctx['user_id']);
+		$profile = $this->buildUserProfile($ctx, $userRow);
+		// scoreBatch durchlaeuft enrichScoresWithSender → ScoreOverrideService
+		// auch fuer cache-hits, also greifen neue Override-Regeln auf vorhandene
+		// Scores. User-korrigierte Felder bleiben sticky.
+		$this->kernel->get(MailScoringService::class)
+			->scoreBatch($ctx['tenant_id'], $profile, $mails);
+
+		Response::json([
+			'ok'        => true,
+			'count'     => count($mails),
+			'folder_id' => $folderId,
+			'capped'    => count($mails) === 100,
+		]);
 	}
 
 	/**

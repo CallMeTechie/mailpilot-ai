@@ -12,6 +12,36 @@ function initCurrentMail() {
 	document.getElementById('btn-cancel-correction')?.addEventListener('click', () => toggle('correct-section', false));
 	// Phase 5b (Marc 2026-05-19): Done-Button im DieseMail-Tab.
 	document.getElementById('btn-current-done')?.addEventListener('click', markCurrentMailDone);
+	// Phase 9h.4 (Marc 2026-05-20): Bulk-Rescore-Button — re-evaluiert alle
+	// Mails im aktuellen Outlook-Folder mit aktuellen Override-Regeln.
+	document.getElementById('btn-rescore-folder')?.addEventListener('click', rescoreCurrentFolder);
+}
+
+/**
+ * Phase 9h.4 — User klickt Bulk-Rescore-Icon. Wir holen die Parent-Folder-ID
+ * aus Office.context (verfuegbar wenn eine Mail offen ist) und feuern den
+ * Backend-Endpoint. Sync-Request, dauert ggf. 30-60s bei vollem Folder.
+ */
+async function rescoreCurrentFolder() {
+	const btn = document.getElementById('btn-rescore-folder');
+	const item = Office.context.mailbox.item;
+	const folderId = item && item.itemId && item.parent ? (item.parent.id || item.parent.itemId) : null;
+	if (!folderId) {
+		showToast('Kein Folder erkannt — bitte zuerst eine Mail anklicken.', 'warning', 4000);
+		return;
+	}
+	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
+	try {
+		showToast('Ordner wird neu bewertet …', 'info', 3000);
+		const res = await api.mails.rescoreFolder(folderId);
+		const note = res?.capped ? ` (Cap: ${res.count} jüngste Mails)` : '';
+		showToast(`✅ ${res?.count ?? 0} Mails neu bewertet${note}`, 'success', 6000);
+		state.briefingLoaded = false;
+	} catch (err) {
+		handleError(err);
+	} finally {
+		if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
+	}
 }
 
 /**
@@ -47,6 +77,7 @@ async function markCurrentMailDone() {
 function updateDoneIcon(previewPath) {
 	const btn  = document.getElementById('btn-current-done');
 	const prev = document.getElementById('current-preview-path');
+	const rescoreBtn = document.getElementById('btn-rescore-folder');
 	if (btn) {
 		btn.classList.remove('is-busy');
 		if (previewPath) {
@@ -56,6 +87,11 @@ function updateDoneIcon(previewPath) {
 			btn.disabled = true;
 			btn.title    = 'Kein Sortier-Vorschlag verfügbar';
 		}
+	}
+	// Phase 9h.4: Bulk-Rescore aktiv sobald eine Mail geladen ist
+	// (dann kennen wir auch den Folder).
+	if (rescoreBtn) {
+		rescoreBtn.disabled = false;
 	}
 	if (prev) {
 		if (previewPath) {

@@ -119,6 +119,41 @@ final class ScoreOverrideRepository
 		} catch (\Throwable) { /* swallow */ }
 	}
 
+	/**
+	 * Phase 9h.2 (Marc 2026-05-20) — Dedup-Check: existiert bereits eine
+	 * ENABLED Regel mit demselben sender_key UND demselben set_priority?
+	 * Wenn ja, brauchen wir keinen weiteren Claude-Call.
+	 */
+	public function hasSimilarPriorityRule(string $tenantId, string $userId, string $senderKey, int $setPriority): bool
+	{
+		if ($senderKey === '') return false;
+		$stmt = $this->db->prepare('SELECT 1 FROM score_override_rules
+			WHERE tenant_id = :t AND user_id = :u AND deleted_at IS NULL AND enabled = 1
+			  AND match_sender_key = :sk AND set_priority = :sp
+			LIMIT 1');
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':sk' => $senderKey, ':sp' => $setPriority]);
+		return $stmt->fetchColumn() !== false;
+	}
+
+	/**
+	 * Phase 9h.2 — Dedup-Check fuer Topic-Regeln: gleiche sender_key UND
+	 * gleiche folder_segments. JSON-Vergleich ist exakt (Reihenfolge zaehlt) —
+	 * was OK ist, weil folder_segments-Arrays semantisch geordnet sind.
+	 *
+	 * @param list<string> $segments
+	 */
+	public function hasSimilarTopicRule(string $tenantId, string $userId, string $senderKey, array $segments): bool
+	{
+		if ($senderKey === '' || $segments === []) return false;
+		$json = json_encode(array_values(array_map('strval', $segments)), JSON_UNESCAPED_UNICODE);
+		$stmt = $this->db->prepare('SELECT 1 FROM score_override_rules
+			WHERE tenant_id = :t AND user_id = :u AND deleted_at IS NULL AND enabled = 1
+			  AND match_sender_key = :sk AND set_folder_segments = :fs
+			LIMIT 1');
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':sk' => $senderKey, ':fs' => $json]);
+		return $stmt->fetchColumn() !== false;
+	}
+
 	public function softDelete(string $tenantId, string $userId, string $id): bool
 	{
 		$stmt = $this->db->prepare('UPDATE score_override_rules

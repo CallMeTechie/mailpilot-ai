@@ -267,6 +267,8 @@ class Kernel
 				$this->get(Logger::class),
 				// Phase 9b: inferScoreRule() braucht das Override-Repository.
 				$this->get(ScoreOverrideRepository::class),
+				// Phase 9h.2: SenderResolver fuer Dedup-Check (sender_key-Lookup).
+				$this->get(\MailPilot\Services\Sender\SenderResolver::class),
 			),
 			SyncService::class        => new SyncService(
 				$this->get(GraphClient::class),

@@ -405,6 +405,18 @@ final class AutoSortService
 
 		try {
 			$folderId = $this->graph->ensureFolderPath($accessToken, $folderPath);
+			// Phase 9h.1 (Marc 2026-05-20): Skip moveToFolder wenn die Mail
+			// schon im Ziel-Folder ist. Spart ~1-2s Graph-Roundtrip pro Korrektur,
+			// wo der User den vorgeschlagenen Pfad uebernimmt.
+			$currentFolderId = (string)($mail['parent_folder_id'] ?? '');
+			if ($currentFolderId !== '' && $currentFolderId === $folderId) {
+				$this->db->prepare('UPDATE mail_scores
+					SET auto_sorted_at = UTC_TIMESTAMP(3),
+					    cleared_at = UTC_TIMESTAMP(3)
+					WHERE mail_id = :m AND tenant_id = :t')
+					->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				return ['moved' => true, 'folder' => $folderPath, 'reason' => 'already_in_target'];
+			}
 			$newMsId  = $this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
 
 			// ms_message_id-Refresh (AQMk-IDs aendern sich nach Move).

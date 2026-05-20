@@ -28,6 +28,7 @@ async function rejectPending
 async function reloadFilterList
 async function rescoreAll
 async function rescoreCurrent
+async function rescoreCurrentFolder
 async function runBulkAction
 async function saveAutoReplySettings
 async function saveAutoSort

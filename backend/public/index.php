@@ -33,6 +33,8 @@ $router->post('/api/v1/mails/by-graph-id/{ms_message_id}/ensure-scored', 'MailCo
 $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');
+// Phase 9h.4 — Bulk-Rescore: alle Mails in einem Outlook-Folder
+$router->post('/api/v1/mails/rescore-folder',    'MailController@rescoreFolder');
 $router->post('/api/v1/mails/{id}/correct-score','MailController@correctScore');
 $router->post('/api/v1/mails/{id}/done',          'MailController@markUserDone');
 // Sprint 6f — Auto-Reply-Drafts
