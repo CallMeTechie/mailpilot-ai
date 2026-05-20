@@ -197,6 +197,10 @@ export const api = {
 		listScoreOverrides:   ()      => request('GET',    '/settings/score-overrides'),
 		toggleScoreOverride:  (id)    => request('POST',   `/settings/score-overrides/${id}/toggle`),
 		deleteScoreOverride:  (id)    => request('DELETE', `/settings/score-overrides/${id}`),
+		// Phase 9k (Marc 2026-05-20) — Regel-Konflikt-Manager
+		listOverrideConflicts: ()                          => request('GET',  '/settings/score-overrides/conflicts'),
+		mergeOverrideRules:    (aId, bId)                  => request('POST', '/settings/score-overrides/merge',        { rule_a_id: aId, rule_b_id: bId }),
+		acceptOverrideMerge:   (aId, bId, mergedRule)      => request('POST', '/settings/score-overrides/merge/accept', { rule_a_id: aId, rule_b_id: bId, merged: mergedRule }),
 	},
 	// Phase 9e Hotfix #5 — Tenant-weite Pfad-Vorschlaege fuer Datalist
 	senders: {

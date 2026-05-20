@@ -72,6 +72,10 @@ $router->get   ('/api/v1/settings/score-overrides',           'ScoreOverrideCont
 $router->post  ('/api/v1/settings/score-overrides',           'ScoreOverrideController@createRule');
 $router->post  ('/api/v1/settings/score-overrides/{id}/toggle', 'ScoreOverrideController@toggleRule');
 $router->delete('/api/v1/settings/score-overrides/{id}',      'ScoreOverrideController@deleteRule');
+// Phase 9k — Regel-Konflikt-Manager
+$router->get   ('/api/v1/settings/score-overrides/conflicts',     'ScoreOverrideController@listConflicts');
+$router->post  ('/api/v1/settings/score-overrides/merge',         'ScoreOverrideController@mergeRules');
+$router->post  ('/api/v1/settings/score-overrides/merge/accept',  'ScoreOverrideController@acceptMerge');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

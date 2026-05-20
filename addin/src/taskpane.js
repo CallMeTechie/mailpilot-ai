@@ -3081,8 +3081,144 @@ async function patchSender(senderId, rowEl, payload) {
 
 async function loadScoreOverrides() {
 	try {
-		const res = await api.settings.listScoreOverrides();
+		const [res, conflicts] = await Promise.all([
+			api.settings.listScoreOverrides(),
+			api.settings.listOverrideConflicts().catch(() => ({ items: [], count: 0 })),
+		]);
 		renderScoreOverrides(res?.items ?? []);
+		// Phase 9k (Marc 2026-05-20): Konflikt-Banner + Detail-Liste.
+		renderOverrideConflicts(conflicts?.items ?? []);
+	} catch (err) {
+		handleError(err);
+	}
+}
+
+// ============================================================
+// Phase 9k — Regel-Konflikt-Manager
+// ============================================================
+
+function renderOverrideConflicts(conflicts) {
+	const banner = document.getElementById('score-conflicts-banner');
+	const list   = document.getElementById('score-conflicts-list');
+	const btn    = document.getElementById('btn-toggle-conflicts');
+	if (!banner || !list || !btn) return;
+	if (conflicts.length === 0) {
+		banner.dataset.hidden = 'true';
+		list.dataset.hidden   = 'true';
+		list.replaceChildren();
+		return;
+	}
+	banner.dataset.hidden = 'false';
+	btn.textContent = `⚠ ${conflicts.length} Regel-Konflikt${conflicts.length === 1 ? '' : 'e'} — Details zeigen`;
+	btn.onclick = () => {
+		const expanded = list.dataset.hidden === 'false';
+		list.dataset.hidden = expanded ? 'true' : 'false';
+		btn.textContent = `⚠ ${conflicts.length} Regel-Konflikt${conflicts.length === 1 ? '' : 'e'} — Details ${expanded ? 'zeigen' : 'ausblenden'}`;
+	};
+	list.replaceChildren();
+	for (const c of conflicts) {
+		list.appendChild(buildConflictCard(c));
+	}
+}
+
+function describeRuleCompact(r) {
+	const parts = [];
+	if (r.match_subject_regex)        parts.push(`Subject ~ ${r.match_subject_regex}`);
+	if (r.match_label)                parts.push(`Label = ${r.match_label}`);
+	if (r.match_priority_min != null) parts.push(`Prio ≥ ${r.match_priority_min}`);
+	if (r.match_from_local)           parts.push(`Local = ${r.match_from_local}`);
+	const matchPart = parts.length === 0 ? `Absender = ${r.match_sender_key}` : `Absender = ${r.match_sender_key}, ` + parts.join(', ');
+
+	const setParts = [];
+	if (r.set_priority != null)        setParts.push(`Prio = ${r.set_priority}`);
+	if (r.set_action_required != null) setParts.push(`Aktion = ${r.set_action_required ? 'ja' : 'nein'}`);
+	if (r.set_label)                   setParts.push(`Label = ${r.set_label}`);
+	if (Array.isArray(r.set_folder_segments) && r.set_folder_segments.length > 0) {
+		setParts.push(`Folder = ${r.set_folder_segments.join('/')}`);
+	}
+	return { match: matchPart, set: setParts.join(', ') || '—', source: r.source === 'ki_inferred' ? 'KI' : 'Manuell' };
+}
+
+function buildConflictCard(conflict) {
+	const li = document.createElement('li');
+	li.className = 'mp-conflict-card';
+	const a = conflict.rule_a, b = conflict.rule_b;
+	const aDesc = describeRuleCompact(a);
+	const bDesc = describeRuleCompact(b);
+
+	const head = document.createElement('div');
+	head.className = 'mp-conflict-head';
+	head.textContent = `Konflikt bei: ${conflict.conflicting_fields.join(', ')}`;
+	li.appendChild(head);
+
+	for (const [letter, desc] of [['A', aDesc], ['B', bDesc]]) {
+		const row = document.createElement('div');
+		row.className = 'mp-conflict-rule';
+		row.innerHTML = `<strong>${letter}:</strong> <small>${desc.source}</small> · `
+			+ `<em>Wenn:</em> ${escape(desc.match)} · <em>Dann:</em> ${escape(desc.set)}`;
+		li.appendChild(row);
+	}
+
+	const actions = document.createElement('div');
+	actions.className = 'mp-conflict-actions';
+
+	const keepA = document.createElement('button');
+	keepA.className = 'mp-btn mp-btn-secondary';
+	keepA.textContent = 'A behalten';
+	keepA.addEventListener('click', () => resolveConflictKeep(a.id, b.id));
+	actions.appendChild(keepA);
+
+	const keepB = document.createElement('button');
+	keepB.className = 'mp-btn mp-btn-secondary';
+	keepB.textContent = 'B behalten';
+	keepB.addEventListener('click', () => resolveConflictKeep(b.id, a.id));
+	actions.appendChild(keepB);
+
+	const mergeBtn = document.createElement('button');
+	mergeBtn.className = 'mp-btn mp-btn-primary';
+	mergeBtn.textContent = '🤖 Kombinieren';
+	mergeBtn.addEventListener('click', () => tryMerge(a.id, b.id));
+	actions.appendChild(mergeBtn);
+
+	li.appendChild(actions);
+	return li;
+}
+
+async function resolveConflictKeep(keepId, deleteId) {
+	if (!await mpConfirm({
+		title: 'Konflikt auflösen',
+		body: 'Die andere Regel wird gelöscht. Fortfahren?',
+		okLabel: 'Löschen',
+		danger: true,
+	})) return;
+	try {
+		await api.settings.deleteScoreOverride(deleteId);
+		showToast('Konflikt aufgelöst, Regel gelöscht.', 'success', 3000);
+		loadScoreOverrides();
+	} catch (err) {
+		handleError(err);
+	}
+}
+
+async function tryMerge(aId, bId) {
+	showToast('KI-Merge wird geprüft …', 'info', 2500);
+	try {
+		const res = await api.settings.mergeOverrideRules(aId, bId);
+		if (!res?.can_merge || !res.merged) {
+			const reason = res?.reasoning_summary || res?.reason || 'Kein sicherer Merge möglich.';
+			showToast(`KI: ${reason}`, 'warning', 6000);
+			return;
+		}
+		const md = describeRuleCompact({ ...res.merged, source: 'ki_inferred' });
+		const ok = await mpConfirm({
+			title: 'KI-Merge-Vorschlag',
+			body: `<strong>${res.confidence}%</strong> Vertrauen: ${escape(res.reasoning_summary || '')}\n\n<em>Wenn:</em> ${md.match}\n<em>Dann:</em> ${md.set}\n\nBeide Quell-Regeln werden gelöscht und durch die neue Regel ersetzt.`,
+			okLabel: 'Übernehmen',
+		});
+		if (!ok) return;
+		await api.settings.acceptOverrideMerge(aId, bId, res.merged);
+		showToast('✅ Regeln zusammengeführt.', 'success', 3000);
+		loadScoreOverrides();
 	} catch (err) {
 		handleError(err);
 	}

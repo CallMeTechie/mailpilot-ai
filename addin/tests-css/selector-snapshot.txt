@@ -53,6 +53,18 @@
 .mp-chips
 .mp-chips-suggest .mp-chip-suggest
 .mp-chips-suggest .mp-chip-suggest:hover
+.mp-conflict-actions
+.mp-conflict-actions .mp-btn
+.mp-conflict-card
+.mp-conflict-head
+.mp-conflict-rule
+.mp-conflict-rule small
+.mp-conflicts-banner
+.mp-conflicts-banner[data-hidden="true"]
+.mp-conflicts-list
+.mp-conflicts-list[data-hidden="true"]
+.mp-conflicts-toggle
+.mp-conflicts-toggle:hover
 .mp-counter
 .mp-counter-dot
 .mp-counter-label

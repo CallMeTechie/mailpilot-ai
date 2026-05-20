@@ -29,6 +29,7 @@ async function reloadFilterList
 async function rescoreAll
 async function rescoreCurrent
 async function rescoreCurrentFolder
+async function resolveConflictKeep
 async function runBulkAction
 async function saveAutoReplySettings
 async function saveAutoSort
@@ -37,6 +38,7 @@ async function saveModes
 async function saveRuleInference
 async function summarizeCurrent
 async function toggleScoreOverride
+async function tryMerge
 const aliasState
 const BULK_ACTIONS
 const keywordState
@@ -50,6 +52,7 @@ const TRUST_LABEL
 function approveButtonText
 function bounceToLogin
 function buildAutoSortRow
+function buildConflictCard
 function buildIconElement
 function buildLabelTd
 function buildMailListItem
@@ -64,6 +67,7 @@ function closeFilteredList
 function compactNumber
 function consumeHandoff
 function dependentRulesForSubLabel
+function describeRuleCompact
 function dismissToast
 function escape
 function filterSinceUtc
@@ -100,6 +104,7 @@ function renderCurrentMail
 function renderFooterStats
 function renderKeywordChips
 function renderList
+function renderOverrideConflicts
 function renderPending
 function renderPendingList
 function renderPinnedList

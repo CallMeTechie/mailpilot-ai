@@ -459,3 +459,70 @@
 	border-radius: 3px;
 	font-size: 11px;
 }
+
+/* ============================================================
+ * Phase 9k (Marc 2026-05-20) — Regel-Konflikt-Manager.
+ * Banner + aufklappbare Liste von Konflikt-Karten mit A/B/Merge-Buttons.
+ * ============================================================ */
+
+.mp-conflicts-banner {
+	margin: 8px 0;
+}
+.mp-conflicts-banner[data-hidden="true"] { display: none; }
+.mp-conflicts-toggle {
+	width: 100%;
+	padding: 8px 12px;
+	border: 1px solid #f59e0b;
+	border-radius: 6px;
+	background: #fffbeb;
+	color: #92400e;
+	font-size: 13px;
+	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+}
+.mp-conflicts-toggle:hover { background: #fef3c7; }
+
+.mp-conflicts-list {
+	list-style: none;
+	margin: 0 0 12px;
+	padding: 0;
+}
+.mp-conflicts-list[data-hidden="true"] { display: none; }
+
+.mp-conflict-card {
+	padding: 10px 12px;
+	margin-bottom: 6px;
+	border: 1px solid #f59e0b;
+	border-left: 4px solid #f59e0b;
+	border-radius: 6px;
+	background: #fffbeb;
+}
+.mp-conflict-head {
+	font-size: 12px;
+	font-weight: 600;
+	color: #92400e;
+	margin-bottom: 6px;
+}
+.mp-conflict-rule {
+	font-size: 11px;
+	color: #334155;
+	margin-bottom: 4px;
+	line-height: 1.5;
+}
+.mp-conflict-rule small {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: #1e293b;
+	color: #fff;
+	font-size: 10px;
+	font-weight: 600;
+}
+.mp-conflict-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+	flex-wrap: wrap;
+}
+.mp-conflict-actions .mp-btn { font-size: 11px; padding: 4px 8px; }

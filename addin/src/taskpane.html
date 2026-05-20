@@ -543,6 +543,12 @@
 						Regeln (aus deinen Korrekturen mit Begründung) sind initial <strong>aus</strong>
 						— klick auf den Toggle um sie zu aktivieren.
 					</p>
+					<!-- Phase 9k (Marc 2026-05-20): Konflikt-Banner + Detail-Sektion.
+					     Sichtbar nur wenn findConflicts() Treffer liefert. -->
+					<div id="score-conflicts-banner" class="mp-conflicts-banner" data-hidden="true">
+						<button type="button" id="btn-toggle-conflicts" class="mp-conflicts-toggle"></button>
+					</div>
+					<ul class="mp-conflicts-list" id="score-conflicts-list" data-hidden="true"></ul>
 					<ul class="mp-list" id="score-overrides-list"></ul>
 				</div>
 			</section>
@@ -632,6 +638,6 @@
 
 	<div id="mp-toast-stack" class="mp-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-	<script type="module" src="taskpane.js?v=20260520b"></script>
+	<script type="module" src="taskpane.js?v=20260520c"></script>
 </body>
 </html>

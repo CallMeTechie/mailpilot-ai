@@ -154,6 +154,93 @@ final class ScoreOverrideRepository
 		return $stmt->fetchColumn() !== false;
 	}
 
+	/**
+	 * Phase 9k (Marc 2026-05-20) — Konflikt-Detection. Zwei Regeln sind
+	 * konkurrierend wenn:
+	 *   - beide enabled + nicht-deleted
+	 *   - gleicher match_sender_key (nicht null)
+	 *   - mindestens ein gemeinsam gesetztes Set-Feld mit unterschiedlichem
+	 *     Wert (priority, action_required, label, folder_segments)
+	 *
+	 * Subject-Regex-Ueberlapp ist mathematisch nicht entscheidbar (regex
+	 * subset = unsolvable), daher nicht beruecksichtigt — match_sender_key
+	 * als pragmatischer Konflikt-Indikator.
+	 *
+	 * Self-join wo b.id > a.id, damit jedes Paar nur einmal kommt.
+	 *
+	 * @return list<array{rule_a:array<string,mixed>, rule_b:array<string,mixed>, conflicting_fields:list<string>}>
+	 */
+	public function findConflicts(string $tenantId, string $userId): array
+	{
+		$sql = 'SELECT
+				a.id AS a_id, a.match_sender_key AS a_sk, a.match_subject_regex AS a_sr,
+				a.match_from_local AS a_fl, a.match_label AS a_ml, a.match_priority_min AS a_pm,
+				a.set_priority AS a_sp, a.set_action_required AS a_sar, a.set_label AS a_sl,
+				a.set_folder_segments AS a_sfs, a.source AS a_src, a.created_at AS a_ca,
+				b.id AS b_id, b.match_sender_key AS b_sk, b.match_subject_regex AS b_sr,
+				b.match_from_local AS b_fl, b.match_label AS b_ml, b.match_priority_min AS b_pm,
+				b.set_priority AS b_sp, b.set_action_required AS b_sar, b.set_label AS b_sl,
+				b.set_folder_segments AS b_sfs, b.source AS b_src, b.created_at AS b_ca
+			FROM score_override_rules a
+			INNER JOIN score_override_rules b
+				ON  b.tenant_id = a.tenant_id
+				AND b.user_id = a.user_id
+				AND b.id > a.id
+				AND b.match_sender_key = a.match_sender_key
+				AND b.deleted_at IS NULL
+				AND b.enabled = 1
+			WHERE a.tenant_id = :t AND a.user_id = :u
+				AND a.deleted_at IS NULL
+				AND a.enabled = 1
+				AND a.match_sender_key IS NOT NULL
+				AND (
+					(a.set_priority IS NOT NULL AND b.set_priority IS NOT NULL AND a.set_priority <> b.set_priority)
+					OR (a.set_action_required IS NOT NULL AND b.set_action_required IS NOT NULL AND a.set_action_required <> b.set_action_required)
+					OR (a.set_label IS NOT NULL AND b.set_label IS NOT NULL AND a.set_label <> b.set_label)
+					OR (a.set_folder_segments IS NOT NULL AND b.set_folder_segments IS NOT NULL AND a.set_folder_segments <> b.set_folder_segments)
+				)
+			ORDER BY a.created_at ASC, b.created_at ASC';
+		$stmt = $this->db->prepare($sql);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+		$out = [];
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$conflicting = [];
+			if ($row['a_sp']  !== null && $row['b_sp']  !== null && $row['a_sp']  !== $row['b_sp'])  $conflicting[] = 'priority';
+			if ($row['a_sar'] !== null && $row['b_sar'] !== null && $row['a_sar'] !== $row['b_sar']) $conflicting[] = 'action_required';
+			if ($row['a_sl']  !== null && $row['b_sl']  !== null && $row['a_sl']  !== $row['b_sl'])  $conflicting[] = 'label';
+			if ($row['a_sfs'] !== null && $row['b_sfs'] !== null && $row['a_sfs'] !== $row['b_sfs']) $conflicting[] = 'folder_segments';
+			$out[] = [
+				'rule_a'             => $this->rowToConflictRule($row, 'a_'),
+				'rule_b'             => $this->rowToConflictRule($row, 'b_'),
+				'conflicting_fields' => $conflicting,
+			];
+		}
+		return $out;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function rowToConflictRule(array $row, string $prefix): array
+	{
+		$fs = $row[$prefix . 'sfs'] ?? null;
+		return [
+			'id'                  => (string)$row[$prefix . 'id'],
+			'match_sender_key'    => $row[$prefix . 'sk']  !== null ? (string)$row[$prefix . 'sk']  : null,
+			'match_subject_regex' => $row[$prefix . 'sr']  !== null ? (string)$row[$prefix . 'sr']  : null,
+			'match_from_local'    => $row[$prefix . 'fl']  !== null ? (string)$row[$prefix . 'fl']  : null,
+			'match_label'         => $row[$prefix . 'ml']  !== null ? (string)$row[$prefix . 'ml']  : null,
+			'match_priority_min'  => $row[$prefix . 'pm']  !== null ? (int)$row[$prefix . 'pm']     : null,
+			'set_priority'        => $row[$prefix . 'sp']  !== null ? (int)$row[$prefix . 'sp']     : null,
+			'set_action_required' => $row[$prefix . 'sar'] !== null ? (int)(bool)$row[$prefix . 'sar'] : null,
+			'set_label'           => $row[$prefix . 'sl']  !== null ? (string)$row[$prefix . 'sl']  : null,
+			'set_folder_segments' => $fs !== null ? json_decode((string)$fs, true) : null,
+			'source'              => (string)($row[$prefix . 'src'] ?? 'user_manual'),
+			'created_at'          => (string)($row[$prefix . 'ca'] ?? ''),
+		];
+	}
+
 	public function softDelete(string $tenantId, string $userId, string $id): bool
 	{
 		$stmt = $this->db->prepare('UPDATE score_override_rules

@@ -667,4 +667,68 @@ final class RuleInferenceService
 			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
 		];
 	}
+
+	// ========================================================================
+	// Phase 9k — KI-Merge fuer kollidierende Regeln (Marc 2026-05-20)
+	// ========================================================================
+
+	/**
+	 * Versucht zwei kollidierende Override-Regeln zu mergen. Konservativ:
+	 * wenn die KI keinen sicheren Merge findet, return can_merge=false.
+	 * Schreibt NICHTS in die DB — Caller (Controller acceptMerge) entscheidet.
+	 *
+	 * @return array<string,mixed>  {can_merge, confidence, reasoning_summary, merged?, reason?}
+	 */
+	public function mergeRules(string $tenantId, string $userId, string $ruleAId, string $ruleBId): array
+	{
+		if ($this->scoreOverrides === null) {
+			return ['can_merge' => false, 'reason' => 'no_repo_injected'];
+		}
+		$all = $this->scoreOverrides->listForUser($tenantId, $userId);
+		$a = null; $b = null;
+		foreach ($all as $r) {
+			if ($r['id'] === $ruleAId) $a = $r;
+			if ($r['id'] === $ruleBId) $b = $r;
+		}
+		if ($a === null || $b === null) {
+			return ['can_merge' => false, 'reason' => 'rule_not_found'];
+		}
+
+		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
+		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
+
+		$conflicting = [];
+		foreach (['set_priority' => 'priority', 'set_action_required' => 'action_required',
+		          'set_label' => 'label', 'set_folder_segments' => 'folder_segments'] as $field => $short) {
+			$av = $a[$field] ?? null;
+			$bv = $b[$field] ?? null;
+			if ($av !== null && $bv !== null && $av !== $bv) $conflicting[] = $short;
+		}
+
+		$parsed = $this->callClaude([
+			'rule_a_json'         => json_encode($a, JSON_UNESCAPED_UNICODE),
+			'rule_b_json'         => json_encode($b, JSON_UNESCAPED_UNICODE),
+			'conflicting_fields'  => implode(',', $conflicting),
+		], 'P-RULE-MERGE');
+
+		if ($parsed === null) {
+			return ['can_merge' => false, 'reason' => 'claude_invalid_response'];
+		}
+		$canMerge   = (bool)($parsed['can_merge'] ?? false);
+		$confidence = (int)($parsed['confidence'] ?? 0);
+		$summary    = (string)($parsed['reasoning_summary'] ?? '');
+		$merged     = is_array($parsed['merged'] ?? null) ? $parsed['merged'] : null;
+
+		$this->logger->info('rule_inference.merge_evaluated', [
+			'rule_a' => $ruleAId, 'rule_b' => $ruleBId,
+			'can_merge' => $canMerge, 'confidence' => $confidence,
+		]);
+
+		return [
+			'can_merge'         => $canMerge,
+			'confidence'        => $confidence,
+			'reasoning_summary' => $summary,
+			'merged'            => $canMerge ? $merged : null,
+		];
+	}
 }

@@ -82,4 +82,66 @@ final class ScoreOverrideController extends BaseController
 		}
 		Response::json(['ok' => true]);
 	}
+
+	/**
+	 * Phase 9k (Marc 2026-05-20) — Liste konkurrierender Regel-Paare.
+	 * Frontend zeigt das als Banner + Konflikt-Karten im Subtab „Regeln".
+	 */
+	public function listConflicts(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$conflicts = $this->kernel->get(ScoreOverrideRepository::class)
+			->findConflicts($ctx['tenant_id'], $ctx['user_id']);
+		Response::json(['items' => $conflicts, 'count' => count($conflicts)]);
+	}
+
+	/**
+	 * Phase 9k — KI-Merge-Vorschlag fuer zwei kollidierende Regeln.
+	 * Body: { rule_a_id, rule_b_id }
+	 * Liefert: { can_merge: bool, merged?: <rule-shape>, reason?: string,
+	 *           confidence: int, reasoning_summary: string }
+	 *
+	 * Konservativ: wenn die KI keinen sicheren Merge findet → can_merge=false.
+	 * Aktualisiert NICHTS in der DB — der User akzeptiert separat per
+	 * acceptMerge.
+	 */
+	public function mergeRules(array $params, array $body): void
+	{
+		$ctx     = $this->requireAuth();
+		$aId     = trim((string)($body['rule_a_id'] ?? ''));
+		$bId     = trim((string)($body['rule_b_id'] ?? ''));
+		if ($aId === '' || $bId === '') {
+			throw HttpException::badRequest('VALIDATION', 'rule_a_id + rule_b_id erforderlich');
+		}
+		$result = $this->kernel->get(\MailPilot\Services\RuleInferenceService::class)
+			->mergeRules($ctx['tenant_id'], $ctx['user_id'], $aId, $bId);
+		Response::json($result);
+	}
+
+	/**
+	 * Phase 9k — User hat den KI-Merge-Vorschlag akzeptiert. Loescht beide
+	 * Quell-Regeln (soft) und legt die gemergte Regel an.
+	 * Body: { rule_a_id, rule_b_id, merged: <rule-shape mit set_*+match_*> }
+	 */
+	public function acceptMerge(array $params, array $body): void
+	{
+		$ctx     = $this->requireAuth();
+		$aId     = trim((string)($body['rule_a_id'] ?? ''));
+		$bId     = trim((string)($body['rule_b_id'] ?? ''));
+		$merged  = is_array($body['merged'] ?? null) ? $body['merged'] : [];
+		if ($aId === '' || $bId === '' || $merged === []) {
+			throw HttpException::badRequest('VALIDATION', 'rule_a_id, rule_b_id, merged erforderlich');
+		}
+		$repo = $this->kernel->get(ScoreOverrideRepository::class);
+		try {
+			$newId = $repo->create($ctx['tenant_id'], $ctx['user_id'],
+				$merged + ['source' => 'ki_inferred', 'enabled' => true]);
+		} catch (\InvalidArgumentException $e) {
+			throw HttpException::badRequest('VALIDATION', 'Merged-Regel ungueltig: ' . $e->getMessage());
+		}
+		// Quell-Regeln nach erfolgreichem Create soft-deleten.
+		$repo->softDelete($ctx['tenant_id'], $ctx['user_id'], $aId);
+		$repo->softDelete($ctx['tenant_id'], $ctx['user_id'], $bId);
+		Response::json(['ok' => true, 'merged_id' => $newId, 'deleted' => [$aId, $bId]]);
+	}
 }
