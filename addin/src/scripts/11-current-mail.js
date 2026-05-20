@@ -18,22 +18,21 @@ function initCurrentMail() {
 }
 
 /**
- * Phase 9h.4 — User klickt Bulk-Rescore-Icon. Wir holen die Parent-Folder-ID
- * aus Office.context (verfuegbar wenn eine Mail offen ist) und feuern den
- * Backend-Endpoint. Sync-Request, dauert ggf. 30-60s bei vollem Folder.
+ * Phase 9h.4 — User klickt Bulk-Rescore-Icon. Outlook MailItem hat keine
+ * .parent-API, also nutzen wir die DB-Mail-ID — Backend resolved daraus
+ * mails.parent_folder_id. Sync-Request, dauert ggf. 30-60s bei vollem Folder.
  */
 async function rescoreCurrentFolder() {
 	const btn = document.getElementById('btn-rescore-folder');
-	const item = Office.context.mailbox.item;
-	const folderId = item && item.itemId && item.parent ? (item.parent.id || item.parent.itemId) : null;
-	if (!folderId) {
-		showToast('Kein Folder erkannt — bitte zuerst eine Mail anklicken.', 'warning', 4000);
+	const mailDbId = state.currentMailData?.id;
+	if (!mailDbId) {
+		showToast('Mail noch nicht analysiert — bitte einen Moment warten.', 'warning', 4000);
 		return;
 	}
 	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
 	try {
 		showToast('Ordner wird neu bewertet …', 'info', 3000);
-		const res = await api.mails.rescoreFolder(folderId);
+		const res = await api.mails.rescoreFolderOfMail(mailDbId);
 		const note = res?.capped ? ` (Cap: ${res.count} jüngste Mails)` : '';
 		showToast(`✅ ${res?.count ?? 0} Mails neu bewertet${note}`, 'success', 6000);
 		state.briefingLoaded = false;

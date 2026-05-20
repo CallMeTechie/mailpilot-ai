@@ -367,8 +367,25 @@ final class MailController extends BaseController
 	{
 		$ctx = $this->requireAuth();
 		$folderId = trim((string)($body['folder_id'] ?? ''));
+		// Phase 9h.4 (Marc 2026-05-20): Outlook MailItem hat keine .parent-API,
+		// also akzeptieren wir alternativ eine mail_id (DB-ID) und resolven
+		// folder_id ueber mails.parent_folder_id. Caller schickt die aktuell
+		// im Add-in geoeffnete Mail mit.
 		if ($folderId === '') {
-			throw HttpException::badRequest('VALIDATION', 'folder_id fehlt');
+			$mailDbId = trim((string)($body['mail_id'] ?? ''));
+			if ($mailDbId === '') {
+				throw HttpException::badRequest('VALIDATION', 'folder_id oder mail_id erforderlich');
+			}
+			$lookupStmt = $this->kernel->get(\PDO::class)->prepare(
+				'SELECT parent_folder_id FROM mails
+				WHERE id = :id AND tenant_id = :t LIMIT 1'
+			);
+			$lookupStmt->execute([':id' => $mailDbId, ':t' => $ctx['tenant_id']]);
+			$row = $lookupStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+			$folderId = (string)($row['parent_folder_id'] ?? '');
+			if ($folderId === '') {
+				throw HttpException::badRequest('VALIDATION', 'Mail hat keine parent_folder_id (noch nicht gesynced?)');
+			}
 		}
 		$pdo = $this->kernel->get(\PDO::class);
 		$stmt = $pdo->prepare('SELECT m.* FROM mails m

@@ -155,7 +155,8 @@ export const api = {
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
 		// Phase 9h.4 (Marc 2026-05-20): Bulk-Rescore aller Mails im Outlook-Folder.
-		rescoreFolder: (folderId) => request('POST', '/mails/rescore-folder', { folder_id: folderId }),
+		// Backend nimmt folder_id ODER mail_id (resolved daraus parent_folder_id).
+		rescoreFolderOfMail: (mailDbId) => request('POST', '/mails/rescore-folder', { mail_id: mailDbId }),
 		correctScore:  (id, payload) => request('POST', `/mails/${id}/correct-score`, payload),
 		correctOwner:  (id, owner)   => request('POST', `/mails/${id}/correct-owner`, { action_owner: owner }),
 		// Phase 5: User klickt „Erledigt — verschieben" auf einer Pin-Card.
