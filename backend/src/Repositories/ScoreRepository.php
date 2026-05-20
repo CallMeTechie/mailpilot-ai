@@ -50,7 +50,7 @@ final class ScoreRepository
 				model           = VALUES(model),
 				cached          = VALUES(cached),
 				spoof_suspect   = VALUES(spoof_suspect),
-				folder_segments = VALUES(folder_segments),
+				folder_segments = IF((user_corrected_fields IS NOT NULL AND FIND_IN_SET("folder_segments", user_corrected_fields)),                                                                            folder_segments,         VALUES(folder_segments)),
 				inbox_score     = VALUES(inbox_score),
 				scored_at       = VALUES(scored_at)';
 
@@ -88,6 +88,32 @@ final class ScoreRepository
 					: null,
 			]);
 		}
+	}
+
+	/**
+	 * Phase 9j (Marc 2026-05-20) — Bulk-Lookup user_corrected_fields fuer
+	 * eine Liste von mail-IDs. Wird von MailScoringService::enrichScoresWith-
+	 * Sender genutzt, damit ScoreOverrideService die Sticky-Felder respektiert.
+	 *
+	 * @param list<string> $mailIds
+	 * @return array<string,string>  mail_id => CSV der sticky-Felder
+	 */
+	public function loadUserCorrectedFields(string $tenantId, array $mailIds): array
+	{
+		if ($mailIds === []) return [];
+		// Festes Prepared-Statement pro Mail-ID, dann PHP-merge — kein dynamic
+		// IN(?,?,?) das Semgrep flaggt.
+		$stmt = $this->db->prepare('SELECT user_corrected_fields FROM mail_scores
+			WHERE tenant_id = :t AND mail_id = :m LIMIT 1');
+		$out = [];
+		foreach ($mailIds as $mid) {
+			$stmt->execute([':t' => $tenantId, ':m' => $mid]);
+			$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+			if ($row !== false) {
+				$out[(string)$mid] = (string)($row['user_corrected_fields'] ?? '');
+			}
+		}
+		return $out;
 	}
 
 	/**

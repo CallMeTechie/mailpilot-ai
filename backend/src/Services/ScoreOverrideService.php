@@ -61,6 +61,19 @@ final class ScoreOverrideService
 		$label     = (string)($score['label'] ?? '');
 		$priority  = (int)($score['priority'] ?? 0);
 
+		// Phase 9j (Marc 2026-05-20): User-corrected sticky-Felder schuetzen.
+		// Wenn z.B. der User folder_segments korrigiert hat, darf eine spaetere
+		// Override-Regel diese Korrektur NICHT mehr ueberschreiben. Caller
+		// reicht user_corrected_fields als String („label,priority,…") oder
+		// Array durch.
+		$stickyRaw = $score['user_corrected_fields'] ?? null;
+		$sticky    = [];
+		if (is_string($stickyRaw) && $stickyRaw !== '') {
+			$sticky = array_map('trim', explode(',', $stickyRaw));
+		} elseif (is_array($stickyRaw)) {
+			$sticky = array_map('strval', $stickyRaw);
+		}
+
 		// Phase 9g (Marc 2026-05-20): orthogonale Regel-Anwendung. Statt
 		// first-match-wins iterieren wir alle Regeln in created_at-Reihenfolge
 		// und nehmen pro Set-Feld die ERSTE matchende Regel mit nicht-NULL-
@@ -80,7 +93,7 @@ final class ScoreOverrideService
 			if (!$this->matches($rule, $senderKey, $subject, $fromLocal, $label, $priority)) {
 				continue;
 			}
-			$thisChanges = $this->applySetFieldsOrthogonal($rule, $score, $fieldsSetByRule);
+			$thisChanges = $this->applySetFieldsOrthogonal($rule, $score, $fieldsSetByRule, $sticky);
 			if ($thisChanges !== []) {
 				$ruleId = (string)$rule['id'];
 				$this->rules->recordApply($tenantId, $ruleId);
@@ -116,12 +129,16 @@ final class ScoreOverrideService
 	 * @param array<string,?string> $fieldsSetByRule mutiert in-place; key=Feldname, value=ruleId
 	 * @return array<string,mixed> Changes nur fuer Felder die diese Regel zuerst setzt.
 	 */
-	private function applySetFieldsOrthogonal(array $rule, array &$score, array &$fieldsSetByRule): array
+	/**
+	 * @param list<string> $sticky  user_corrected_fields-Marker, z.B. ['priority','folder_segments'].
+	 *                              Diese Felder werden vom Override NICHT angefasst.
+	 */
+	private function applySetFieldsOrthogonal(array $rule, array &$score, array &$fieldsSetByRule, array $sticky = []): array
 	{
 		$changes = [];
 		$ruleId  = (string)$rule['id'];
 
-		if ($rule['set_priority'] !== null && $fieldsSetByRule['priority'] === null) {
+		if ($rule['set_priority'] !== null && $fieldsSetByRule['priority'] === null && !in_array('priority', $sticky, true)) {
 			$old = (int)($score['priority'] ?? 0);
 			$new = (int)$rule['set_priority'];
 			if ($old !== $new) {
@@ -130,7 +147,7 @@ final class ScoreOverrideService
 			}
 			$fieldsSetByRule['priority'] = $ruleId;
 		}
-		if ($rule['set_action_required'] !== null && $fieldsSetByRule['action_required'] === null) {
+		if ($rule['set_action_required'] !== null && $fieldsSetByRule['action_required'] === null && !in_array('action_required', $sticky, true)) {
 			$old = (int)(bool)($score['action_required'] ?? 0);
 			$new = (int)(bool)$rule['set_action_required'];
 			if ($old !== $new) {
@@ -139,7 +156,7 @@ final class ScoreOverrideService
 			}
 			$fieldsSetByRule['action_required'] = $ruleId;
 		}
-		if ($rule['set_label'] !== null && $fieldsSetByRule['label'] === null) {
+		if ($rule['set_label'] !== null && $fieldsSetByRule['label'] === null && !in_array('label', $sticky, true)) {
 			$old = (string)($score['label'] ?? '');
 			$new = (string)$rule['set_label'];
 			if ($old !== $new) {
@@ -149,7 +166,8 @@ final class ScoreOverrideService
 			$fieldsSetByRule['label'] = $ruleId;
 		}
 		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []
-			&& $fieldsSetByRule['folder_segments'] === null) {
+			&& $fieldsSetByRule['folder_segments'] === null
+			&& !in_array('folder_segments', $sticky, true)) {
 			$old = $score['folder_segments'] ?? null;
 			$new = array_values($rule['set_folder_segments']);
 			if ($old !== $new) {

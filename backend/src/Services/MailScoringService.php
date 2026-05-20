@@ -181,6 +181,10 @@ final class MailScoringService
 			}
 		}
 
+		// Phase 9j (Marc 2026-05-20): Sticky-Map laden, damit der ScoreOverride-
+		// Service user-korrigierte Felder NICHT ueberschreibt.
+		$stickyByMailId = $this->scores->loadUserCorrectedFields($tenantId, array_keys($mailById));
+
 		foreach ($scored as &$row) {
 			$mid = (string)($row['mail_id'] ?? '');
 			$mail = $mailById[$mid] ?? null;
@@ -224,6 +228,9 @@ final class MailScoringService
 			// in-place wenn eine Regel matched. Best-effort — Fehler werfen
 			// nicht den ganzen Score-Pfad raus.
 			if ($this->scoreOverride !== null && $userId !== '') {
+				// Phase 9j: Sticky-CSV in $row injizieren, damit der Service
+				// user-korrigierte Felder schuetzt.
+				$row['user_corrected_fields'] = $stickyByMailId[$mid] ?? '';
 				try {
 					$this->scoreOverride->apply($tenantId, $userId, $mail, $row, $bucketForOverride);
 				} catch (\Throwable $e) {
@@ -265,8 +272,14 @@ final class MailScoringService
 				]);
 			}
 		}
+		// Phase 9j (Marc 2026-05-20): Sticky-CSV aus DB nachladen, damit der
+		// ScoreOverrideService user-korrigierte Felder respektiert. Caller
+		// (MailController::ensureScored) reicht das schon teilweise mit, aber
+		// hier ist DB die Quelle der Wahrheit.
+		$stickyMap = $this->scores->loadUserCorrectedFields($tenantId, [(string)($mail['id'] ?? '')]);
 		// Kopie, damit apply() in-place mutiert und wir den Diff vergleichen koennen.
 		$mutated = $score;
+		$mutated['user_corrected_fields'] = $stickyMap[(string)($mail['id'] ?? '')] ?? '';
 		$result  = $this->scoreOverride->apply($tenantId, $userId, $mail, $mutated, $bucket);
 		if (!($result['matched'] ?? false) || empty($result['changes'])) {
 			return ['matched' => false];
