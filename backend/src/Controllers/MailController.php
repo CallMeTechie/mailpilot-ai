@@ -376,15 +376,35 @@ final class MailController extends BaseController
 			if ($mailDbId === '') {
 				throw HttpException::badRequest('VALIDATION', 'folder_id oder mail_id erforderlich');
 			}
-			$lookupStmt = $this->kernel->get(\PDO::class)->prepare(
-				'SELECT parent_folder_id FROM mails
-				WHERE id = :id AND tenant_id = :t LIMIT 1'
+			$pdo = $this->kernel->get(\PDO::class);
+			$lookupStmt = $pdo->prepare(
+				'SELECT m.parent_folder_id, m.ms_message_id, m.mailbox_id
+				FROM mails m WHERE m.id = :id AND m.tenant_id = :t LIMIT 1'
 			);
 			$lookupStmt->execute([':id' => $mailDbId, ':t' => $ctx['tenant_id']]);
 			$row = $lookupStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 			$folderId = (string)($row['parent_folder_id'] ?? '');
+			// Phase 9h.4-Hotfix (Marc 2026-05-20): Wenn parent_folder_id NULL
+			// (alte Mail oder Sync vor dem Fix), holen wir das jetzt frisch
+			// per Graph und updaten die DB. Self-healing.
+			if ($folderId === '' && !empty($row['ms_message_id']) && !empty($row['mailbox_id'])) {
+				try {
+					$mb = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+						->findById($ctx['tenant_id'], (string)$row['mailbox_id']);
+					if ($mb !== null) {
+						$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+						$graphMsg = $this->kernel->get(GraphClient::class)
+							->fetchMessage($token, (string)$row['ms_message_id']);
+						$folderId = (string)($graphMsg['parentFolderId'] ?? '');
+						if ($folderId !== '') {
+							$pdo->prepare('UPDATE mails SET parent_folder_id = :pf WHERE id = :id AND tenant_id = :t')
+								->execute([':pf' => $folderId, ':id' => $mailDbId, ':t' => $ctx['tenant_id']]);
+						}
+					}
+				} catch (\Throwable) { /* fall through to error below */ }
+			}
 			if ($folderId === '') {
-				throw HttpException::badRequest('VALIDATION', 'Mail hat keine parent_folder_id (noch nicht gesynced?)');
+				throw HttpException::badRequest('VALIDATION', 'Folder konnte nicht ermittelt werden — Graph liefert keine parentFolderId.');
 			}
 		}
 		$pdo = $this->kernel->get(\PDO::class);

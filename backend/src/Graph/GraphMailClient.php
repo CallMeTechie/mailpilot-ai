@@ -29,8 +29,11 @@ final class GraphMailClient
 	 */
 	public function syncInbox(string $accessToken, ?string $deltaToken = null): array
 	{
+		// Phase 9h.4-Hotfix (Marc 2026-05-20): parentFolderId ergaenzt — siehe
+		// fetchMessage. Delta-Token bleibt rueckwaerts-kompatibel (Graph
+		// liefert dieselben Felder weiter).
 		$url = $deltaToken
-			?? self::GRAPH_BASE . '/me/mailFolders/Inbox/messages/delta?$select=id,conversationId,internetMessageId,from,toRecipients,ccRecipients,subject,bodyPreview,body,hasAttachments,receivedDateTime,internetMessageHeaders,categories';
+			?? self::GRAPH_BASE . '/me/mailFolders/Inbox/messages/delta?$select=id,conversationId,internetMessageId,parentFolderId,from,toRecipients,ccRecipients,subject,bodyPreview,body,hasAttachments,receivedDateTime,internetMessageHeaders,categories';
 
 		$messages = [];
 		$nextDelta = null;
@@ -63,8 +66,12 @@ final class GraphMailClient
 	 */
 	public function fetchMessage(string $accessToken, string $messageId): ?array
 	{
+		// Phase 9h.4-Hotfix (Marc 2026-05-20): parentFolderId ergaenzt — wird
+		// fuer MoveDetectionService + rescoreFolder (Bulk-Rescore) gebraucht.
+		// Ohne dieses Feld bekommen alle einzeln gefetched Mails NULL in
+		// mails.parent_folder_id und Bulk-Rescore funktioniert nicht.
 		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId)
-			. '?$select=id,conversationId,internetMessageId,from,toRecipients,ccRecipients,'
+			. '?$select=id,conversationId,internetMessageId,parentFolderId,from,toRecipients,ccRecipients,'
 			. 'subject,bodyPreview,body,hasAttachments,receivedDateTime,internetMessageHeaders,categories';
 		try {
 			return $this->http->get($accessToken, $url);
