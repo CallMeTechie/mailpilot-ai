@@ -61,23 +61,104 @@ final class ScoreOverrideService
 		$label     = (string)($score['label'] ?? '');
 		$priority  = (int)($score['priority'] ?? 0);
 
+		// Phase 9g (Marc 2026-05-20): orthogonale Regel-Anwendung. Statt
+		// first-match-wins iterieren wir alle Regeln in created_at-Reihenfolge
+		// und nehmen pro Set-Feld die ERSTE matchende Regel mit nicht-NULL-
+		// Wert fuer dieses Feld. So koennen z.B. eine Folder-Override-Regel
+		// UND eine Priority-Override-Regel gleichzeitig greifen, statt dass
+		// die fruehere die spaetere blockt.
+		$allChanges    = [];
+		$appliedRules  = [];
+		$fieldsSetByRule = [
+			'priority'         => null,
+			'action_required'  => null,
+			'label'            => null,
+			'folder_segments'  => null,
+		];
+
 		foreach ($rules as $rule) {
 			if (!$this->matches($rule, $senderKey, $subject, $fromLocal, $label, $priority)) {
 				continue;
 			}
-			$changes = $this->applySetFields($rule, $score);
-			if ($changes !== []) {
-				$this->rules->recordApply($tenantId, (string)$rule['id']);
+			$thisChanges = $this->applySetFieldsOrthogonal($rule, $score, $fieldsSetByRule);
+			if ($thisChanges !== []) {
+				$ruleId = (string)$rule['id'];
+				$this->rules->recordApply($tenantId, $ruleId);
 				$this->logger->info('score_override.applied', [
-					'rule_id' => (string)$rule['id'],
+					'rule_id' => $ruleId,
 					'mail_id' => (string)($mail['id'] ?? ''),
-					'changes' => $changes,
+					'changes' => $thisChanges,
 				]);
-				return ['matched' => true, 'rule_id' => (string)$rule['id'], 'changes' => $changes];
+				$allChanges    = array_merge($allChanges, $thisChanges);
+				$appliedRules[] = $ruleId;
 			}
-			// Regel matched aber set_-Felder waren alle null → wirkungslos, weiter.
 		}
-		return ['matched' => false];
+
+		if ($allChanges === []) {
+			return ['matched' => false];
+		}
+		return [
+			'matched'   => true,
+			'rule_id'   => $appliedRules[0],          // backward-compat: erste applied rule
+			'rule_ids'  => $appliedRules,
+			'changes'   => $allChanges,
+		];
+	}
+
+	/**
+	 * Phase 9g — orthogonale Variante von applySetFields: setzt pro Feld nur,
+	 * wenn eine FRUEHERE Regel dieses Feld noch nicht gesetzt hat.
+	 * $fieldsSetByRule wird per-reference mitgefuehrt; gibt nur die in
+	 * DIESEM Call tatsaechlich geaenderten Felder zurueck.
+	 *
+	 * @param array<string,mixed> $rule
+	 * @param array<string,mixed> $score             mutiert in-place
+	 * @param array<string,?string> $fieldsSetByRule mutiert in-place; key=Feldname, value=ruleId
+	 * @return array<string,mixed> Changes nur fuer Felder die diese Regel zuerst setzt.
+	 */
+	private function applySetFieldsOrthogonal(array $rule, array &$score, array &$fieldsSetByRule): array
+	{
+		$changes = [];
+		$ruleId  = (string)$rule['id'];
+
+		if ($rule['set_priority'] !== null && $fieldsSetByRule['priority'] === null) {
+			$old = (int)($score['priority'] ?? 0);
+			$new = (int)$rule['set_priority'];
+			if ($old !== $new) {
+				$score['priority'] = $new;
+				$changes['priority'] = ['from' => $old, 'to' => $new];
+			}
+			$fieldsSetByRule['priority'] = $ruleId;
+		}
+		if ($rule['set_action_required'] !== null && $fieldsSetByRule['action_required'] === null) {
+			$old = (int)(bool)($score['action_required'] ?? 0);
+			$new = (int)(bool)$rule['set_action_required'];
+			if ($old !== $new) {
+				$score['action_required'] = $new;
+				$changes['action_required'] = ['from' => $old, 'to' => $new];
+			}
+			$fieldsSetByRule['action_required'] = $ruleId;
+		}
+		if ($rule['set_label'] !== null && $fieldsSetByRule['label'] === null) {
+			$old = (string)($score['label'] ?? '');
+			$new = (string)$rule['set_label'];
+			if ($old !== $new) {
+				$score['label'] = $new;
+				$changes['label'] = ['from' => $old, 'to' => $new];
+			}
+			$fieldsSetByRule['label'] = $ruleId;
+		}
+		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []
+			&& $fieldsSetByRule['folder_segments'] === null) {
+			$old = $score['folder_segments'] ?? null;
+			$new = array_values($rule['set_folder_segments']);
+			if ($old !== $new) {
+				$score['folder_segments']   = $new;
+				$changes['folder_segments'] = ['from' => $old, 'to' => $new];
+			}
+			$fieldsSetByRule['folder_segments'] = $ruleId;
+		}
+		return $changes;
 	}
 
 	/**
