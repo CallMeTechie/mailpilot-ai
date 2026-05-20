@@ -193,49 +193,7 @@ final class ScoreOverrideService
 		return true;
 	}
 
-	/**
-	 * @param array<string,mixed> $rule
-	 * @param array<string,mixed> $score  mutiert in-place
-	 * @return array<string,mixed> tatsaechlich geaenderte Felder fuer Audit-Log
-	 */
-	private function applySetFields(array $rule, array &$score): array
-	{
-		$changes = [];
-		if ($rule['set_priority'] !== null) {
-			$old = (int)($score['priority'] ?? 0);
-			$new = (int)$rule['set_priority'];
-			if ($old !== $new) {
-				$score['priority'] = $new;
-				$changes['priority'] = ['from' => $old, 'to' => $new];
-			}
-		}
-		if ($rule['set_action_required'] !== null) {
-			$old = (int)(bool)($score['action_required'] ?? 0);
-			$new = (int)(bool)$rule['set_action_required'];
-			if ($old !== $new) {
-				$score['action_required'] = $new;
-				$changes['action_required'] = ['from' => $old, 'to' => $new];
-			}
-		}
-		if ($rule['set_label'] !== null) {
-			$old = (string)($score['label'] ?? '');
-			$new = (string)$rule['set_label'];
-			if ($old !== $new) {
-				$score['label'] = $new;
-				$changes['label'] = ['from' => $old, 'to' => $new];
-			}
-		}
-		// Phase 9e (Marc 2026-05-19): Topic-Override. Wenn die Regel
-		// folder_segments setzt, ueberschreiben wir den KI-Vorschlag —
-		// der FolderPathBuilder verarbeitet das dann im AutoSortService.
-		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []) {
-			$old = $score['folder_segments'] ?? null;
-			$new = array_values($rule['set_folder_segments']);
-			if ($old !== $new) {
-				$score['folder_segments']   = $new;
-				$changes['folder_segments'] = ['from' => $old, 'to' => $new];
-			}
-		}
-		return $changes;
-	}
+	// Phase 9g (Marc 2026-05-20): Vorgaengermethode applySetFields() entfernt —
+	// durch applySetFieldsOrthogonal() oben ersetzt, die per-Feld first-rule-wins
+	// statt per-Regel first-match-wins implementiert.
 }
