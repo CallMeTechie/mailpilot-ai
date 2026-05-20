@@ -90,6 +90,15 @@ class GraphClient
 		return $this->mail->fetchMessage($accessToken, $messageId);
 	}
 
+	/**
+	 * Phase 9h.4-Hotfix #3 — Folder-Enumeration fuer Bulk-Rescore.
+	 * @return list<array<string,mixed>>
+	 */
+	public function listFolderMessages(string $accessToken, string $folderId, int $top = 100): array
+	{
+		return $this->mail->listFolderMessages($accessToken, $folderId, $top);
+	}
+
 	public function setCategories(string $accessToken, string $messageId, array $categories): void
 	{
 		$this->mail->setCategories($accessToken, $messageId, $categories);

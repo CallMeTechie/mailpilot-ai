@@ -407,25 +407,56 @@ final class MailController extends BaseController
 				throw HttpException::badRequest('VALIDATION', 'Folder konnte nicht ermittelt werden — Graph liefert keine parentFolderId.');
 			}
 		}
-		$pdo = $this->kernel->get(\PDO::class);
-		$stmt = $pdo->prepare('SELECT m.* FROM mails m
-			INNER JOIN mailboxes mb ON mb.id = m.mailbox_id
-			WHERE m.tenant_id = :t
-			  AND mb.user_id = :u
-			  AND m.parent_folder_id = :f
-			  AND m.deleted_at IS NULL
-			ORDER BY m.received_at DESC
-			LIMIT 100');
-		$stmt->execute([':t' => $ctx['tenant_id'], ':u' => $ctx['user_id'], ':f' => $folderId]);
-		$mails = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+		// Phase 9h.4 Hotfix #3 (Marc 2026-05-20): statt nur die DB nach
+		// parent_folder_id zu durchsuchen (was bei alten Mails NULL ist),
+		// enumerieren wir den Folder direkt via Graph — das holt die jüngsten
+		// 100 Mails, upsertFromGraph heilt mails.parent_folder_id im
+		// Vorbeigehen, und scoreBatch durchlaeuft alle.
+		$mailboxes = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+			->findByUser($ctx['tenant_id'], $ctx['user_id']);
+		if ($mailboxes === []) {
+			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
+		}
+		$graphMessages = [];
+		$lastMailbox = null;
+		foreach ($mailboxes as $mb) {
+			$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
+			try {
+				$msgs = $this->kernel->get(GraphClient::class)->listFolderMessages($token, $folderId, 100);
+			} catch (\Throwable) { $msgs = []; }
+			if ($msgs !== []) {
+				$graphMessages = $msgs;
+				$lastMailbox = $mb;
+				break;  // Folder gehoert genau einer Mailbox an
+			}
+		}
+		if ($graphMessages === [] || $lastMailbox === null) {
+			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_in_folder', 'folder_id' => $folderId]);
+			return;
+		}
+		// Upsert alle Mails (heilt parent_folder_id) + sammel mail-Rows.
+		$mailRepo = $this->kernel->get(MailRepository::class);
+		$pdo      = $this->kernel->get(\PDO::class);
+		$lookup   = $pdo->prepare('SELECT * FROM mails WHERE ms_message_id = :ms AND tenant_id = :t LIMIT 1');
+		$mails = [];
+		foreach ($graphMessages as $gm) {
+			$msId = (string)($gm['id'] ?? '');
+			if ($msId === '') continue;
+			$mailRepo->upsertFromGraph($ctx['tenant_id'], (string)$lastMailbox['id'], $gm);
+			$lookup->execute([':ms' => $msId, ':t' => $ctx['tenant_id']]);
+			$row = $lookup->fetch(\PDO::FETCH_ASSOC);
+			if ($row !== false) {
+				$mails[] = $row;
+			}
+		}
 		if ($mails === []) {
-			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_in_folder']);
+			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_after_upsert', 'folder_id' => $folderId]);
 			return;
 		}
 		$userRow = $this->fetchUser($ctx['user_id']);
 		$profile = $this->buildUserProfile($ctx, $userRow);
 		// scoreBatch durchlaeuft enrichScoresWithSender → ScoreOverrideService
-		// auch fuer cache-hits, also greifen neue Override-Regeln auf vorhandene
+		// auch fuer cache-hits, also greifen Override-Regeln auch auf vorhandene
 		// Scores. User-korrigierte Felder bleiben sticky.
 		$this->kernel->get(MailScoringService::class)
 			->scoreBatch($ctx['tenant_id'], $profile, $mails);

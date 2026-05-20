@@ -83,6 +83,32 @@ final class GraphMailClient
 		}
 	}
 
+	/**
+	 * Phase 9h.4-Hotfix #3 (Marc 2026-05-20) — listet die Top-N Mails eines
+	 * Outlook-Folders. Wird vom rescoreFolder-Endpoint genutzt um den Folder
+	 * zu enumerieren UND nebenbei alle mails.parent_folder_id zu heilen.
+	 * Single-page, kein delta — wir wollen nur die jüngsten N für Rescore.
+	 *
+	 * @return list<array<string,mixed>>
+	 */
+	public function listFolderMessages(string $accessToken, string $folderId, int $top = 100): array
+	{
+		$top = max(1, min(100, $top));
+		$url = self::GRAPH_BASE . '/me/mailFolders/' . rawurlencode($folderId) . '/messages'
+			. '?$top=' . $top
+			. '&$orderby=' . rawurlencode('receivedDateTime desc')
+			. '&$select=id,conversationId,internetMessageId,parentFolderId,from,toRecipients,ccRecipients,'
+			. 'subject,bodyPreview,body,hasAttachments,receivedDateTime,internetMessageHeaders,categories';
+		try {
+			$res = $this->http->get($accessToken, $url);
+		} catch (\RuntimeException $e) {
+			if (preg_match('/\b404\b/', $e->getMessage())) return [];
+			throw $e;
+		}
+		$values = $res['value'] ?? [];
+		return is_array($values) ? array_values($values) : [];
+	}
+
 	public function setCategories(string $accessToken, string $messageId, array $categories): void
 	{
 		$url = self::GRAPH_BASE . '/me/messages/' . rawurlencode($messageId);
