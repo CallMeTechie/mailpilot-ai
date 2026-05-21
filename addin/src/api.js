@@ -154,9 +154,10 @@ export const api = {
 		summarize:     (id)    => request('POST', `/mails/${id}/summarize`),
 		draftReply:    (id, i) => request('POST', `/mails/${id}/draft-reply`, { instruction: i ?? null }),
 		rescore:       (id)    => request('POST', `/mails/${id}/rescore`),
-		// Phase 9h.4 (Marc 2026-05-20): Bulk-Rescore aller Mails im Outlook-Folder.
-		// Backend nimmt folder_id ODER mail_id (resolved daraus parent_folder_id).
+		// Phase 9l (Marc 2026-05-21): Bulk-Rescore async via Worker. Liefert
+		// { job_id, status:"queued" }; UI pollt getRescoreJob bis done/failed.
 		rescoreFolderOfMail: (mailDbId) => request('POST', '/mails/rescore-folder', { mail_id: mailDbId }),
+		getRescoreJob:       (jobId)   => request('GET',  `/mails/rescore-jobs/${encodeURIComponent(jobId)}`),
 		correctScore:  (id, payload) => request('POST', `/mails/${id}/correct-score`, payload),
 		correctOwner:  (id, owner)   => request('POST', `/mails/${id}/correct-owner`, { action_owner: owner }),
 		// Phase 5: User klickt „Erledigt — verschieben" auf einer Pin-Card.

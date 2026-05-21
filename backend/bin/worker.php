@@ -26,12 +26,14 @@ use MailPilot\Repositories\AutoSortCorrectionRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\RescoreJobRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
 use MailPilot\Services\AutoReplyService;
 use MailPilot\Services\JobRecoveryService;
 use MailPilot\Services\JwtService;
 use MailPilot\Services\ReconciliationService;
+use MailPilot\Services\RescoreJobService;
 use MailPilot\Services\SyncService;
 
 $config = require __DIR__ . '/../config/config.php';
@@ -115,6 +117,21 @@ while (true) {
 			runSyncJob($kernel, $log, $pdo, $job);
 		}
 
+		// Phase 9l (Marc 2026-05-21): Bulk-Rescore-Tick. Eigene Tabelle
+		// rescore_jobs (analog sync_jobs), pickup via FOR UPDATE SKIP LOCKED
+		// im Repository. Pro Loop-Iteration max EIN Job, damit der
+		// sync_jobs-Pfad nicht starved.
+		try {
+			$rescoreRepo = $kernel->get(RescoreJobRepository::class);
+			$rescoreJob  = $rescoreRepo->claimNextQueued();
+			if ($rescoreJob !== null) {
+				$log->info('worker.rescore_job_start', ['job_id' => $rescoreJob['id']]);
+				$kernel->get(RescoreJobService::class)->run($rescoreJob);
+			}
+		} catch (\Throwable $e) {
+			$log->error('worker.rescore_job_loop_error', ['err' => $e->getMessage()]);
+		}
+
 		$today = gmdate('Y-m-d');
 		if ($lastHousekeepingDay !== $today) {
 			$mailRepo = $kernel->get(MailRepository::class);
@@ -148,6 +165,13 @@ while (true) {
 				$log->warning('worker.reconciliation_failed', ['err' => $e->getMessage()]);
 			}
 
+			// Phase 9l: rescore_jobs Housekeeping. Stale-Recovery markiert
+			// running-Jobs > 30 Min als failed (Worker-Crash-Recovery), und
+			// done/failed > 14 Tage werden purged.
+			$rescoreRepo = $kernel->get(RescoreJobRepository::class);
+			$rescoreRecovered = $rescoreRepo->recoverStaleRunning(30);
+			$rescorePurged    = $rescoreRepo->purgeOlderThan(14);
+
 			$log->info('worker.housekeeping', [
 				'bodies'             => $purgedBodies,
 				'oauth_states'       => $purgedStates,
@@ -157,6 +181,8 @@ while (true) {
 				'corrections_stable' => $promoted,
 				'corrections_purged' => $purgedCorrs,
 				'reconciliation'     => $reconStats,
+				'rescore_recovered'  => $rescoreRecovered,
+				'rescore_purged'     => $rescorePurged,
 			]);
 			$lastHousekeepingDay = $today;
 		}

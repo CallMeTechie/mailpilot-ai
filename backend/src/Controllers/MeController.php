@@ -86,15 +86,18 @@ final class MeController extends BaseController
 	 * Test Alarm.
 	 *
 	 * Begründungen:
-	 *   tenant_user → Junction, kein PII pro se (nur Membership)
-	 *   audit_log   → Compliance-Audit, darf laut Art. 17 zur Beweissicherung
-	 *                  retained werden; user_id ist Schlüssel, kein Body
+	 *   tenant_user   → Junction, kein PII pro se (nur Membership)
+	 *   audit_log     → Compliance-Audit, darf laut Art. 17 zur Beweissicherung
+	 *                    retained werden; user_id ist Schlüssel, kein Body
+	 *   rescore_jobs  → Phase 9l (2026-05-21): ephemere Operations-Records,
+	 *                    enthalten nur Folder-ID + Counter, kein Mail-Body.
+	 *                    Werden durch Worker-Housekeeping nach Done gepurged.
 	 *
 	 * @return list<string>
 	 */
 	public static function deliberateNonUserTables(): array
 	{
-		return ['tenant_user', 'audit_log'];
+		return ['tenant_user', 'audit_log', 'rescore_jobs'];
 	}
 
 	public function export(array $params, array $body): void

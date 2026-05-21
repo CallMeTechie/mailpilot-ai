@@ -111,11 +111,23 @@ final class RuleInferenceService
 			'mail_subject'     => $redactedSubject,
 			'reasoning'        => $redactedReasoning,
 		]);
+		return $this->applyFolderRuleParsed($parsed, $tenantId, $userId, $mailId, $hash);
+	}
+
+	/**
+	 * Phase 9h.3 — extrahiert aus infer(), damit inferAllFromCorrection()
+	 * denselben Apply-Pfad nutzen kann (Fuzzy-Merge, Pending/Auto-Apply,
+	 * Logging). $hash stammt aus dem Caller (Idempotenz-Stempel).
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function applyFolderRuleParsed(?array $parsed, string $tenantId, string $userId, string $mailId, string $hash): array
+	{
 		if ($parsed === null) {
 			return ['action' => 'skipped', 'reason' => 'claude_invalid_response'];
 		}
 
-		// 6) Hash speichern, damit ein Doppelclick blockiert wird
+		// Hash speichern, damit ein Doppelclick blockiert wird.
 		$this->stampHash($tenantId, $mailId, $hash);
 
 		if (!($parsed['create_rule'] ?? false)) {
@@ -125,7 +137,7 @@ final class RuleInferenceService
 			];
 		}
 
-		// 7) Fuzzy-Merge gegen existing Rules
+		// Fuzzy-Merge gegen existing Rules.
 		$label    = $this->normalizeLabel((string)($parsed['label'] ?? 'auto'));
 		$subLabel = $this->normalizeSubLabel($parsed['sub_label'] ?? null);
 		$folder   = trim((string)($parsed['folder_name'] ?? ''));
@@ -146,13 +158,12 @@ final class RuleInferenceService
 				: 'MailPilot/' . ucfirst($label);
 		}
 
-		// 8) Match-Suche
+		// Match-Suche + Decision (Auto-Apply vs. Pending).
 		$signals     = is_array($parsed['match_signals'] ?? null) ? $parsed['match_signals'] : [];
 		$range       = $this->settings->getString('rule_inference_backfill_range', 'last_30_days');
 		$backfillCap = max(1, $this->settings->getInt('rule_inference_backfill_max', 100));
 		$matches     = $this->findMatchingMails($tenantId, $userId, $signals, $range, $backfillCap + 1);
 
-		// 9) Decision
 		$confidence      = (int)($parsed['confidence'] ?? 0);
 		$confidenceFloor = $this->settings->getInt('rule_inference_confidence_floor', 80);
 		$moveMode        = $this->settings->getString('autosort_move_mode', 'suggest');
@@ -161,9 +172,6 @@ final class RuleInferenceService
 			&& $range !== 'all'
 			&& count($matches) <= $backfillCap;
 
-		// Pending sobald irgendeine Schutzbedingung greift. DA-R1 Crit 2:
-		// range=all immer Pending. DA-R2 Med 3: ein einziges Pending mit
-		// affected_mail_ids[]-Array, nicht N Einzel-Items.
 		if (!$autoApplyOnly) {
 			$pendingId = $this->pending->create(
 				$tenantId, $userId, 'rule_suggestion',
@@ -174,10 +182,6 @@ final class RuleInferenceService
 					'folder_name'       => $folder,
 					'match_signals'     => array_values(array_map('strval', $signals)),
 					'affected_mail_ids' => array_column($matches, 'id'),
-					// 2026-05-16: array_slice(..., 0, 10) entfernt — die
-					// Pending-Card-UI (v2) zeigt jetzt alle Subjects als
-					// Checkbox-Liste. backfill_max=100 begrenzt $matches
-					// ohnehin auf < 100 Einträge.
 					'affected_subjects' => array_column($matches, 'subject'),
 					'confidence'        => $confidence,
 					'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
@@ -201,10 +205,6 @@ final class RuleInferenceService
 			];
 		}
 
-		// 10) Auto-Apply. Bei range=last_30_days holt der AutoSort-Backfill-
-		// Worker die jetzt-matchenden Mails im naechsten Sweep nach (siehe
-		// AutoSortService::backfillForMailbox). Bei range=future_only ist
-		// nichts nachzuholen — die Rule greift fuer alle kuenftigen Mails.
 		$this->rules->upsert($tenantId, $userId, $label, $subLabel, true, $folder);
 		$this->logger->info('rule_inference.applied', [
 			'label'      => $label,
@@ -266,21 +266,43 @@ final class RuleInferenceService
 	/** @return array<string,mixed>|null */
 	private function callClaude(array $vars, string $promptKey = 'P-RULE-EXTRACT'): ?array
 	{
+		$payload = $this->buildClaudePayload($vars, $promptKey);
+		try {
+			$response = $this->claude->messages($payload);
+		} catch (\Throwable $e) {
+			$this->logger->warning('rule_inference.claude_failed', ['err' => $e->getMessage()]);
+			return null;
+		}
+		return $this->parseClaudeResponse($response);
+	}
+
+	/**
+	 * Phase 9h.3 (Marc 2026-05-21) — baut die Anthropic-Payload separat,
+	 * sodass callClaudeBatch() mehrere parallel feuern kann.
+	 *
+	 * @param array<string,mixed> $vars
+	 * @return array<string,mixed>
+	 */
+	private function buildClaudePayload(array $vars, string $promptKey): array
+	{
 		$active = $this->prompts->getActive($promptKey);
 		$user   = $active['user_template'];
 		foreach ($vars as $k => $v) {
 			$user = str_replace('{{' . $k . '}}', (string)$v, $user);
 		}
-		try {
-			$response = $this->claude->messages([
-				'model'       => $active['model'],
-				'max_tokens'  => $active['max_tokens'],
-				'temperature' => $active['temperature'],
-				'system'      => $active['system_prompt'],
-				'messages'    => [['role' => 'user', 'content' => $user]],
-			]);
-		} catch (\Throwable $e) {
-			$this->logger->warning('rule_inference.claude_failed', ['err' => $e->getMessage()]);
+		return [
+			'model'       => $active['model'],
+			'max_tokens'  => $active['max_tokens'],
+			'temperature' => $active['temperature'],
+			'system'      => $active['system_prompt'],
+			'messages'    => [['role' => 'user', 'content' => $user]],
+		];
+	}
+
+	/** @return array<string,mixed>|null */
+	private function parseClaudeResponse(mixed $response): ?array
+	{
+		if (!is_array($response)) {
 			return null;
 		}
 		$text = ClaudeClient::extractText($response);
@@ -296,6 +318,43 @@ final class RuleInferenceService
 			return null;
 		}
 		return is_array($parsed) ? $parsed : null;
+	}
+
+	/**
+	 * Phase 9h.3 — Batch-Variante via ClaudeClient::messagesBatch.
+	 * Sendet alle Payloads parallel; returnt ein Array gleicher Reihenfolge
+	 * mit jeweils parsed Response oder null bei Fehler.
+	 *
+	 * @param list<array{vars:array<string,mixed>, promptKey:string}> $specs
+	 * @return list<array<string,mixed>|null>
+	 */
+	private function callClaudeBatch(array $specs): array
+	{
+		if ($specs === []) {
+			return [];
+		}
+		$payloads = [];
+		foreach ($specs as $spec) {
+			$payloads[] = $this->buildClaudePayload($spec['vars'], $spec['promptKey']);
+		}
+		try {
+			$responses = $this->claude->messagesBatch($payloads);
+		} catch (\Throwable $e) {
+			$this->logger->warning('rule_inference.claude_batch_failed', ['err' => $e->getMessage()]);
+			return array_fill(0, count($specs), null);
+		}
+		$results = [];
+		foreach ($responses as $i => $resp) {
+			if ($resp instanceof \RuntimeException) {
+				$this->logger->warning('rule_inference.claude_batch_slot_error', [
+					'slot' => $i, 'err' => $resp->getMessage(),
+				]);
+				$results[] = null;
+				continue;
+			}
+			$results[] = $this->parseClaudeResponse($resp);
+		}
+		return $results;
 	}
 
 	/**
@@ -493,6 +552,20 @@ final class RuleInferenceService
 			'reasoning'          => $reasoningR,
 		], 'P-SCORE-RULE-EXTRACT');
 
+		return $this->applyScoreRuleParsed($parsed, $tenantId, $userId, $mailId);
+	}
+
+	/**
+	 * Phase 9h.3 — extrahiert aus inferScoreRule, damit
+	 * inferAllFromCorrection() denselben Apply-Pfad nutzen kann.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function applyScoreRuleParsed(?array $parsed, string $tenantId, string $userId, string $mailId): array
+	{
+		if ($this->scoreOverrides === null) {
+			return ['action' => 'skipped', 'reason' => 'no_repo_injected'];
+		}
 		if ($parsed === null) {
 			return ['action' => 'error', 'reason' => 'claude_invalid_response'];
 		}
@@ -504,15 +577,10 @@ final class RuleInferenceService
 			];
 		}
 
-		// Phase 9d (Marc 2026-05-19): Bei hoher Confidence direkt aktivieren,
-		// statt den User zum Settings-Tab zu schicken. Schwelle ueber
-		// system_settings.score_rule_auto_enable_threshold konfigurierbar
-		// (Migration 0037; default 85 = synchron mit Prompt-Definition).
 		$confidence    = (int)($parsed['confidence'] ?? 0);
 		$autoThreshold = $this->settings->getInt('score_rule_auto_enable_threshold', 85);
 		$autoEnabled   = $confidence >= $autoThreshold;
 
-		// Repo-create validiert Match-Felder (min 1) + Regex-Syntax.
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
 				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
@@ -619,6 +687,21 @@ final class RuleInferenceService
 			'reasoning'           => $reasoningR,
 		], 'P-TOPIC-RULE-EXTRACT');
 
+		return $this->applyTopicRuleParsed($parsed, $tenantId, $userId, $mailId, $correctedSegments, $topic);
+	}
+
+	/**
+	 * Phase 9h.3 — extrahiert aus inferTopicRule, damit
+	 * inferAllFromCorrection() denselben Apply-Pfad nutzen kann.
+	 *
+	 * @param list<string> $correctedSegments
+	 * @return array<string,mixed>
+	 */
+	private function applyTopicRuleParsed(?array $parsed, string $tenantId, string $userId, string $mailId, array $correctedSegments, string $topic): array
+	{
+		if ($this->scoreOverrides === null) {
+			return ['action' => 'skipped', 'reason' => 'no_repo_injected'];
+		}
 		if ($parsed === null) {
 			return ['action' => 'error', 'reason' => 'claude_invalid_response'];
 		}
@@ -730,5 +813,218 @@ final class RuleInferenceService
 			'reasoning_summary' => $summary,
 			'merged'            => $canMerge ? $merged : null,
 		];
+	}
+
+	// ========================================================================
+	// Phase 9h.3 — parallele Inferenz aller drei Regel-Typen (Marc 2026-05-21)
+	// ========================================================================
+
+	/**
+	 * Aus einer correctScore-Korrektur ALLE drei Regel-Typen (Folder /
+	 * ScoreOverride / Topic) ableiten. Ersetzt drei sequenzielle infer*-
+	 * Aufrufe (~7.5s total) durch EIN curl_multi (~2.5s total).
+	 *
+	 * Returnt ein Map mit den drei Result-Arrays:
+	 *   { folder: array|null, score_rule: array|null, topic_rule: array|null }
+	 * Slots koennen null sein wenn die Inferenz nicht relevant war (z.B.
+	 * topic_rule wenn topicSegments leer, oder folder wenn reasoning leer).
+	 *
+	 * Caller (MailController::correctScore) hat schon entschieden ob es
+	 * reasoning + topic gibt — wir bauen dynamisch 0..3 Payloads.
+	 *
+	 * @param array<string,mixed>      $correctedScore  {label,priority,action_required}
+	 * @param array<string,mixed>      $originalScore   {label,priority,action_required}
+	 * @param list<string>             $topicSegments
+	 * @return array{folder:?array<string,mixed>, score_rule:?array<string,mixed>, topic_rule:?array<string,mixed>}
+	 */
+	public function inferAllFromCorrection(
+		string $tenantId,
+		string $userId,
+		string $mailId,
+		array $correctedScore,
+		array $originalScore,
+		string $reasoning,
+		array $topicSegments,
+	): array {
+		$result = ['folder' => null, 'score_rule' => null, 'topic_rule' => null];
+
+		if (!$this->settings->getBool('rule_inference_enabled', true)) {
+			return $result;
+		}
+		$reasoning = trim($reasoning);
+		$hasReasoning = $reasoning !== '';
+		$hasTopic     = $topicSegments !== [];
+
+		// Wenn weder reasoning noch topic da ist, gibt's nichts zu inferieren.
+		if (!$hasReasoning && !$hasTopic) {
+			return $result;
+		}
+
+		// Mail-Context 1× laden — alle drei Inferenzen brauchen from_email/subject.
+		$ctx = $this->loadMailContext($tenantId, $mailId);
+		if ($ctx === null) {
+			$err = ['action' => 'skipped', 'reason' => 'mail_not_found'];
+			if ($hasReasoning) {
+				$result['folder']     = $err;
+				$result['score_rule'] = $err;
+			}
+			if ($hasTopic) {
+				$result['topic_rule'] = $err;
+			}
+			return $result;
+		}
+
+		$fromDomain = $this->redactor->reduceFromToDomain((string)$ctx['from_email']);
+		$subject    = $this->redactor->redact((string)$ctx['subject']);
+		$nameList   = $this->getNameList();
+
+		// Quota — gemeinsamer Counter. Wir koennten 3× incrementOrFail rufen,
+		// aber gemeinsamer Increment ist semantisch korrekter: eine User-
+		// Korrektur = ein Inferenz-Event.
+		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
+		try {
+			$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
+		} catch (QuotaExceededException $e) {
+			$throw = ['action' => 'skipped', 'reason' => 'quota_exceeded'];
+			if ($hasReasoning) {
+				$result['folder']     = $throw;
+				$result['score_rule'] = $throw;
+			}
+			if ($hasTopic) {
+				$result['topic_rule'] = $throw;
+			}
+			throw $e; // Caller (Controller) übersetzt in 429.
+		}
+
+		// Pre-Apply-Hashes / Dedup-Checks.
+		$folderHash = null;
+		$folderSkipReason = null;
+		if ($hasReasoning) {
+			$folderHash = hash('sha256', $mailId . "\n" . $reasoning);
+			if ($this->hashExists($tenantId, $folderHash)) {
+				$folderSkipReason = ['action' => 'skipped', 'reason' => 'duplicate_submit', 'hash' => $folderHash];
+			}
+		}
+
+		$scoreSkipReason = null;
+		if ($hasReasoning && $this->scoreOverrides !== null && $this->senderResolver !== null) {
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
+				$senderKey = (string)($bucket['sender_key'] ?? '');
+				$correctedPrio = (int)($correctedScore['priority'] ?? 0);
+				if ($senderKey !== '' && $correctedPrio > 0
+					&& $this->scoreOverrides->hasSimilarPriorityRule($tenantId, $userId, $senderKey, $correctedPrio)) {
+					$this->logger->info('rule_inference.score_rule_dedup_skip', [
+						'sender_key' => $senderKey, 'set_priority' => $correctedPrio, 'mail_id' => $mailId,
+					]);
+					$scoreSkipReason = ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
+				}
+			} catch (\Throwable) { /* fall through to claude */ }
+		}
+
+		$topicSkipReason = null;
+		if ($hasTopic && $this->scoreOverrides !== null && $this->senderResolver !== null) {
+			try {
+				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
+				$senderKey = (string)($bucket['sender_key'] ?? '');
+				if ($senderKey !== ''
+					&& $this->scoreOverrides->hasSimilarTopicRule($tenantId, $userId, $senderKey, $topicSegments)) {
+					$this->logger->info('rule_inference.topic_rule_dedup_skip', [
+						'sender_key' => $senderKey, 'segments' => $topicSegments, 'mail_id' => $mailId,
+					]);
+					$topicSkipReason = ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
+				}
+			} catch (\Throwable) { /* fall through */ }
+		}
+
+		// Payloads bauen — eine pro Slot der ausgefuehrt wird.
+		// $specs ist [{vars, promptKey, slot:'folder'|'score_rule'|'topic_rule'}, ...]
+		$specs = [];
+
+		if ($hasReasoning && $folderSkipReason === null) {
+			$redactedReasoning = $this->redactor->redactReasoning($reasoning, $nameList);
+			$specs[] = [
+				'slot'      => 'folder',
+				'promptKey' => 'P-RULE-EXTRACT',
+				'vars'      => [
+					'mail_label'       => (string)($ctx['label'] ?? 'auto'),
+					'mail_sub_label'   => $ctx['sub_label'] !== null ? (string)$ctx['sub_label'] : 'null',
+					'mail_from_domain' => $fromDomain,
+					'mail_subject'     => $subject,
+					'reasoning'        => $redactedReasoning,
+				],
+			];
+		}
+
+		if ($hasReasoning && $scoreSkipReason === null && $this->scoreOverrides !== null) {
+			$reasoningR = $this->redactor->redactReasoning($reasoning, $nameList);
+			$specs[] = [
+				'slot'      => 'score_rule',
+				'promptKey' => 'P-SCORE-RULE-EXTRACT',
+				'vars'      => [
+					'from_domain'        => $fromDomain,
+					'subject'            => $subject,
+					'original_label'     => (string)($originalScore['label'] ?? '?'),
+					'original_priority'  => (string)($originalScore['priority'] ?? '?'),
+					'original_action'    => !empty($originalScore['action_required']) ? 'true' : 'false',
+					'corrected_label'    => (string)($correctedScore['label'] ?? '?'),
+					'corrected_priority' => (string)($correctedScore['priority'] ?? '?'),
+					'corrected_action'   => !empty($correctedScore['action_required']) ? 'true' : 'false',
+					'reasoning'          => $reasoningR,
+				],
+			];
+		}
+
+		if ($hasTopic && $topicSkipReason === null && $this->scoreOverrides !== null) {
+			$reasoningClean = trim($reasoning);
+			$reasoningR = $reasoningClean === ''
+				? '(keine Begruendung)'
+				: $this->redactor->redactReasoning($reasoningClean, $nameList);
+			$topicLast = (string)end($topicSegments);
+			$specs[] = [
+				'slot'      => 'topic_rule',
+				'promptKey' => 'P-TOPIC-RULE-EXTRACT',
+				'vars'      => [
+					'from_domain'         => $fromDomain,
+					'subject'             => $subject,
+					'corrected_topic'     => $topicLast,
+					'corrected_segments'  => json_encode($topicSegments, JSON_UNESCAPED_UNICODE),
+					'reasoning'           => $reasoningR,
+				],
+			];
+		}
+
+		// Pre-skip-Antworten direkt eintragen.
+		if ($folderSkipReason !== null)  { $result['folder']     = $folderSkipReason; }
+		if ($scoreSkipReason !== null)   { $result['score_rule'] = $scoreSkipReason; }
+		if ($topicSkipReason !== null)   { $result['topic_rule'] = $topicSkipReason; }
+
+		// Wenn keine Specs uebrig sind (alles dedup-skipped), kein Claude-Call.
+		if ($specs === []) {
+			return $result;
+		}
+
+		// Parallel-Call — DAS ist der eigentliche 9h.3-Gewinn.
+		$batchSpecs = array_map(fn($s) => ['vars' => $s['vars'], 'promptKey' => $s['promptKey']], $specs);
+		$parsedList = $this->callClaudeBatch($batchSpecs);
+
+		// Apply pro Slot.
+		foreach ($specs as $i => $spec) {
+			$parsed = $parsedList[$i] ?? null;
+			switch ($spec['slot']) {
+				case 'folder':
+					$result['folder'] = $this->applyFolderRuleParsed($parsed, $tenantId, $userId, $mailId, $folderHash ?? '');
+					break;
+				case 'score_rule':
+					$result['score_rule'] = $this->applyScoreRuleParsed($parsed, $tenantId, $userId, $mailId);
+					break;
+				case 'topic_rule':
+					$topicLast = (string)end($topicSegments);
+					$result['topic_rule'] = $this->applyTopicRuleParsed($parsed, $tenantId, $userId, $mailId, $topicSegments, $topicLast);
+					break;
+			}
+		}
+
+		return $result;
 	}
 }

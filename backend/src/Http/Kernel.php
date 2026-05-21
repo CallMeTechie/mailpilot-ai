@@ -17,6 +17,7 @@ use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
 use MailPilot\Repositories\RedactionRepository;
+use MailPilot\Repositories\RescoreJobRepository;
 use MailPilot\Repositories\ScoreOverrideRepository;
 use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SettingsRepository;
@@ -39,6 +40,7 @@ use MailPilot\Services\MoveDetectionService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Services\ReconciliationService;
 use MailPilot\Services\ReplyDraftService;
+use MailPilot\Services\RescoreJobService;
 use MailPilot\Services\RuleInferenceService;
 use MailPilot\Services\ScoreOverrideService;
 use MailPilot\Services\Sender\FolderPathBuilder;
@@ -127,6 +129,8 @@ class Kernel
 			PendingActionRepository::class => new PendingActionRepository($this->get(PDO::class)),
 			UsageCounterRepository::class => new UsageCounterRepository($this->get(PDO::class)),
 			AutoSortCorrectionRepository::class => new AutoSortCorrectionRepository($this->get(PDO::class)),
+			// Phase 9l: Bulk-Rescore Async-Job-Queue.
+			RescoreJobRepository::class => new RescoreJobRepository($this->get(PDO::class)),
 			MoveDetectionService::class => new MoveDetectionService(
 				$this->get(MailRepository::class),
 				$this->get(ScoreRepository::class),
@@ -271,6 +275,19 @@ class Kernel
 				$this->get(ScoreOverrideRepository::class),
 				// Phase 9h.2: SenderResolver fuer Dedup-Check (sender_key-Lookup).
 				$this->get(\MailPilot\Services\Sender\SenderResolver::class),
+			),
+			// Phase 9l: Async Bulk-Rescore — Worker-Aufrufer + Controller nutzen
+			// dieselbe Run-Methode (Controller delegiert nur an Repository,
+			// Worker ruft tatsächlich run()).
+			RescoreJobService::class => new RescoreJobService(
+				$this->get(PDO::class),
+				$this->get(RescoreJobRepository::class),
+				$this->get(MailboxRepository::class),
+				$this->get(MailRepository::class),
+				$this->get(GraphClient::class),
+				$this->get(TokenService::class),
+				$this->get(MailScoringService::class),
+				$this->get(Logger::class),
 			),
 			SyncService::class        => new SyncService(
 				$this->get(GraphClient::class),

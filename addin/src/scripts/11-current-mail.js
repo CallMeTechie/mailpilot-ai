@@ -18,9 +18,9 @@ function initCurrentMail() {
 }
 
 /**
- * Phase 9h.4 — User klickt Bulk-Rescore-Icon. Outlook MailItem hat keine
- * .parent-API, also nutzen wir die DB-Mail-ID — Backend resolved daraus
- * mails.parent_folder_id. Sync-Request, dauert ggf. 30-60s bei vollem Folder.
+ * Phase 9l (Marc 2026-05-21) — User klickt Bulk-Rescore-Icon. Backend
+ * enqueued einen rescore_job (kein Sync mehr → kein 504). UI pollt den
+ * Job alle 2s und zeigt live progress, bis status=done|failed.
  */
 async function rescoreCurrentFolder() {
 	const btn = document.getElementById('btn-rescore-folder');
@@ -31,18 +31,69 @@ async function rescoreCurrentFolder() {
 	}
 	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
 	try {
-		// Phase 9k Hotfix (Marc 2026-05-21): Hinweis dass es dauern kann.
-		// Bei 50 Mails ohne Cache-Hits: 30-90s, lange Toast-Anzeige.
-		showToast('Ordner wird neu bewertet … (kann bis zu 2 Min dauern)', 'info', 10000);
-		const res = await api.mails.rescoreFolderOfMail(mailDbId);
-		const note = res?.capped ? ` (Cap: ${res.count} jüngste Mails)` : '';
-		showToast(`✅ ${res?.count ?? 0} Mails neu bewertet${note}`, 'success', 6000);
-		state.briefingLoaded = false;
+		const enqRes = await api.mails.rescoreFolderOfMail(mailDbId);
+		const jobId = enqRes?.job_id;
+		if (!jobId) {
+			showToast('Konnte Bulk-Rescore nicht starten.', 'error', 5000);
+			return;
+		}
+		if (enqRes?.reused) {
+			showToast('Bulk-Rescore läuft bereits — Status wird aktualisiert.', 'info', 4000);
+		} else {
+			showToast('🔄 Bulk-Rescore gestartet — wird im Hintergrund verarbeitet …', 'info', 4000);
+		}
+		const result = await pollRescoreJob(jobId);
+		if (result.status === 'done') {
+			const note = result.capped ? ` (Cap: ${result.total} jüngste Mails)` : '';
+			showToast(`✅ ${result.processed} Mails neu bewertet${note}`, 'success', 6000);
+			state.briefingLoaded = false;
+		} else if (result.status === 'failed') {
+			showToast(`❌ Bulk-Rescore fehlgeschlagen: ${result.error_text || 'unbekannt'}`, 'error', 8000);
+		} else if (result.status === 'timeout') {
+			showToast('Bulk-Rescore dauert ungewöhnlich lange — Status im Hintergrund prüfen.', 'warning', 7000);
+		}
 	} catch (err) {
 		handleError(err);
 	} finally {
 		if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
 	}
+}
+
+/**
+ * Phase 9l — pollt rescore-jobs alle 2s mit hartem Timeout (~8 min).
+ * Live-Progress-Toast wird max alle 5s aktualisiert wenn processed sich
+ * aendert, sonst Toast-Spam.
+ */
+async function pollRescoreJob(jobId) {
+	const POLL_INTERVAL_MS         = 2000;
+	const MAX_POLLS                = 240; // 240 × 2s = 8 min
+	const PROGRESS_TOAST_EVERY_MS  = 5000;
+
+	let lastToastAt   = 0;
+	let lastProcessed = -1;
+
+	for (let i = 0; i < MAX_POLLS; i++) {
+		await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+		let job;
+		try {
+			job = await api.mails.getRescoreJob(jobId);
+		} catch (_err) {
+			// transient — weiterpollen, sonst lassen wir den User im Dunkeln
+			continue;
+		}
+		if (job.status === 'done' || job.status === 'failed') {
+			return job;
+		}
+		const now = Date.now();
+		if (job.processed !== lastProcessed && (now - lastToastAt) > PROGRESS_TOAST_EVERY_MS) {
+			if (job.total > 0) {
+				showToast(`⏳ Bulk-Rescore: ${job.processed}/${job.total} Mails …`, 'info', 3000);
+			}
+			lastToastAt   = now;
+			lastProcessed = job.processed;
+		}
+	}
+	return { status: 'timeout', processed: lastProcessed, total: 0 };
 }
 
 /**

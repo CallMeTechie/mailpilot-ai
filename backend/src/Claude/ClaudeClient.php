@@ -31,6 +31,18 @@ class ClaudeClient implements ClaudeProvider
 	}
 
 	/**
+	 * Phase 9h.3 (Marc 2026-05-21) — Batch-Variante via curl_multi.
+	 * Delegiert an AnthropicClient::messagesBatch.
+	 *
+	 * @param list<array<string, mixed>> $payloads
+	 * @return list<array<string, mixed>|\RuntimeException>
+	 */
+	public function messagesBatch(array $payloads): array
+	{
+		return $this->inner->messagesBatch($payloads);
+	}
+
+	/**
 	 * Extract concatenated text from a Claude response (any provider).
 	 */
 	public static function extractText(array $response): string

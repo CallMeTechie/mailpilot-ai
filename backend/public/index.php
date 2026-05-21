@@ -33,8 +33,10 @@ $router->post('/api/v1/mails/by-graph-id/{ms_message_id}/ensure-scored', 'MailCo
 $router->post('/api/v1/mails/{id}/summarize',    'MailController@summarize');
 $router->post('/api/v1/mails/{id}/draft-reply',  'MailController@draftReply');
 $router->post('/api/v1/mails/{id}/rescore',      'MailController@rescore');
-// Phase 9h.4 — Bulk-Rescore: alle Mails in einem Outlook-Folder
-$router->post('/api/v1/mails/rescore-folder',    'MailController@rescoreFolder');
+// Phase 9l — Bulk-Rescore: async via Worker-Job-Queue. POST enqueued (202),
+// GET liefert Live-Progress fuer das UI-Polling bis status=done|failed.
+$router->post('/api/v1/mails/rescore-folder',         'MailController@rescoreFolder');
+$router->get ('/api/v1/mails/rescore-jobs/{id}',       'MailController@getRescoreJob');
 $router->post('/api/v1/mails/{id}/correct-score','MailController@correctScore');
 $router->post('/api/v1/mails/{id}/done',          'MailController@markUserDone');
 // Sprint 6f — Auto-Reply-Drafts

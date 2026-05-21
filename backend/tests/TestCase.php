@@ -83,7 +83,9 @@ abstract class TestCase extends BaseTestCase
 			'sender_projects',
 			'senders',
 			// 0035: Phase 9a — Klassifikations-Overrides.
-			'score_override_rules'];
+			'score_override_rules',
+			// 0044: Phase 9l — Bulk-Rescore-Jobs.
+			'rescore_jobs'];
 		foreach ($tables as $t) {
 			try { $pdo->exec("TRUNCATE TABLE {$t}"); } catch (\Throwable) {}
 		}

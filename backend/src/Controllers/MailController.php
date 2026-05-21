@@ -11,6 +11,7 @@ use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
+use MailPilot\Repositories\RescoreJobRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\MailSummaryService;
@@ -355,22 +356,23 @@ final class MailController extends BaseController
 	}
 
 	/**
-	 * Phase 9h.4 (Marc 2026-05-20) — Bulk-Rescore aller Mails in einem
-	 * Outlook-Folder. Macht hauptsaechlich Sinn nach Aenderung der Override-
-	 * Regeln, damit existing Mails neu durch enrichScoresWithSender +
-	 * ScoreOverrideService laufen.
+	 * Phase 9l (Marc 2026-05-21) — Bulk-Rescore wird in einen Async-Worker-
+	 * Job verlagert. Controller resolved nur den folder_id und enqueued.
+	 * Response 202 mit job_id → Add-in pollt GET /mails/rescore-jobs/{id}.
 	 *
-	 * Body: { folder_id: string }  - Outlook Graph parent_folder_id
-	 * Cap:  100 Mails pro Call (Sync-Request mit FPM-Timeout ~60s).
+	 * Body: { folder_id?: string, mail_id?: string }
+	 * Response: { ok: true, job_id: string, status: "queued"|"running",
+	 *             folder_id: string, reused?: true }
 	 */
 	public function rescoreFolder(array $params, array $body): void
 	{
 		$ctx = $this->requireAuth();
 		$folderId = trim((string)($body['folder_id'] ?? ''));
-		// Phase 9h.4 (Marc 2026-05-20): Outlook MailItem hat keine .parent-API,
-		// also akzeptieren wir alternativ eine mail_id (DB-ID) und resolven
-		// folder_id ueber mails.parent_folder_id. Caller schickt die aktuell
-		// im Add-in geoeffnete Mail mit.
+
+		// Outlook MailItem hat keine .parent-API, also akzeptieren wir
+		// alternativ eine mail_id (DB-ID) und resolven folder_id ueber
+		// mails.parent_folder_id. Caller schickt die aktuell im Add-in
+		// geoeffnete Mail mit.
 		if ($folderId === '') {
 			$mailDbId = trim((string)($body['mail_id'] ?? ''));
 			if ($mailDbId === '') {
@@ -384,12 +386,12 @@ final class MailController extends BaseController
 			$lookupStmt->execute([':id' => $mailDbId, ':t' => $ctx['tenant_id']]);
 			$row = $lookupStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
 			$folderId = (string)($row['parent_folder_id'] ?? '');
-			// Phase 9h.4-Hotfix (Marc 2026-05-20): Wenn parent_folder_id NULL
-			// (alte Mail oder Sync vor dem Fix), holen wir das jetzt frisch
-			// per Graph und updaten die DB. Self-healing.
+			// Self-healing: parent_folder_id ist NULL bei alten Mails (Sync
+			// vor Phase 9h.4). Wir holen das jetzt frisch per Graph und
+			// updaten die DB.
 			if ($folderId === '' && !empty($row['ms_message_id']) && !empty($row['mailbox_id'])) {
 				try {
-					$mb = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+					$mb = $this->kernel->get(MailboxRepository::class)
 						->findById($ctx['tenant_id'], (string)$row['mailbox_id']);
 					if ($mb !== null) {
 						$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
@@ -407,70 +409,53 @@ final class MailController extends BaseController
 				throw HttpException::badRequest('VALIDATION', 'Folder konnte nicht ermittelt werden — Graph liefert keine parentFolderId.');
 			}
 		}
-		// Phase 9h.4 Hotfix #3 (Marc 2026-05-20): statt nur die DB nach
-		// parent_folder_id zu durchsuchen (was bei alten Mails NULL ist),
-		// enumerieren wir den Folder direkt via Graph — das holt die jüngsten
-		// 50 Mails, upsertFromGraph heilt mails.parent_folder_id im
-		// Vorbeigehen, und scoreBatch durchlaeuft alle.
-		// Phase 9k Hotfix (Marc 2026-05-21): Cap auf 50 (von 100) gesenkt,
-		// damit der Sync-Request unter dem nginx fastcgi_read_timeout (180s)
-		// bleibt. set_time_limit hebt PHPs eigenes Skript-Limit zur Sicherheit.
-		@set_time_limit(180);
-		$mailboxes = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
-			->findByUser($ctx['tenant_id'], $ctx['user_id']);
-		if ($mailboxes === []) {
-			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
-		}
-		$graphMessages = [];
-		$lastMailbox = null;
-		foreach ($mailboxes as $mb) {
-			$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
-			try {
-				$msgs = $this->kernel->get(GraphClient::class)->listFolderMessages($token, $folderId, 50);
-			} catch (\Throwable) { $msgs = []; }
-			if ($msgs !== []) {
-				$graphMessages = $msgs;
-				$lastMailbox = $mb;
-				break;  // Folder gehoert genau einer Mailbox an
-			}
-		}
-		if ($graphMessages === [] || $lastMailbox === null) {
-			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_in_folder', 'folder_id' => $folderId]);
+
+		$jobRepo = $this->kernel->get(RescoreJobRepository::class);
+
+		// Schutz vor Doppel-Klicks und parallelen Worker-Picks: wenn der
+		// User schon einen aktiven Job auf demselben Folder hat, recyceln
+		// wir den. UI sieht denselben job_id und pollt einfach weiter.
+		$existing = $jobRepo->findActiveByFolder($ctx['tenant_id'], $ctx['user_id'], $folderId);
+		if ($existing !== null) {
+			Response::json([
+				'ok'        => true,
+				'job_id'    => $existing,
+				'status'    => 'queued',
+				'folder_id' => $folderId,
+				'reused'    => true,
+			], 202);
 			return;
 		}
-		// Upsert alle Mails (heilt parent_folder_id) + sammel mail-Rows.
-		$mailRepo = $this->kernel->get(MailRepository::class);
-		$pdo      = $this->kernel->get(\PDO::class);
-		$lookup   = $pdo->prepare('SELECT * FROM mails WHERE ms_message_id = :ms AND tenant_id = :t LIMIT 1');
-		$mails = [];
-		foreach ($graphMessages as $gm) {
-			$msId = (string)($gm['id'] ?? '');
-			if ($msId === '') continue;
-			$mailRepo->upsertFromGraph($ctx['tenant_id'], (string)$lastMailbox['id'], $gm);
-			$lookup->execute([':ms' => $msId, ':t' => $ctx['tenant_id']]);
-			$row = $lookup->fetch(\PDO::FETCH_ASSOC);
-			if ($row !== false) {
-				$mails[] = $row;
-			}
-		}
-		if ($mails === []) {
-			Response::json(['ok' => true, 'count' => 0, 'reason' => 'no_mails_after_upsert', 'folder_id' => $folderId]);
-			return;
-		}
-		$userRow = $this->fetchUser($ctx['user_id']);
-		$profile = $this->buildUserProfile($ctx, $userRow);
-		// scoreBatch durchlaeuft enrichScoresWithSender → ScoreOverrideService
-		// auch fuer cache-hits, also greifen Override-Regeln auch auf vorhandene
-		// Scores. User-korrigierte Felder bleiben sticky.
-		$this->kernel->get(MailScoringService::class)
-			->scoreBatch($ctx['tenant_id'], $profile, $mails);
+
+		$jobId = $jobRepo->enqueue($ctx['tenant_id'], $ctx['user_id'], $folderId);
 
 		Response::json([
 			'ok'        => true,
-			'count'     => count($mails),
+			'job_id'    => $jobId,
+			'status'    => 'queued',
 			'folder_id' => $folderId,
-			'capped'    => count($mails) === 50,
-		]);
+		], 202);
+	}
+
+	/**
+	 * Phase 9l — Polling-Endpoint fuer Bulk-Rescore-Jobs. Add-in ruft das
+	 * alle paar Sek bis status in {done,failed}.
+	 *
+	 * Response: { id, status, total, processed, capped, error_text?, folder_id }
+	 */
+	public function getRescoreJob(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$jobId = trim((string)($params['id'] ?? ''));
+		if ($jobId === '') {
+			throw HttpException::badRequest('VALIDATION', 'job_id fehlt');
+		}
+		$job = $this->kernel->get(RescoreJobRepository::class)
+			->findById($ctx['tenant_id'], $jobId);
+		if ($job === null) {
+			throw HttpException::notFound('NOT_FOUND', 'Rescore-Job nicht gefunden');
+		}
+		Response::json(['ok' => true] + $job);
 	}
 
 	/**
@@ -567,71 +552,14 @@ final class MailController extends BaseController
 		// abzuleiten. Failures sind nicht fatal — die Korrektur selbst
 		// ist schon committed; das Add-in zeigt nur einen weniger
 		// hilfreichen Toast.
-		$ruleResult = null;
-		$scoreRuleResult = null;
-		if ($reasoningText !== '') {
-			try {
-				$ruleResult = $this->kernel->get(RuleInferenceService::class)
-					->infer($ctx['tenant_id'], $ctx['user_id'], $mailId, $reasoningText);
-			} catch (QuotaExceededException $e) {
-				throw HttpException::tooManyRequests(
-					'QUOTA_EXCEEDED',
-					'Tageslimit für Auto-Rule-Inference erreicht. Korrektur ist gespeichert; die Regel-Ableitung ist morgen wieder verfügbar.'
-				);
-			} catch (\Throwable $e) {
-				// Logging übernimmt der Service. Wir scheitern still und
-				// liefern die Korrektur-Response ohne rule_inference-Block.
-				$ruleResult = ['action' => 'error', 'reason' => $e->getMessage()];
-			}
-
-			// Phase 9b (Marc 2026-05-19): zusaetzlich Score-Override-Regel
-			// ableiten. Parallel zur Folder-Inference oben — share denselben
-			// rule_inference-Quota-Counter. Wenn Folder-Inferenz Quota frisst,
-			// kann Score-Inferenz im selben Call den 429 werfen — wir
-			// schlucken den Throw still, weil die Korrektur selbst bereits
-			// committed ist.
-			try {
-				$scoreRuleResult = $this->kernel->get(RuleInferenceService::class)
-					->inferScoreRule(
-						$ctx['tenant_id'],
-						$ctx['user_id'],
-						$mailId,
-						[
-							'label'           => $label,
-							'priority'        => $priority,
-							'action_required' => (bool)($body['action_required'] ?? false),
-						],
-						[
-							'label'           => $orig['label']           ?? null,
-							'priority'        => isset($orig['priority']) ? (int)$orig['priority'] : null,
-							'action_required' => isset($orig['action_required']) ? (bool)$orig['action_required'] : null,
-						],
-						$reasoningText,
-					);
-			} catch (QuotaExceededException $e) {
-				$scoreRuleResult = ['action' => 'skipped', 'reason' => 'quota_exceeded'];
-			} catch (\Throwable $e) {
-				$scoreRuleResult = ['action' => 'error', 'reason' => $e->getMessage()];
-			}
-		}
-
-		// Phase 9e (Marc 2026-05-19): Topic-Apply. Wenn der User ein Topic
-		// gegeben hat: (a) folder_segments im mail_scores persistieren mit
-		// sticky-Flag, (b) Mail jetzt nach Sender-Root/<Topic> verschieben,
-		// (c) KI-Inferenz fuer eine Topic-Regel (immer, auch ohne reasoning —
-		// dann mit niedriger Confidence + enabled=false).
-		$topicApplied  = null;
-		$movedTo       = null;
-		$topicRuleInfo = null;
+		// Phase 9e (Marc 2026-05-19): Topic-Apply (non-Inferenz-Teil) FIRST.
+		// (a) folder_segments persistieren mit sticky-Flag, (b) Mail nach
+		// Sender-Root/<Topic> verschieben. Diese beiden Schritte sind nicht
+		// von der KI-Inferenz abhaengig — Move/Persist erfolgen direkt.
+		$topicApplied = null;
+		$movedTo      = null;
 		if ($topicSegments !== []) {
-			// Phase 9e Hotfix #5: Topic ist IMMER absolut. Wir nehmen genau,
-			// was der User getippt hat — keine Sender-Root-Magie. Topic-Feld
-			// im Add-in ist mit dem aktuellen vollen Pfad vorausgefuellt,
-			// damit der User entweder nur Suffixe aendert oder den ganzen
-			// Pfad ueberschreibt.
 			$segments = $topicSegments;
-
-			// (a) Persistieren — sticky setzen, sonst ueberschreibt naechstes Scoring.
 			$pdo->prepare('UPDATE mail_scores
 				SET folder_segments     = :fs,
 				    user_corrected_fields = CONCAT_WS(",",
@@ -645,11 +573,6 @@ final class MailController extends BaseController
 				]);
 			$topicApplied = $segments;
 
-			// (b) Move-Now via AutoSortService::applyManualMove. Pfad direkt
-			// aus segments + optional sort_root (Setting). Outlook-Path-Sanitize
-			// (slash/backslash IN einem Segment) hat ScoreOverrideRepository
-			// schon ausgeschlossen; segments hier sind bereits validierte
-			// einzelne Folder-Namen.
 			try {
 				$folderPath = implode('/', $segments);
 				$sortRoot = trim($this->kernel->get(SettingsRepository::class)
@@ -658,7 +581,7 @@ final class MailController extends BaseController
 					$folderPath = $sortRoot . '/' . $folderPath;
 				}
 				if ($folderPath !== '') {
-					$mbAll = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
+					$mbAll = $this->kernel->get(MailboxRepository::class)
 						->findByUser($ctx['tenant_id'], $ctx['user_id']);
 					$mb = null;
 					foreach ($mbAll as $cand) {
@@ -674,21 +597,47 @@ final class MailController extends BaseController
 					}
 				}
 			} catch (\Throwable) { /* best-effort */ }
+		}
 
-			// (c) Topic-Regel ableiten (immer, auch ohne reasoning).
+		// Phase 9h.3 (Marc 2026-05-21): Statt 3 sequenziellen KI-Calls
+		// (~7.5s) machen wir EINEN parallelen curl_multi (~2.5s). Service
+		// dispatched intern in Folder/Score/Topic-Apply-Pfade.
+		$ruleResult      = null;
+		$scoreRuleResult = null;
+		$topicRuleInfo   = null;
+		if ($reasoningText !== '' || $topicSegments !== []) {
 			try {
-				$topicRuleInfo = $this->kernel->get(RuleInferenceService::class)
-					->inferTopicRule(
+				$infAll = $this->kernel->get(RuleInferenceService::class)
+					->inferAllFromCorrection(
 						$ctx['tenant_id'],
 						$ctx['user_id'],
 						$mailId,
-						$segments,
+						[
+							'label'           => $label,
+							'priority'        => $priority,
+							'action_required' => (bool)($body['action_required'] ?? false),
+						],
+						[
+							'label'           => $orig['label']           ?? null,
+							'priority'        => isset($orig['priority']) ? (int)$orig['priority'] : null,
+							'action_required' => isset($orig['action_required']) ? (bool)$orig['action_required'] : null,
+						],
 						$reasoningText,
+						$topicSegments,
 					);
+				$ruleResult      = $infAll['folder']     ?? null;
+				$scoreRuleResult = $infAll['score_rule'] ?? null;
+				$topicRuleInfo   = $infAll['topic_rule'] ?? null;
 			} catch (QuotaExceededException $e) {
-				$topicRuleInfo = ['action' => 'skipped', 'reason' => 'quota_exceeded'];
+				throw HttpException::tooManyRequests(
+					'QUOTA_EXCEEDED',
+					'Tageslimit für Auto-Rule-Inference erreicht. Korrektur ist gespeichert; die Regel-Ableitung ist morgen wieder verfügbar.'
+				);
 			} catch (\Throwable $e) {
-				$topicRuleInfo = ['action' => 'error', 'reason' => $e->getMessage()];
+				// Best-effort — Korrektur ist schon committed. Wir parken
+				// den Fehler im folder-Slot, damit das Add-in zumindest
+				// eine sinnvolle Toast-Diagnose zeigen kann.
+				$ruleResult = ['action' => 'error', 'reason' => $e->getMessage()];
 			}
 		}
 

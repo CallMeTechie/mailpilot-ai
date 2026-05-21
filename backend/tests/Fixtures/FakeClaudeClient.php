@@ -44,6 +44,31 @@ final class FakeClaudeClient extends ClaudeClient
 		return array_shift($this->scriptedResponses);
 	}
 
+	/**
+	 * Phase 9h.3 (2026-05-21) — Test-Pendant zur curl_multi-Variante. Consumes
+	 * N scripted Responses in der Reihenfolge der Payloads. Wenn nicht genug
+	 * Scripts vorhanden sind, returnt RuntimeException-Objekte fuer die
+	 * fehlenden Slots — Caller-Code muss damit umgehen koennen.
+	 *
+	 * @param list<array<string, mixed>> $payloads
+	 * @return list<array<string, mixed>|\RuntimeException>
+	 */
+	public function messagesBatch(array $payloads): array
+	{
+		$results = [];
+		foreach ($payloads as $payload) {
+			$this->calls[] = $payload;
+			if ($this->scriptedResponses === []) {
+				$results[] = new \RuntimeException(
+					'FakeClaudeClient: no scripted response for batch slot #' . count($this->calls)
+				);
+				continue;
+			}
+			$results[] = array_shift($this->scriptedResponses);
+		}
+		return $results;
+	}
+
 	public function callCount(): int
 	{
 		return count($this->calls);
