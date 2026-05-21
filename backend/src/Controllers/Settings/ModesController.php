@@ -36,7 +36,50 @@ final class ModesController extends BaseController
 			'autoreply_enabled'             => $s->getBool('autoreply_enabled', false),
 			'autoreply_enabled_at'          => $s->getString('autoreply_enabled_at', ''),
 			'autoreply_max_per_day'         => $s->getInt('autoreply_max_per_day', 15),
+			// Phase 9m (Marc 2026-05-21): MailPilot-Arbeitswurzel.
+			'mailpilot_root'                => $s->getString('mailpilot_root', 'account_root'),
 		]);
+	}
+
+	/**
+	 * Phase 9m (Marc 2026-05-21) — speichert mailpilot_root.
+	 * Werte: 'account_root', 'inbox', oder ein Custom-Pfad-String.
+	 */
+	public function saveMailpilotRoot(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$root = trim((string)($body['mailpilot_root'] ?? ''));
+		if ($root === '') {
+			throw HttpException::badRequest('VALIDATION', 'mailpilot_root erforderlich');
+		}
+		if ($root !== 'account_root' && $root !== 'inbox') {
+			if (strlen($root) > 200 || preg_match('/[\\\\\x00-\x1F\x7F]/', $root) === 1) {
+				throw HttpException::badRequest('VALIDATION', 'mailpilot_root: ungueltiger Pfad');
+			}
+			$root = trim($root, '/');
+		}
+		$s = $this->kernel->get(SettingsRepository::class);
+		$s->set('mailpilot_root', $root);
+		Response::json(['ok' => true, 'mailpilot_root' => $root]);
+	}
+
+	/**
+	 * Phase 9m (Marc 2026-05-21) — Bulk-Delete fuer Legacy-Rules mit
+	 * folder_name LIKE 'MailPilot/%'. Hard-Delete (auto_sort_rules hat kein
+	 * deleted_at) und tenant+user-gescoped.
+	 */
+	public function deleteLegacyAutoSortRules(array $params, array $body): void
+	{
+		$ctx = $this->requireAuth();
+		$pdo = $this->kernel->get(\PDO::class);
+		$stmt = $pdo->prepare(
+			'DELETE FROM auto_sort_rules
+			 WHERE tenant_id = :t AND user_id = :u
+			   AND folder_name LIKE "MailPilot/%"'
+		);
+		$stmt->execute([':t' => $ctx['tenant_id'], ':u' => $ctx['user_id']]);
+		$deleted = $stmt->rowCount();
+		Response::json(['ok' => true, 'deleted' => $deleted]);
 	}
 
 	/**

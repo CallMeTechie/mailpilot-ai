@@ -30,6 +30,7 @@ final class AutoSortService
 {
 	public function __construct(
 		private readonly GraphClient $graph,
+		/** @phpstan-ignore-next-line property.unused (Phase 9m: findRule-Pfad entfernt, Property bleibt fuer Backwards-Compat im Konstruktor) */
 		private readonly AutoSortRepository $rules,
 		private readonly PDO $db,
 		private readonly \Psr\Log\LoggerInterface $logger,
@@ -48,6 +49,9 @@ final class AutoSortService
 		// Phase 9i (Marc 2026-05-20): MailboxRepository fuer Sent-Folder-ID-
 		// Cache. Optional, damit aelteste Tests ohne weiter funktionieren.
 		private readonly ?\MailPilot\Repositories\MailboxRepository $mailboxes = null,
+		// Phase 9m (Marc 2026-05-21): deterministische Inbox-Schutz-Schicht.
+		// Optional damit Bestands-Tests ohne Konstruktor-Update laufen.
+		private readonly ?InboxProtectionResolver $inboxProtection = null,
 	) {
 	}
 
@@ -132,155 +136,96 @@ final class AutoSortService
 			return ['moved' => false, 'reason' => 'sent_folder_protected'];
 		}
 
-		// Phase 9f (Marc 2026-05-19): Pin-Logik nutzt jetzt priority statt
-		// inbox_score — der User sieht/korrigiert priority im Add-in, also
-		// soll sie auch die Pin-Entscheidung steuern. Default-Schwelle 4
-		// (Prio 4+5 bleiben in der Inbox bis User-Done).
-		if (!$forceMove && !$userCleared) {
-			$minPrio = $this->settings !== null
-				? max(1, min(5, $this->settings->getInt('inbox_pin_priority_min', 4)))
-				: 4;
-			if ($priority >= $minPrio) {
-				return ['moved' => false, 'reason' => 'inbox_pinned_priority', 'priority' => $priority, 'min' => $minPrio];
+		// Phase 9m (Marc 2026-05-21): Deterministische Inbox-Schutz-Schicht.
+		// Ersetzt die alten priority>=4-Hardcodes. Schutz greift wenn
+		// IRGENDEINER der 6 Marker zutrifft (priority, label=direct, action,
+		// VIP, TO/CC-Match, Alias-Body-Match).
+		if (!$forceMove && !$userCleared && $this->inboxProtection !== null) {
+			$prot = $this->inboxProtection->evaluate($tenantId, $userId, $mail, $score);
+			if ($prot['protected']) {
+				return ['moved' => false, 'reason' => 'inbox_protected', 'protection_reason' => $prot['reason']];
 			}
 		}
-
-		// High-Prio-Schutz erweitert (2026-05-15 Bug-Fund):
-		//   alte Logik:  (label IN direct/action) AND priority>=4 → protected
-		//   Problem:     Amazon-Zahlungs-Problem mit label='auto', priority=4,
-		//                action_required=1, action_owner='user' lief durch
-		//                und landete in „Auto".
-		//   neue Logik: ZUSÄTZLICH schützen wenn der User explizit handeln
-		//                muss — action_required + action_owner='user'. Labels
-		//                sind KI-fehleranfällig; action_owner ist die echte
-		//                Aussage „du musst hier ran".
-		// Force-Move (Done-Endpoint) ueberspringt auch diese Schicht, damit
-		// der User explizit verschieben kann was er als „erledigt" markiert.
-		if (!$forceMove && in_array($label, ['direct', 'action'], true) && $priority >= 4) {
-			return ['moved' => false, 'reason' => 'high_priority_protected'];
-		}
-		if (!$forceMove && $actionRequired && $actionOwner === 'user' && $priority >= 4) {
-			return ['moved' => false, 'reason' => 'user_action_required'];
-		}
-
-		// Phase 7 (Marc 2026-05-19): Sender-zentrischer Move-Pfad.
-		// Wenn die KI in Phase 3b folder_segments + ein erkennbarer Sender
-		// existiert, baue den Pfad ueber FolderPathBuilder (z.B. /Amazon/OTP)
-		// statt auf die Legacy auto_sort_rules zurueckzugreifen.
-		// Bestands-Rules bleiben Fallback fuer Mails ohne folder_segments
-		// (z.B. Score-Cache aus Pre-3b-Zeit, oder KI war unschluessig).
-		$senderPath = $this->resolveSenderPath($tenantId, $mail, $score);
-		if ($senderPath !== null) {
-			$mode = $this->moveMode();
-			if ($mode === 'off') {
-				return ['moved' => false, 'reason' => 'mode_off'];
-			}
-			$msMessageId = (string)($mail['ms_message_id'] ?? '');
-			if ($msMessageId === '') {
-				return ['moved' => false, 'reason' => 'missing_message_id'];
-			}
-			if ($mode === 'suggest' && $this->pending !== null) {
-				$pid = $this->pending->create($tenantId, $userId, 'move', [
-					'mail_id'       => (string)$mail['id'],
-					'ms_message_id' => $msMessageId,
-					'subject'       => (string)($mail['subject'] ?? ''),
-					'from'          => (string)($mail['from_email'] ?? ''),
-					'label'         => $label,
-					'sub_label'     => $subLabel,
-					'target_folder' => $senderPath,
-					'source'        => 'sender_path',  // Audit: kein Rule-Lookup gemacht
-				], 'suggest');
-				return ['moved' => false, 'reason' => 'pending', 'pending_id' => $pid, 'kind' => 'move'];
-			}
-			// auto-Mode → direkter Move
-			return $this->applyManualMove($accessToken, $tenantId, $userId, $mail, $senderPath);
-		}
-
-		$rule = $this->rules->findRule($tenantId, $userId, $label, $subLabel);
-		if ($rule === null || !$rule['enabled']) {
-			return ['moved' => false, 'reason' => 'rule_disabled'];
-		}
-		// findRule may have fallen back from the requested $subLabel to
-		// the catch-all (sub_label = null). Persist hits against the
-		// rule that actually matched so folder_id / last_error end up
-		// on the right row.
-		$matchedSub = $rule['sub_label'] ?? null;
 
 		$msMessageId = (string)($mail['ms_message_id'] ?? '');
 		if ($msMessageId === '') {
 			return ['moved' => false, 'reason' => 'missing_message_id'];
 		}
 
-		// Sprint 6c Modus-Schalter (PRD §3 Toggle 1). 'off' blockiert
-		// jeden Move; 'suggest' legt eine pending_action an und überlässt
-		// dem User die Entscheidung; 'auto' fällt durch zum bestehenden
-		// Pfad. created_under_mode wird eingefroren (DA-Finding 1), damit
-		// Toggle-Wechsel suggest→auto keine bestehenden Pending mit-flippt.
 		$mode = $this->moveMode();
 		if ($mode === 'off') {
 			return ['moved' => false, 'reason' => 'mode_off'];
 		}
-		if ($mode === 'suggest') {
-			// DA-Impl-Finding 1: fail-closed. Wenn kein PendingRepo injiziert
-			// ist (Test-Bestand vor 6c), würde der Fall-Through silent einen
-			// echten Move ausführen statt einer Pending-Anlage. Lieber laut
-			// throw — Test muss das Repo übergeben (auch wenn null in
-			// auto-Mode-Tests gewünscht ist, dann Mode explizit setzen).
-			if ($this->pending === null) {
-				throw new \RuntimeException('AutoSortService: suggest-mode benötigt PendingActionRepository');
-			}
-			// PRD §3.1: wenn die Rule disabled ist UND es eine offene
-			// create_topic-pending für (label, sub_label) gibt, koppeln
-			// wir den Move via parent_pending_id. Topic-Approval triggert
-			// dann den Bulk-Move-Confirm. Bei aktiver Rule ist die Kopplung
-			// nicht nötig (User hat schon zugestimmt).
-			$parentPid = null;
-			$kind = 'move';
-			if (!$rule['enabled'] && $matchedSub !== null) {
-				$parentPid = $this->pending->findPendingTopicId($tenantId, $userId, $label, $matchedSub);
-				if ($parentPid !== null) {
-					$kind = 'move_to_pending_topic';
-				}
-			}
-			$pid = $this->pending->create($tenantId, $userId, $kind, [
+
+		// Phase 9m: label=noise → direkt in Outlook /me/mailFolders/junkemail.
+		// Kein eigener Folder, kein Pfad-Builder; nutzt Outlook's natives
+		// Spam-Management. Marc-Regel: „Spam in Outlook eigenem Junk-E-Mail
+		// Ordner".
+		if ($label === 'noise') {
+			return $this->moveToJunk($accessToken, $tenantId, $userId, $mail);
+		}
+
+		// Phase 9m: alle anderen Labels gehen ueber resolveSenderPath.
+		// FolderPathBuilder dispatcht intern:
+		//   - newsletter → Newsletter/{display}
+		//   - mit folder_segments + Sender-Root → Sender/Topic
+		//   - ohne folder_segments aber mit Sender.root_folder_name → Bucket-only
+		// Wenn nichts greift, ist senderPath null → Mail bleibt in Inbox.
+		// KEIN Legacy-findRule-Fallback mehr (Phase 9m: keine MailPilot/*-Folder).
+		$senderPath = $this->resolveSenderPath($tenantId, $mail, $score);
+		if ($senderPath === null) {
+			return ['moved' => false, 'reason' => 'no_sort_config'];
+		}
+
+		if ($mode === 'suggest' && $this->pending !== null) {
+			$pid = $this->pending->create($tenantId, $userId, 'move', [
 				'mail_id'       => (string)$mail['id'],
 				'ms_message_id' => $msMessageId,
 				'subject'       => (string)($mail['subject'] ?? ''),
 				'from'          => (string)($mail['from_email'] ?? ''),
 				'label'         => $label,
-				'sub_label'     => $matchedSub,
-				'target_folder' => (string)$rule['folder_name'],
-			], 'suggest', $parentPid);
-			$this->logger->info('autosort.pending', [
-				'user' => $userId, 'label' => $label, 'kind' => $kind,
-				'pid' => $pid, 'parent_pid' => $parentPid,
-			]);
-			return ['moved' => false, 'reason' => 'pending', 'pending_id' => $pid, 'kind' => $kind];
+				'sub_label'     => $subLabel,
+				'target_folder' => $senderPath,
+				'source'        => 'sender_path',
+			], 'suggest');
+			return ['moved' => false, 'reason' => 'pending', 'pending_id' => $pid, 'kind' => 'move'];
 		}
+		// auto-Mode → direkter Move
+		return $this->applyManualMove($accessToken, $tenantId, $userId, $mail, $senderPath);
+	}
 
-		// If we already moved this mail once, skip — avoids hammering
-		// Graph with redundant move requests when ensureScored is
-		// called on a mail the background sweep handled minutes ago.
-		$stmt = $this->db->prepare('SELECT auto_sorted_at FROM mail_scores
-			WHERE mail_id = :m AND tenant_id = :t LIMIT 1');
-		$stmt->execute([':m' => $mail['id'], ':t' => $tenantId]);
-		$existing = $stmt->fetch(PDO::FETCH_ASSOC);
-		if ($existing && $existing['auto_sorted_at'] !== null) {
-			return ['moved' => false, 'reason' => 'already_sorted'];
+	/**
+	 * Phase 9m (Marc 2026-05-21) — Spam-Mails landen in Outlook's nativem
+	 * Junk-E-Mail-Folder, nicht in einem MailPilot-eigenen "Noise"-Ordner.
+	 * Folder-ID wird per resolveWellKnownFolder('junkemail') geholt und
+	 * (zur Beschleunigung kuenftiger Calls) im Mailbox-Cache abgelegt
+	 * wenn die Spalte existiert.
+	 *
+	 * @param array<string, mixed> $mail
+	 * @return array{moved:bool, reason?:string, folder?:string, error?:string}
+	 */
+	private function moveToJunk(string $accessToken, string $tenantId, string $userId, array $mail): array
+	{
+		$msMessageId = (string)($mail['ms_message_id'] ?? '');
+		if ($msMessageId === '') {
+			return ['moved' => false, 'reason' => 'missing_message_id'];
 		}
-
 		try {
-			$folderId = $rule['folder_id'];
-			if ($folderId === null || $folderId === '') {
-				$folderId = $this->graph->ensureFolderPath($accessToken, $rule['folder_name']);
-				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, $folderId);
+			$junkId = $this->graph->resolveWellKnownFolder($accessToken, 'junkemail');
+			if ($junkId === null || $junkId === '') {
+				return ['moved' => false, 'reason' => 'junk_folder_not_resolvable'];
 			}
-			$newMsId = $this->graph->moveToFolder($accessToken, $msMessageId, $folderId);
-			// AQMk-IDs ändern sich nach Move (im Gegensatz zu echten
-			// Immutable-IDs). Ohne diesen Update lieferte
-			// displayMessageFormAsync im Add-in danach ErrorItemNotFound
-			// — der „Öffnen"-Button im Heute-Tab wäre für jede gesortete
-			// Mail tot.
+			// Mail ist schon im Junk-Folder → kein Move noetig.
+			$currentFolderId = (string)($mail['parent_folder_id'] ?? '');
+			if ($currentFolderId !== '' && $currentFolderId === $junkId) {
+				$this->db->prepare('UPDATE mail_scores
+					SET auto_sorted_at = UTC_TIMESTAMP(3),
+					    cleared_at = UTC_TIMESTAMP(3)
+					WHERE mail_id = :m AND tenant_id = :t')
+					->execute([':m' => $mail['id'], ':t' => $tenantId]);
+				return ['moved' => true, 'folder' => 'Junk-E-Mail', 'reason' => 'already_in_junk'];
+			}
+			$newMsId = $this->graph->moveToFolder($accessToken, $msMessageId, $junkId);
 			if ($newMsId !== null && $newMsId !== $msMessageId) {
 				try {
 					$this->db->prepare('UPDATE mails
@@ -288,105 +233,31 @@ final class AutoSortService
 						WHERE id = :id AND tenant_id = :t')
 						->execute([':new' => $newMsId, ':id' => $mail['id'], ':t' => $tenantId]);
 				} catch (\PDOException $e) {
-					// SQLSTATE 23000 / 1062 = uq_mail-Verstoss: ein paralleler
-					// Sync hat die Mail mit der neuen ID bereits als eigene
-					// Row geupserted. Die NEUE Row ist korrekt; wir markieren
-					// die alte Row als gelöscht, damit nichts doppelt im UI
-					// auftaucht. Move in Outlook ist trotzdem schon passiert.
 					if ($e->getCode() === '23000') {
 						$this->db->prepare('UPDATE mails
 							SET deleted_at = UTC_TIMESTAMP(3)
 							WHERE id = :id AND tenant_id = :t AND deleted_at IS NULL')
 							->execute([':id' => $mail['id'], ':t' => $tenantId]);
-						$this->logger->info('autosort.id_refresh_conflict_resolved', [
-							'mail_id' => $mail['id'],
-							'old_ms_id' => substr($msMessageId, 0, 20) . '...',
-							'new_ms_id' => substr($newMsId, 0, 20) . '...',
-						]);
 					} else {
 						throw $e;
 					}
 				}
 			}
-			// Mark so the background backfill query doesn't try to
-			// move it again on the next sweep. cleared_at (Sprint 6e
-			// DA-Finding 1) markiert die Mail als „weg aus der Inbox"
-			// für die TodayController-Done-Sektion — egal ob auto-
-			// sorted oder später user-moved.
 			$this->db->prepare('UPDATE mail_scores
 				SET auto_sorted_at = UTC_TIMESTAMP(3),
 				    cleared_at = UTC_TIMESTAMP(3)
 				WHERE mail_id = :m AND tenant_id = :t')
 				->execute([':m' => $mail['id'], ':t' => $tenantId]);
-			$this->logger->info('autosort.moved', [
-				'user'      => $userId,
-				'label'     => $label,
-				'sub_label' => $matchedSub,
-				'folder'    => $rule['folder_name'],
+			$this->logger->info('autosort.junk_moved', [
+				'user' => $userId, 'mail_id' => (string)$mail['id'],
 			]);
-			return ['moved' => true, 'folder' => $rule['folder_name']];
+			return ['moved' => true, 'folder' => 'Junk-E-Mail'];
 		} catch (\Throwable $e) {
-			$msg = $e->getMessage();
-			$this->logger->warning('autosort.failed', [
-				'user'      => $userId,
-				'label'     => $label,
-				'sub_label' => $matchedSub,
-				'err'       => $msg,
+			$this->logger->warning('autosort.junk_failed', [
+				'user' => $userId, 'mail_id' => (string)$mail['id'],
+				'err'  => $e->getMessage(),
 			]);
-
-			// Discriminate 404 by Graph error code (postJson packt das in
-			// die Exception-Message — siehe GraphClient::postJson).
-			$isItemMissing   = (bool)preg_match('/ErrorItemNotFound|ErrorMessageNotFound|MailboxItemNotFoundException/i', $msg);
-			$isFolderMissing = (bool)preg_match('/ErrorFolderNotFound|ErrorParentFolderNotFound|\b410\b/i', $msg);
-
-			// rememberError schreibt in auto_sort_rules.last_error — das ist
-			// die Rule-Diagnose im Add-in. Bei ErrorItemNotFound ist die
-			// Rule aber nicht das Problem, nur die einzelne Mail-ID war
-			// stale → den Rule-Error NICHT anrühren.
-			if (!$isItemMissing) {
-				$this->rules->rememberError($tenantId, $userId, $label, $matchedSub, $msg);
-			}
-
-			if ($isItemMissing) {
-				// Mail existiert in Outlook nicht mehr (User hat sie manuell
-				// gelöscht/verschoben, REST-ID ist stale). Mail als deleted
-				// markieren — fällt aus der Match-Query raus, kein Retry-
-				// Loop. Score bleibt als Audit erhalten.
-				$this->db->prepare('UPDATE mails SET deleted_at = UTC_TIMESTAMP(3)
-					WHERE id = :m AND tenant_id = :t AND deleted_at IS NULL')
-					->execute([':m' => $mail['id'], ':t' => $tenantId]);
-				$this->db->prepare('UPDATE mail_scores SET auto_sorted_at = UTC_TIMESTAMP(3)
-					WHERE mail_id = :m AND tenant_id = :t AND auto_sorted_at IS NULL')
-					->execute([':m' => $mail['id'], ':t' => $tenantId]);
-				return ['moved' => false, 'reason' => 'mail_gone'];
-			}
-
-			if ($isFolderMissing || preg_match('/\b404\b/', $msg)) {
-				// Folder weg ODER unspezifischer 404 → folder_id droppen
-				// damit der nächste Versuch ensureFolderPath neu läuft.
-				$this->rules->rememberFolderId($tenantId, $userId, $label, $matchedSub, '');
-			}
-
-			// Retry-Cap (Sprint 0.2): jeden Fail zählen, bei 3 endgültig
-			// skippen. Ohne Cap hat die Frontend-Schleife dieselbe Mail
-			// 40+ mal wiederversucht — siehe „2000 verarbeitet / 300
-			// Fehler"-Symptom.
-			// Retry-Cap aus Migration 0014, default 3.
-			$retryCap = $this->settings !== null
-				? max(1, $this->settings->getInt('autosort.retry_cap', 3))
-				: 3;
-			$this->db->prepare('UPDATE mail_scores
-				SET auto_sort_attempts = auto_sort_attempts + 1
-				WHERE mail_id = :m AND tenant_id = :t')
-				->execute([':m' => $mail['id'], ':t' => $tenantId]);
-			$this->db->prepare('UPDATE mail_scores
-				SET auto_sorted_at = UTC_TIMESTAMP(3)
-				WHERE mail_id = :m AND tenant_id = :t
-				  AND auto_sort_attempts >= :cap
-				  AND auto_sorted_at IS NULL')
-				->execute([':m' => $mail['id'], ':t' => $tenantId, ':cap' => $retryCap]);
-
-			return ['moved' => false, 'reason' => 'graph_error'];
+			return ['moved' => false, 'reason' => 'graph_error', 'error' => $e->getMessage()];
 		}
 	}
 
@@ -404,10 +275,7 @@ final class AutoSortService
 		if ($this->senderResolver === null || $this->senders === null || $this->pathBuilder === null) {
 			return null;
 		}
-		$rawSegments = $score['folder_segments'] ?? null;
-		if (!is_array($rawSegments) || $rawSegments === []) {
-			return null;
-		}
+		$label = (string)($score['label'] ?? '');
 		$from = (string)($mail['from_email'] ?? '');
 		if ($from === '') return null;
 		$at = strrpos($from, '@');
@@ -416,9 +284,13 @@ final class AutoSortService
 		$regDomain = $this->senderResolver->registrableDomain($host);
 		if ($regDomain === null) return null;
 		$bucket = $this->senders->findByRegistrableDomain($tenantId, $regDomain);
-		if ($bucket === null) return null;
-		$segments = array_values(array_map('strval', $rawSegments));
-		return $this->pathBuilder->build($bucket, $segments);
+		// Phase 9m: Newsletter und Bucket-Only-Mode brauchen kein folder_segments.
+		// FolderPathBuilder dispatcht intern.
+		$rawSegments = $score['folder_segments'] ?? null;
+		$segments = is_array($rawSegments)
+			? array_values(array_map('strval', $rawSegments))
+			: null;
+		return $this->pathBuilder->build($label, $bucket, $segments);
 	}
 
 	/**

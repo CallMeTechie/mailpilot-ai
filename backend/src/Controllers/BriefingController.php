@@ -162,7 +162,7 @@ final class BriefingController extends BaseController
 			$bucket = $regDomain !== null
 				? $senders->findByRegistrableDomain($tenantId, $regDomain)
 				: null;
-			$preview = $pathBuilder->build($bucket, $segments);
+			$preview = $pathBuilder->build((string)($r['label'] ?? ''), $bucket, $segments);
 
 			$out[] = [
 				'mail_id'             => (string)$r['id'],

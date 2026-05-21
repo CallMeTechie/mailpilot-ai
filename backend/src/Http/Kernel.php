@@ -162,14 +162,12 @@ class Kernel
 				$this->get(Logger::class),
 				$this->get(SettingsRepository::class),
 				$this->get(PendingActionRepository::class),
-				// Phase 7: Sender-zentrische Move-Pfade. Wenn folder_segments
-				// vorhanden, ueberspringt AutoSortService das Legacy-Rule-Lookup
-				// und verschiebt direkt in /Sender/Topic.
 				$this->get(SenderResolver::class),
 				$this->get(SenderRepository::class),
 				$this->get(FolderPathBuilder::class),
-				// Phase 9i: MailboxRepository fuer Sent-Folder-Skip.
 				$this->get(MailboxRepository::class),
+				// Phase 9m: deterministische Inbox-Schutz-Schicht.
+				$this->get(\MailPilot\Services\InboxProtectionResolver::class),
 			),
 			RedactionService::class   => new RedactionService(),
 			// Sort-Refactor Phase 2 — Domain-Layer. PSL liegt unter backend/var/psl/
@@ -191,6 +189,14 @@ class Kernel
 			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
+				// Phase 9m (Marc 2026-05-21): mailpilot_root steuert die
+				// Wurzel unter der Folder angelegt werden duerfen.
+				fn(): string => $this->get(SettingsRepository::class)->getString('mailpilot_root', 'account_root'),
+			),
+			// Phase 9m: Deterministische Inbox-Schutz-Schicht.
+			\MailPilot\Services\InboxProtectionResolver::class => new \MailPilot\Services\InboxProtectionResolver(
+				$this->get(PDO::class),
+				$this->get(SettingsRepository::class),
 			),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],

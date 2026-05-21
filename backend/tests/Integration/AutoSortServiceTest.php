@@ -32,13 +32,17 @@ final class AutoSortServiceTest extends TestCase
 	private function makeService(FakeGraphClient $graph): AutoSortService
 	{
 		$pdo = $this->pdo();
+		$settings = new SettingsRepository($pdo);
 		return new AutoSortService(
 			$graph,
 			new AutoSortRepository($pdo),
 			$pdo,
 			$this->logger(),
-			new SettingsRepository($pdo),
+			$settings,
 			new PendingActionRepository($pdo),
+			null, null, null, null,
+			// Phase 9m: InboxProtectionResolver fuer deterministische Schutz-Logik.
+			new \MailPilot\Services\InboxProtectionResolver($pdo, $settings),
 		);
 	}
 
@@ -58,6 +62,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testExactSubLabelMatchMovesToItsFolder(): void
 	{
+		$this->markTestSkipped('Phase 9m: findRule-Fallback entfernt — Sender-Pfad oder Inbox.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -88,6 +93,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testUnknownSubLabelFallsBackToCatchAllFolder(): void
 	{
+		$this->markTestSkipped('Phase 9m: findRule-Catch-all entfernt — Sender-Pfad ist single source.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -127,11 +133,11 @@ final class AutoSortServiceTest extends TestCase
 		);
 
 		$this->assertFalse($res['moved']);
-		// Phase 9f (2026-05-19): Pin-Logik nutzt jetzt Priority direkt —
-		// Prio 5 wird vom neuen inbox_pinned_priority-Pfad gefangen, bevor
-		// der Legacy-high_priority_protected-Fallback ueberhaupt erreicht
-		// wird. Funktional identisch (moved=false), nur anderer reason-String.
-		$this->assertSame('inbox_pinned_priority', $res['reason']);
+		// Phase 9m (Marc 2026-05-21): InboxProtectionResolver liefert jetzt
+		// 'inbox_protected' als reason mit detailliertem protection_reason.
+		// Funktional identisch (moved=false), neuer reason-String.
+		$this->assertSame('inbox_protected', $res['reason']);
+		$this->assertSame('priority_high', $res['protection_reason']);
 		$this->assertSame([], $graph->moveCalls, 'Must never call Graph for protected mails');
 	}
 
@@ -166,17 +172,18 @@ final class AutoSortServiceTest extends TestCase
 		);
 
 		$this->assertFalse($res['moved']);
-		// Phase 9f (2026-05-19): Prio 4 wird jetzt vom neuen Priority-Pin
-		// gefangen, bevor der Legacy-user_action_required-Fallback greift.
-		// Funktional weiterhin geschuetzt — die action_owner='user'-Logik
-		// bleibt im Code als Fallback fuer Prio<minPrio mit user-action.
-		$this->assertSame('inbox_pinned_priority', $res['reason']);
+		// Phase 9m (Marc 2026-05-21): InboxProtectionResolver schluckt Prio 4
+		// schon ueber priority_high. action_owner='user'-Logik bleibt im
+		// Code als weitere Schutzschicht fuer Prio<minPrio mit user-action.
+		$this->assertSame('inbox_protected', $res['reason']);
+		$this->assertSame('priority_high', $res['protection_reason']);
 		$this->assertSame([], $graph->moveCalls,
 			'User-action-required mails dürfen nicht verschoben werden, auch wenn label="auto"');
 	}
 
 	public function testDisabledRuleResultsInNoMove(): void
 	{
+		$this->markTestSkipped('Phase 9m: findRule-Pfad entfernt — Mails ohne Sender-Config bleiben in Inbox.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -198,6 +205,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testAlreadySortedMailIsSkipped(): void
 	{
+		$this->markTestSkipped('Phase 9m: already_sorted-Check im findRule-Pfad entfernt — applyManualMove macht Skip selbst.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -221,6 +229,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testCachedFolderIdSkipsEnsureFolderPath(): void
 	{
+		$this->markTestSkipped('Phase 9m: folder_id-Cache im findRule-Pfad entfernt.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -243,6 +252,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function test404DropsCachedFolderIdSoNextRunReResolves(): void
 	{
+		$this->markTestSkipped('Phase 9m: findRule-404-Handling entfernt — applyManualMove hat eigene Logik.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -277,6 +287,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testNonExistentRuleProducesNoMove(): void
 	{
+		$this->markTestSkipped('Phase 9m: rule_disabled-Reason ersetzt durch no_sort_config.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -295,6 +306,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testItemNotFoundMarksMailDeletedAndSkipsRetries(): void
 	{
+		$this->markTestSkipped('Phase 9m: findRule-ErrorItemNotFound-Handling entfernt — applyManualMove macht eigenes Handling.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -333,6 +345,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testSingleFailureBumpsAttemptsButDoesNotSkip(): void
 	{
+		$this->markTestSkipped('Phase 9m: Retry-Cap im findRule-Pfad entfernt.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 
@@ -359,6 +372,7 @@ final class AutoSortServiceTest extends TestCase
 
 	public function testThirdFailureMarksMailPermanentlySkipped(): void
 	{
+		$this->markTestSkipped('Phase 9m: Retry-Cap im findRule-Pfad entfernt.');
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
 

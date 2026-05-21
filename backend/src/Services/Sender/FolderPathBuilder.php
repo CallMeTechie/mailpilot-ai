@@ -37,23 +37,39 @@ final class FolderPathBuilder
 	public const MAX_DEPTH = 3;
 
 	/**
-	 * @param \Closure():string $sortRootResolver  Just-in-time-Lookup, damit
-	 *   Setting-Aenderungen ohne Service-Rebuild greifen. Test injiziert eine
-	 *   einfache Closure; Production-Kernel uebergibt fn() => $settings->getString(...).
+	 * @param \Closure():string  $sortRootResolver      Legacy sort_root-Lookup (Phase 4).
+	 * @param \Closure():string|null $mailpilotRootResolver Phase 9m: 'account_root', 'inbox',
+	 *   oder Custom-Path. Wird bei build() den finalen Pfaden vorangestellt.
 	 */
-	public function __construct(private readonly \Closure $sortRootResolver)
-	{
+	public function __construct(
+		private readonly \Closure $sortRootResolver,
+		private readonly ?\Closure $mailpilotRootResolver = null,
+	) {
 	}
 
 	/**
-	 * @param array<string,mixed>|null $senderBucket  Output von SenderRepository::hydrate, oder null
+	 * Phase 9m (Marc 2026-05-21) — Signatur erweitert um $label. Newsletter
+	 * werden Klassen-First sortiert ({prefix}/Newsletter/{display}, max 2
+	 * Tiefen), alle anderen Labels behalten Sender-First-Logik.
+	 *
+	 * @param string                   $label          mail_scores.label, steuert Newsletter-Special-Case
+	 * @param array<string,mixed>|null $senderBucket   Output von SenderRepository::hydrate, oder null
 	 * @param list<string>|null        $folderSegments KI-Vorschlag aus mail_scores.folder_segments
 	 * @return string|null  finaler Pfad oder null wenn keine Sortier-Empfehlung
 	 */
-	public function build(?array $senderBucket, ?array $folderSegments): ?string
+	public function build(string $label, ?array $senderBucket, ?array $folderSegments): ?string
 	{
+		// Newsletter-Special-Case (Phase 9m): Sender-Root-Magie wird
+		// uebersprungen, Pfad ist immer {prefix}/Newsletter/{display}.
+		if ($label === 'newsletter') {
+			return $this->buildNewsletterPath($senderBucket);
+		}
+
 		if (!is_array($folderSegments) || $folderSegments === []) {
-			return null;
+			// Phase 9m: Fallback auf senderBucket.root_folder_name allein —
+			// wenn der User im Absender-Subtab einen Ordner gesetzt hat,
+			// landet die Mail dort, auch ohne Topic-Segments.
+			return $this->buildBucketOnlyPath($senderBucket);
 		}
 		// Sender-Root als verbindlicher erster Pfad-Teil.
 		$senderRoot = $senderBucket !== null
@@ -83,22 +99,78 @@ final class FolderPathBuilder
 			}
 		}
 
-		// Wenn nach Bereinigung keine Sub-Segments uebrig → null (Marc-Regel:
-		// nie direkt in /Sender/, immer in Unterordner).
+		// Phase 9m: Wenn nach Bereinigung keine Sub-Segments uebrig → Bucket-Only-
+		// Pfad (User-konfigurierter Sender-Ordner). Vor 9m war das null + Inbox-
+		// Stau. Marc-Wunsch: KI liefert nur Sender → Mail geht trotzdem in den
+		// User-Ordner ohne Topic-Subfolder.
 		if ($segments === []) {
-			return null;
+			return $this->buildBucketOnlyPath($senderBucket);
 		}
 
 		$parts = array_merge([$senderRoot], $segments);
 		$parts = array_slice($parts, 0, self::MAX_DEPTH);
 		$path = implode('/', array_map(fn(string $p): string => $this->sanitizeSegment($p), $parts));
 
+		return $this->withPrefix($path);
+	}
+
+	/**
+	 * Phase 9m — Newsletter immer Klassen-First. Display-Name aus
+	 * senderBucket.root_folder_name oder display_name, sonst null.
+	 */
+	private function buildNewsletterPath(?array $senderBucket): ?string
+	{
+		if ($senderBucket === null) {
+			return null;
+		}
+		$display = trim((string)($senderBucket['root_folder_name']
+			?? $senderBucket['display_name']
+			?? ''));
+		if ($display === '') {
+			return null;
+		}
+		$path = 'Newsletter/' . $this->sanitizeSegment($display);
+		return $this->withPrefix($path);
+	}
+
+	/**
+	 * Phase 9m — Bucket-only-Pfad: User hat im Absender-Subtab einen
+	 * root_folder_name konfiguriert, KI hat aber keine Topic-Segments. Mail
+	 * geht direkt in den User-konfigurierten Ordner.
+	 */
+	private function buildBucketOnlyPath(?array $senderBucket): ?string
+	{
+		if ($senderBucket === null) {
+			return null;
+		}
+		$root = trim((string)($senderBucket['root_folder_name'] ?? ''));
+		if ($root === '') {
+			return null;
+		}
+		return $this->withPrefix($this->sanitizeSegment($root));
+	}
+
+	/**
+	 * Setzt mailpilot_root (Phase 9m) und Legacy sort_root (Phase 4) als
+	 * Praefix. mailpilot_root='account_root' = kein Prefix, 'inbox' = "Inbox/",
+	 * sonst literal.
+	 */
+	private function withPrefix(string $path): string
+	{
+		if ($this->mailpilotRootResolver !== null) {
+			$mp = trim(($this->mailpilotRootResolver)());
+			if ($mp !== '' && $mp !== 'account_root') {
+				$prefix = $mp === 'inbox' ? 'Inbox' : trim($mp, '/');
+				if ($prefix !== '') {
+					$path = $prefix . '/' . $path;
+				}
+			}
+		}
 		$root = trim(($this->sortRootResolver)());
 		if ($root !== '') {
 			$root = trim($root, '/');
 			$path = $root . '/' . $path;
 		}
-
 		return $path;
 	}
 

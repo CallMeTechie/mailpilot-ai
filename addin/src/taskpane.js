@@ -448,6 +448,10 @@ async function loadModes() {
 		// Sprint 6f — Auto-Reply Settings
 		const arEnabled = document.getElementById('autoreply-enabled');
 		if (arEnabled) arEnabled.checked = !!m.autoreply_enabled;
+		// Phase 9m (Marc 2026-05-21) — MailPilot-Arbeitswurzel
+		if (typeof applyMailpilotRootFromModes === 'function') {
+			applyMailpilotRootFromModes(m);
+		}
 		refreshModeHints();
 	} catch (err) { handleError(err); }
 }
@@ -2396,6 +2400,11 @@ function initSettings() {
 	// Auto-Sort-Sub-Regeln) wird in loadSettings weiterhin gefuellt, damit
 	// der Auto-Sort-Subtab die KI-discovered Sub-Labels anzeigen kann.
 
+	// Phase 9m (Marc 2026-05-21): MailPilot-Arbeitswurzel-Auswahl
+	document.getElementById('mp-mailpilot-root')?.addEventListener('change', onMailpilotRootChange);
+	document.getElementById('mp-mailpilot-root-custom')?.addEventListener('blur', persistMailpilotRoot);
+	document.getElementById('btn-delete-legacy-rules')?.addEventListener('click', onDeleteLegacyRules);
+
 	document.getElementById('btn-add-autosort-sub')?.addEventListener('click', addAutoSortSubRule);
 	document.getElementById('autosort-sub-rows')?.addEventListener('click', async (e) => {
 		const btn = e.target.closest('button.remove-sub-rule');
@@ -3390,6 +3399,83 @@ async function deleteScoreOverride(id, rowEl) {
 		setTimeout(() => rowEl?.remove(), 250);
 		showToast('Regel gelöscht.', 'success', 2500);
 	} catch (err) {
+		handleError(err);
+	}
+}
+
+// ============================================================
+// Phase 9m (Marc 2026-05-21) — MailPilot-Arbeitswurzel + Legacy-Cleanup
+// ============================================================
+
+/** Wird von loadSettings nach getModes-Response gefuellt. */
+function applyMailpilotRootFromModes(modes) {
+	const sel    = document.getElementById('mp-mailpilot-root');
+	const custom = document.getElementById('mp-mailpilot-root-custom');
+	if (!sel || !custom) return;
+	const value = modes?.mailpilot_root ?? 'account_root';
+	if (value === 'account_root' || value === 'inbox') {
+		sel.value = value;
+		custom.style.display = 'none';
+		custom.value = '';
+	} else {
+		sel.value = '__custom__';
+		custom.style.display = '';
+		custom.value = value;
+	}
+}
+
+function onMailpilotRootChange() {
+	const sel    = document.getElementById('mp-mailpilot-root');
+	const custom = document.getElementById('mp-mailpilot-root-custom');
+	const status = document.getElementById('mp-mailpilot-root-status');
+	if (!sel) return;
+	if (sel.value === '__custom__') {
+		custom.style.display = '';
+		custom.focus();
+		if (status) status.textContent = '';
+		return;
+	}
+	custom.style.display = 'none';
+	custom.value = '';
+	persistMailpilotRoot();
+}
+
+async function persistMailpilotRoot() {
+	const sel    = document.getElementById('mp-mailpilot-root');
+	const custom = document.getElementById('mp-mailpilot-root-custom');
+	const status = document.getElementById('mp-mailpilot-root-status');
+	if (!sel) return;
+	const value = sel.value === '__custom__' ? (custom?.value ?? '').trim() : sel.value;
+	if (!value) {
+		if (status) status.textContent = 'Bitte Pfad eingeben oder Wurzel wählen.';
+		return;
+	}
+	try {
+		const res = await api.settings.saveMailpilotRoot(value);
+		if (status) status.textContent = `✓ Gespeichert: ${res.mailpilot_root}`;
+		showToast('MailPilot-Wurzel aktualisiert.', 'success', 3000);
+	} catch (err) {
+		if (status) status.textContent = '✗ ' + (err?.message ?? 'Fehler');
+		handleError(err);
+	}
+}
+
+async function onDeleteLegacyRules() {
+	const ok = await mpConfirm({
+		title: 'Legacy-Regeln endgültig löschen?',
+		body: 'Alle Auto-Sort-Regeln mit Pfaden wie MailPilot/Direct, MailPilot/Auto, MailPilot/Aktion etc. werden hart gelöscht.\n\nDie Outlook-Ordner selbst bleiben — du musst sie manuell aufräumen.\n\nFortfahren?',
+		okLabel: 'Endgültig löschen',
+		danger: true,
+	});
+	if (!ok) return;
+	const status = document.getElementById('legacy-cleanup-status');
+	try {
+		const res = await api.settings.deleteLegacyAutoSortRules();
+		if (status) status.textContent = `✓ ${res.deleted} Legacy-Regeln gelöscht.`;
+		showToast(`${res.deleted} Legacy-Regeln gelöscht.`, 'success', 4000);
+		loadSettings();
+	} catch (err) {
+		if (status) status.textContent = '✗ ' + (err?.message ?? 'Fehler');
 		handleError(err);
 	}
 }

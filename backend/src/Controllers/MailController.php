@@ -245,7 +245,8 @@ final class MailController extends BaseController
 					? $this->kernel->get(\MailPilot\Repositories\SenderRepository::class)
 						->findByRegistrableDomain($ctx['tenant_id'], $regDomain)
 					: null;
-				$previewPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+				$previewPath = $this->kernel->get(FolderPathBuilder::class)
+					->build((string)($r['label'] ?? ''), $bucket, $segments);
 			}
 		}
 
@@ -721,7 +722,8 @@ final class MailController extends BaseController
 		} else {
 			$bucket = $this->kernel->get(SenderResolver::class)
 				->resolve($ctx['tenant_id'], (string)($mail['from_email'] ?? ''));
-			$folderPath = $this->kernel->get(FolderPathBuilder::class)->build($bucket, $segments);
+			$folderPath = $this->kernel->get(FolderPathBuilder::class)
+				->build((string)($scoreRow['label'] ?? ''), $bucket, $segments);
 		}
 		if ($folderPath === null || $folderPath === '') {
 			Response::json([

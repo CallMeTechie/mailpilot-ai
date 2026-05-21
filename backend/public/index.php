@@ -98,6 +98,9 @@ $router->get ('/api/v1/settings/modes',              'ModesController@getModes')
 $router->post('/api/v1/settings/modes',              'ModesController@saveModes');
 // Sprint 6f — Auto-Reply-Backlog-Trigger
 $router->post('/api/v1/settings/auto-reply/include-backlog', 'ModesController@includeAutoReplyBacklog');
+// Phase 9m (Marc 2026-05-21): MailPilot-Arbeitswurzel + Legacy-Cleanup.
+$router->post  ('/api/v1/settings/mailpilot-root',           'ModesController@saveMailpilotRoot');
+$router->delete('/api/v1/settings/legacy-autosort-rules',    'ModesController@deleteLegacyAutoSortRules');
 
 // Sprint 6d — Reason-Capture für Move-Korrekturen (Privacy-gated)
 $router->post('/api/v1/me/auto-sort-corrections/{id}/reason', 'MeController@setCorrectionReason');

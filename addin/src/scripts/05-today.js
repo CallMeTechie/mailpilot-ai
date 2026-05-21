@@ -186,6 +186,10 @@ async function loadModes() {
 		// Sprint 6f — Auto-Reply Settings
 		const arEnabled = document.getElementById('autoreply-enabled');
 		if (arEnabled) arEnabled.checked = !!m.autoreply_enabled;
+		// Phase 9m (Marc 2026-05-21) — MailPilot-Arbeitswurzel
+		if (typeof applyMailpilotRootFromModes === 'function') {
+			applyMailpilotRootFromModes(m);
+		}
 		refreshModeHints();
 	} catch (err) { handleError(err); }
 }

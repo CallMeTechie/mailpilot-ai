@@ -153,9 +153,20 @@ final class RuleInferenceService
 			}
 		}
 		if ($folder === '') {
-			$folder = $subLabel !== null
-				? 'MailPilot/' . ucfirst($label) . '/' . $subLabel
-				: 'MailPilot/' . ucfirst($label);
+			// Phase 9m (Marc 2026-05-21): KEINE MailPilot/<Label>-Defaults mehr.
+			// Wenn die KI keinen folder_name liefert und kein Fuzzy-Match
+			// existiert, ist die Inferenz unvollstaendig — wir geben
+			// reason="no_folder" zurueck statt zwanghaft MailPilot/Auto zu
+			// erfinden (das hatte sich Marc explizit nicht gewuenscht).
+			$this->logger->info('rule_inference.no_folder_in_parsed', [
+				'label' => $label, 'sub_label' => $subLabel, 'mail_id' => $mailId,
+			]);
+			return [
+				'action' => 'skipped',
+				'reason' => 'no_folder_in_inference',
+				'label'  => $label,
+				'sub_label' => $subLabel,
+			];
 		}
 
 		// Match-Suche + Decision (Auto-Apply vs. Pending).

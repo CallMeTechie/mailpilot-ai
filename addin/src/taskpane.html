@@ -451,17 +451,37 @@
 			<!-- Auto-Sort: Catch-all + Sub-Regeln + Apply -->
 			<section class="mp-subpanel" data-subpanel="autosort">
 				<div class="mp-section">
-					<h2>Auto-Sort</h2>
+					<h2>Auto-Sort &amp; Aufräumen</h2>
 					<div class="mp-banner-info" role="note">
-						<strong>Seit Phase 7 (2026-05-19):</strong> Wenn die KI für eine Mail einen
-						<code>folder_segments</code>-Vorschlag liefert, wird sie in den passenden
-						<strong>Absender-Ordner</strong> verschoben (z.B. <code>/Amazon/OTP/</code>) —
-						nicht mehr in <code>/MailPilot/&lt;Label&gt;/</code>. Die Regeln unten greifen
-						nur noch als Fallback für Mails, bei denen die KI keinen Pfad findet.
-						Die alten <code>/MailPilot/...</code>-Ordner kannst du in Outlook hand-leeren
-						oder löschen.
+						<strong>Phase 9m (2026-05-21):</strong> Auto-Sort läuft jetzt über
+						<strong>Absender-Ordner</strong> (Sub-Tab „Absender") und
+						<strong>Score-Regeln</strong> (Sub-Tab „Regeln"). Newsletter gehen nach
+						<code>Newsletter/{Absender}</code>, Spam in Outlook's eigenen
+						<code>Junk-E-Mail</code>-Ordner, der Rest in den von dir konfigurierten
+						Absender-Ordner. Keine <code>MailPilot/&lt;Label&gt;</code>-Ordner mehr.
 					</div>
-					<p class="mp-muted">Mails nach Klassifizierung in Outlook-Ordner verschieben. Direct/Aktion mit Priorität ≥ 4 bleiben immer in der Inbox.</p>
+
+					<h3>MailPilot-Arbeitswurzel</h3>
+					<p class="mp-muted">Wo darf MailPilot neue Ordner anlegen?</p>
+					<div class="mp-field">
+						<label for="mp-mailpilot-root">Wurzel:</label>
+						<select id="mp-mailpilot-root">
+							<option value="account_root">Account-Wurzel (neben Inbox/Sent/Junk)</option>
+							<option value="inbox">Unter der Inbox</option>
+							<option value="__custom__">Eigener Ordner …</option>
+						</select>
+						<input type="text" id="mp-mailpilot-root-custom" placeholder="z.B. Archiv" style="display:none">
+					</div>
+					<p class="mp-muted" id="mp-mailpilot-root-status"></p>
+
+					<h3>Legacy-Regeln</h3>
+					<p class="mp-muted">Diese Regeln stammen aus Sprint 5-7 und sind seit Phase 9m deaktiviert. Du kannst sie löschen wenn nicht mehr gebraucht.</p>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-danger" id="btn-delete-legacy-rules">Alle <code>MailPilot/*</code>-Regeln löschen</button>
+					</div>
+					<p class="mp-muted" id="legacy-cleanup-status"></p>
+
+					<h3>Bestehende Rule-Liste (read-only)</h3>
 					<table class="mp-autosort-table" id="autosort-table">
 						<thead>
 							<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
@@ -638,6 +658,6 @@
 
 	<div id="mp-toast-stack" class="mp-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-	<script type="module" src="taskpane.js?v=20260521b"></script>
+	<script type="module" src="taskpane.js?v=20260521c"></script>
 </body>
 </html>
