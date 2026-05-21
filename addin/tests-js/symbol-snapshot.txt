@@ -19,10 +19,13 @@ async function loadToday
 async function loadTopicSuggestions
 async function markCurrentMailDone
 async function markPinnedDone
+async function onDeleteLegacyRules
 async function openFilteredList
 async function patchSender
 async function persistAliases
 async function persistKeywords
+async function persistMailpilotRoot
+async function pollRescoreJob
 async function regenerateDraft
 async function rejectPending
 async function reloadFilterList
@@ -49,6 +52,7 @@ const state
 const todayState
 const TRUST_CYCLE
 const TRUST_LABEL
+function applyMailpilotRootFromModes
 function approveButtonText
 function bounceToLogin
 function buildAutoSortRow
@@ -72,6 +76,7 @@ function dismissToast
 function escape
 function filterSinceUtc
 function findSubLabelMetaById
+function formatRelativeAge
 function handleCurrentMailError
 function handleError
 function initBriefing
@@ -86,6 +91,7 @@ function maybeShowOutlookNotification
 function mpConfirm
 function mpProgress
 function onItemChanged
+function onMailpilotRootChange
 function openCorrectForm
 function openDraftInOutlook
 function openMailInOutlook

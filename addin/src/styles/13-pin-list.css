@@ -514,6 +514,11 @@
 	color: #64748b;
 	font-variant-numeric: tabular-nums;
 }
+/* Phase 9o (Marc 2026-05-21): leiser Zustand wenn Regel noch nie gegriffen hat */
+.mp-rule-applies.is-unused {
+	color: #94a3b8;
+	font-style: italic;
+}
 
 .mp-rule-delete {
 	width: 22px;

@@ -113,10 +113,58 @@ final class CorrectionRepository
 	 * landen am Ende, der Top-Block bleibt stabil → Anthropic-Cache-Read
 	 * greift. 30d-Window verhindert, dass uralte Korrekturen ewig bleiben.
 	 *
+	 * Phase 9o (Marc 2026-05-21): optionaler $perLabelLimit aktiviert
+	 * Per-Label-Cap via ROW_NUMBER() OVER (PARTITION BY corrected_label).
+	 * Bei null bleibt Verhalten Legacy-global. ScoringPromptBuilder schaltet
+	 * Per-Label-Mode an wenn Setting learning.score_corrections_per_label>0.
+	 *
 	 * @return list<array<string,mixed>>
 	 */
-	public function forFewShotPrompt(string $tenantId, string $userId, int $limit, int $windowDays = 30): array
-	{
+	public function forFewShotPrompt(
+		string $tenantId,
+		string $userId,
+		int $limit,
+		int $windowDays = 30,
+		?int $perLabelLimit = null,
+	): array {
+		if ($perLabelLimit !== null && $perLabelLimit > 0) {
+			$sql = 'SELECT from_email, subject,
+					original_label, original_priority,
+					corrected_label, corrected_priority, corrected_action, reasoning
+				FROM (
+					SELECT m.from_email, m.subject,
+						c.original_label, c.original_priority,
+						c.corrected_label, c.corrected_priority, c.corrected_action,
+						c.reasoning, c.created_at, c.id,
+						ROW_NUMBER() OVER (
+							PARTITION BY c.corrected_label
+							ORDER BY c.created_at DESC, c.id DESC
+						) AS rn
+					FROM mail_score_corrections c
+					INNER JOIN mails m ON m.id = c.mail_id
+					WHERE c.tenant_id = :t AND c.user_id = :u
+					  AND c.created_at >= (UTC_TIMESTAMP(3) - INTERVAL :w DAY)
+				) ranked
+				WHERE rn <= :pll
+				ORDER BY corrected_label ASC, created_at ASC, id ASC';
+			$stmt = $this->db->prepare($sql);
+			$stmt->bindValue(':t', $tenantId);
+			$stmt->bindValue(':u', $userId);
+			$stmt->bindValue(':w',   max(1, $windowDays),     PDO::PARAM_INT);
+			$stmt->bindValue(':pll', max(1, $perLabelLimit),  PDO::PARAM_INT);
+			$stmt->execute();
+			return array_map(static fn(array $r): array => [
+				'from_email'         => (string)($r['from_email'] ?? ''),
+				'subject'            => (string)($r['subject'] ?? ''),
+				'original_label'     => $r['original_label'] !== null ? (string)$r['original_label'] : null,
+				'original_priority'  => $r['original_priority'] !== null ? (int)$r['original_priority'] : null,
+				'corrected_label'    => (string)$r['corrected_label'],
+				'corrected_priority' => (int)$r['corrected_priority'],
+				'corrected_action'   => (bool)$r['corrected_action'],
+				'reasoning'          => $r['reasoning'] !== null ? (string)$r['reasoning'] : null,
+			], $stmt->fetchAll(PDO::FETCH_ASSOC));
+		}
+
 		$stmt = $this->db->prepare('SELECT m.from_email, m.subject,
 				c.original_label, c.original_priority,
 				c.corrected_label, c.corrected_priority, c.corrected_action, c.reasoning

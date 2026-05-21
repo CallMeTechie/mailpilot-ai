@@ -2195,6 +2195,28 @@ function useDraft() {
 // ============================================================
 // Settings
 // ============================================================
+
+// Phase 9o (Marc 2026-05-21): formatiert UTC-ISO-Zeitstempel als kurzen
+// deutschen Relativ-Text fuer den Audit-Counter im Regeln-Subtab. Liefert
+// null bei null/Parse-Fehler — Caller faellt dann auf den nicht-relativen
+// Counter zurueck.
+function formatRelativeAge(isoUtc) {
+	if (!isoUtc) return null;
+	const then = new Date(isoUtc);
+	if (Number.isNaN(then.getTime())) return null;
+	const diffMin = Math.max(0, Math.round((Date.now() - then.getTime()) / 60000));
+	if (diffMin < 1)    return 'gerade eben';
+	if (diffMin < 60)   return `vor ${diffMin} Min`;
+	const diffH = Math.round(diffMin / 60);
+	if (diffH < 24)     return `vor ${diffH} Std`;
+	const diffD = Math.round(diffH / 24);
+	if (diffD < 14)     return `vor ${diffD} Tag${diffD === 1 ? '' : 'en'}`;
+	const diffW = Math.round(diffD / 7);
+	if (diffW < 8)      return `vor ${diffW} Wochen`;
+	const diffMo = Math.round(diffD / 30);
+	return `vor ${diffMo} Monaten`;
+}
+
 // Cache of the user's sub-labels, grouped by primary. Populated by
 // loadSettings(), consumed by the "add sub-rule" dropdown in the
 // AutoSort section so the user can only pick a sub they actually
@@ -3338,8 +3360,17 @@ function buildScoreOverrideRow(r) {
 
 	const applies = document.createElement('span');
 	applies.className = 'mp-rule-applies';
-	applies.textContent = `${r.applies_count}× angewendet`;
-	if (r.last_applied_at) applies.title = `Zuletzt: ${r.last_applied_at}`;
+	const appliesCount = Number(r.applies_count ?? 0);
+	const lastRel = formatRelativeAge(r.last_applied_at);
+	if (appliesCount === 0) {
+		applies.textContent = 'noch nicht angewendet';
+		applies.classList.add('is-unused');
+	} else if (lastRel) {
+		applies.textContent = `${appliesCount}× • zuletzt ${lastRel}`;
+		applies.title = r.last_applied_at;
+	} else {
+		applies.textContent = `${appliesCount}× angewendet`;
+	}
 	head.appendChild(applies);
 
 	const delBtn = document.createElement('button');

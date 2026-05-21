@@ -191,10 +191,16 @@ final class ScoringPromptBuilder
 	{
 		$scoreLimit    = max(0, $this->settings->getInt('learning.score_corrections_limit', 10));
 		$autosortLimit = max(0, $this->settings->getInt('learning.autosort_corrections_limit', 10));
+		// Phase 9o (Marc 2026-05-21): Per-Label-Cap als Drift-Schutz. Wenn das
+		// Setting > 0, ueberschreibt der Per-Label-Cap das globale Limit — max
+		// N juengste pro corrected_label, Label-balanciert.
+		$perLabelLimit = max(0, $this->settings->getInt('learning.score_corrections_per_label', 5));
 		$out = [];
 
-		if ($scoreLimit > 0) {
-			$score = $this->corrections->forFewShotPrompt($tenantId, $userId, $scoreLimit, 30);
+		if ($scoreLimit > 0 || $perLabelLimit > 0) {
+			$effectiveLimit    = $scoreLimit > 0 ? $scoreLimit : 999;
+			$effectivePerLabel = $perLabelLimit > 0 ? $perLabelLimit : null;
+			$score = $this->corrections->forFewShotPrompt($tenantId, $userId, $effectiveLimit, 30, $effectivePerLabel);
 			if ($score !== []) {
 				$out[] = $this->settings->getString('prompt.corrections_header', 'PRIOR_USER_CORRECTIONS:');
 				foreach ($score as $c) {
