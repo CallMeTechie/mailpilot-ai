@@ -1504,29 +1504,9 @@ function renderBriefing(data) {
 	document.getElementById('briefing-subtitle').textContent =
 		`${total} neue Mails · ${c.direct ?? 0} direkt · ${c.action ?? 0} mit Aktion`;
 
-	const list = document.getElementById('top-priority-list');
-	list.innerHTML = '';
-	(data.top_priority ?? []).forEach((m) => {
-		const li = document.createElement('li');
-		li.className = 'mp-mail-item';
-		li.innerHTML = `
-			<div class="mp-mail-top">
-				<span class="mp-badge" data-label="${escape(m.label)}">${labelText(m.label)}</span>
-				<span class="mp-priority">Priorität ${m.priority}</span>
-			</div>
-			<div class="mp-mail-from">${escape(m.from_name || m.from_email)}</div>
-			<div class="mp-mail-subject">${escape(m.subject)}</div>
-			<div class="mp-mail-summary">${escape(m.summary ?? '')}</div>
-		`;
-		// Outlook needs the Graph REST id (AQMk…), not our internal UUID.
-		// topPrioritySince now ships ms_message_id; mail_id is kept as
-		// fallback only for older payloads.
-		li.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
-		list.appendChild(li);
-	});
-
-	// Phase 5 (Marc 2026-05-18): Pin-Liste oben im Briefing. Mails mit
-	// hohem inbox_score warten auf User-Done-Klick.
+	// Phase 9n (Marc 2026-05-21): „Top-Priorität"-Sektion entfernt — die
+	// Pin-Liste deckt denselben Use-Case mit besseren Filtern (Inbox-Check,
+	// erledigt-Check) ab. Doppelte Listen waren verwirrend.
 	renderPinnedList(data.pinned ?? []);
 }
 

@@ -34,22 +34,18 @@ final class BriefingController extends BaseController
 		// initial sync brought in mostly older mail.
 		$sinceUtc = gmdate('Y-m-d H:i:s.000', time() - 7 * 86400);
 
+		// Phase 9n (Marc 2026-05-21): „Top Priorität"-Sektion entfernt —
+		// die Pin-Liste deckt das gleiche Use-Case mit besseren Filtern
+		// (Inbox-Check, user_cleared_at, auto_sorted_at) ab. Doppelte
+		// Listen waren verwirrend und Top-Priorität hatte den gleichen
+		// Bug wie die alte Pin-Liste vor 9n.
 		$countersTotal = ['direct' => 0, 'action' => 0, 'cc' => 0, 'newsletter' => 0, 'auto' => 0, 'noise' => 0];
-		$top = [];
 		foreach ($mailboxes as $mb) {
 			$c = $scores->countByLabelSince($ctx['tenant_id'], (string)$mb['id'], $sinceUtc);
 			foreach ($c as $k => $v) {
 				$countersTotal[$k] = ($countersTotal[$k] ?? 0) + $v;
 			}
-			$top = array_merge($top, $scores->topPrioritySince($ctx['tenant_id'], (string)$mb['id'], $sinceUtc, 5));
 		}
-
-		// Sort merged top-list
-		usort($top, static function (array $a, array $b): int {
-			return ($b['priority'] <=> $a['priority'])
-				?: (strcmp((string)$b['received_at'], (string)$a['received_at']));
-		});
-		$top = array_slice($top, 0, 10);
 
 		// Budget + worker info so the add-in footer can show a live
 		// "12k / 100k Tokens" badge and a worker-alive indicator. Both
@@ -80,7 +76,6 @@ final class BriefingController extends BaseController
 		Response::json([
 			'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
 			'counters'     => $countersTotal,
-			'top_priority' => $top,
 			'pinned'       => $pinned,
 			'budget'       => [
 				'user_used'  => $userUsed,
