@@ -31,7 +31,9 @@ async function rescoreCurrentFolder() {
 	}
 	if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
 	try {
-		showToast('Ordner wird neu bewertet …', 'info', 3000);
+		// Phase 9k Hotfix (Marc 2026-05-21): Hinweis dass es dauern kann.
+		// Bei 50 Mails ohne Cache-Hits: 30-90s, lange Toast-Anzeige.
+		showToast('Ordner wird neu bewertet … (kann bis zu 2 Min dauern)', 'info', 10000);
 		const res = await api.mails.rescoreFolderOfMail(mailDbId);
 		const note = res?.capped ? ` (Cap: ${res.count} jüngste Mails)` : '';
 		showToast(`✅ ${res?.count ?? 0} Mails neu bewertet${note}`, 'success', 6000);

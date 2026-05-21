@@ -410,8 +410,12 @@ final class MailController extends BaseController
 		// Phase 9h.4 Hotfix #3 (Marc 2026-05-20): statt nur die DB nach
 		// parent_folder_id zu durchsuchen (was bei alten Mails NULL ist),
 		// enumerieren wir den Folder direkt via Graph — das holt die jüngsten
-		// 100 Mails, upsertFromGraph heilt mails.parent_folder_id im
+		// 50 Mails, upsertFromGraph heilt mails.parent_folder_id im
 		// Vorbeigehen, und scoreBatch durchlaeuft alle.
+		// Phase 9k Hotfix (Marc 2026-05-21): Cap auf 50 (von 100) gesenkt,
+		// damit der Sync-Request unter dem nginx fastcgi_read_timeout (180s)
+		// bleibt. set_time_limit hebt PHPs eigenes Skript-Limit zur Sicherheit.
+		@set_time_limit(180);
 		$mailboxes = $this->kernel->get(\MailPilot\Repositories\MailboxRepository::class)
 			->findByUser($ctx['tenant_id'], $ctx['user_id']);
 		if ($mailboxes === []) {
@@ -422,7 +426,7 @@ final class MailController extends BaseController
 		foreach ($mailboxes as $mb) {
 			$token = $this->kernel->get(TokenService::class)->ensureFreshAccessToken($mb);
 			try {
-				$msgs = $this->kernel->get(GraphClient::class)->listFolderMessages($token, $folderId, 100);
+				$msgs = $this->kernel->get(GraphClient::class)->listFolderMessages($token, $folderId, 50);
 			} catch (\Throwable) { $msgs = []; }
 			if ($msgs !== []) {
 				$graphMessages = $msgs;
@@ -465,7 +469,7 @@ final class MailController extends BaseController
 			'ok'        => true,
 			'count'     => count($mails),
 			'folder_id' => $folderId,
-			'capped'    => count($mails) === 100,
+			'capped'    => count($mails) === 50,
 		]);
 	}
 
