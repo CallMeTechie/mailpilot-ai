@@ -50,21 +50,105 @@
 .mp-pin-card {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 10px 12px;
+	gap: 4px;
+	padding: 8px 10px;
 	border: 1px solid var(--mp-color-border, #e2e8f0);
-	border-left: 4px solid var(--mp-color-accent, #ef4444);
+	border-left: 4px solid #94a3b8;
 	border-radius: 6px;
 	background: #fff;
 	transition: opacity 200ms ease, transform 200ms ease;
 }
+/* Phase 9n (Marc 2026-05-21) — Priority-Balken links farbcodiert. */
+.mp-pin-card.mp-prio-5  { border-left-color: #dc2626; }   /* red-600 — sofort */
+.mp-pin-card.mp-prio-4  { border-left-color: #ea580c; }   /* orange-600 — heute */
+.mp-pin-card.mp-prio-3  { border-left-color: #ca8a04; }   /* amber-600 — diese Woche */
+.mp-pin-card.mp-prio-2  { border-left-color: #94a3b8; }   /* slate-400 — wann passt */
+.mp-pin-card.mp-prio-1  { border-left-color: #cbd5e1; }   /* slate-300 — ignorierbar */
 .mp-pin-card.is-spoof {
-	border-left-color: #f59e0b; /* amber-500 */
-	background: #fffbeb;        /* amber-50 */
+	border-left-color: #f59e0b !important;
+	background: #fffbeb;
 }
 .mp-pin-card.is-fading {
 	opacity: 0;
 	transform: translateX(8px);
+}
+
+/* Phase 9n — neue Pin-Card-Komponenten: kleinere Priority-Pill,
+   Action-Icons (Auge + Häkchen), Pfad-Chip, KI-Empfehlungs-Zeile. */
+.mp-pin-prio {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 26px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 3px;
+	background: #1e293b;
+	color: #fff;
+	font-size: 10px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	flex-shrink: 0;
+}
+.mp-pin-card.mp-prio-5 .mp-pin-prio { background: #dc2626; }
+.mp-pin-card.mp-prio-4 .mp-pin-prio { background: #ea580c; }
+.mp-pin-card.mp-prio-3 .mp-pin-prio { background: #ca8a04; }
+
+.mp-action-icon {
+	flex-shrink: 0;
+	width: 22px; height: 22px;
+	padding: 0;
+	border: 1px solid #94a3b8;
+	border-radius: 4px;
+	background: #fff;
+	color: #475569;
+	display: inline-flex; align-items: center; justify-content: center;
+	cursor: pointer;
+	transition: background 100ms ease;
+}
+.mp-action-icon:hover { background: #f1f5f9; }
+.mp-pin-open { margin-left: auto; }
+/* Done-Icon und Open-Icon zusammen rechts oben — Open links davon */
+.mp-pin-card .mp-pin-done { margin-left: 4px; }
+
+.mp-pin-pathchip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	color: #475569;
+	font-family: var(--mp-font-mono, monospace);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+.mp-pin-pathchip.is-empty {
+	color: #94a3b8;
+	font-family: inherit;
+	font-style: italic;
+}
+.mp-pin-pathicon {
+	color: #16a34a;
+	font-weight: 700;
+}
+
+.mp-pin-reco {
+	font-size: 11px;
+	color: #475569;
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	line-clamp: 2;
+}
+
+/* Done- und Open-Icons auf 22×22 kompakter (war 28×28). */
+.mp-pin-card .mp-done-icon {
+	width: 22px;
+	height: 22px;
 }
 
 .mp-pin-head {

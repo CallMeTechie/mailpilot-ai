@@ -65,6 +65,21 @@ final class SyncService
 
 		$accessToken = $this->tokens->ensureFreshAccessToken($mailbox);
 
+		// Phase 9n (Marc 2026-05-21): einmalig die Inbox-Folder-ID resolven,
+		// damit der BriefingController die Pin-Liste auf parent_folder_id =
+		// inbox_folder_id filtern kann (Marc-Beschwerde: „Mails werden als
+		// 'in Inbox' angezeigt obwohl sie schon verschoben sind").
+		if (empty($mailbox['inbox_folder_id'])) {
+			try {
+				$inboxId = $this->graph->resolveWellKnownFolder($accessToken, 'inbox');
+				if ($inboxId !== null && $inboxId !== '') {
+					$this->mailboxes->setInboxFolderId($mailboxId, $inboxId);
+				}
+			} catch (\Throwable $e) {
+				$this->logger->info('sync.inbox_resolve_failed', ['err' => $e->getMessage()]);
+			}
+		}
+
 		// Pre-fetch: signal "we're alive, fetching delta". Total=1
 		// keeps the bar a tiny sliver instead of 0/0 (which would
 		// render as empty). Real total comes after delta returns.

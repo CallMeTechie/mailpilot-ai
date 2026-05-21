@@ -107,4 +107,15 @@ class MailboxRepository
 		$this->db->prepare('UPDATE mailboxes SET sent_folder_id = :s WHERE id = :id')
 			->execute([':s' => $sentFolderId, ':id' => $id]);
 	}
+
+	/**
+	 * Phase 9n (Marc 2026-05-21) — Inbox-Folder-ID cachen fuer den BriefingTab.
+	 * Pin-Liste filtert auf parent_folder_id = inbox_folder_id, damit
+	 * manuell verschobene Mails nicht mehr als „in Inbox" angezeigt werden.
+	 */
+	public function setInboxFolderId(string $id, ?string $inboxFolderId): void
+	{
+		$this->db->prepare('UPDATE mailboxes SET inbox_folder_id = :i WHERE id = :id')
+			->execute([':i' => $inboxFolderId, ':id' => $id]);
+	}
 }

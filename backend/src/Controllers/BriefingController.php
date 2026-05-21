@@ -116,9 +116,14 @@ final class BriefingController extends BaseController
 
 		// Phase 9i (Marc 2026-05-20): Sent-Mails aus der Pinned-Liste raus —
 		// gesendete Mails sind kein „to-do", auch wenn ihre Prio hoch ist.
-		// mb.sent_folder_id wird vom AutoSortService self-healed.
+		// Phase 9n (Marc 2026-05-21): Mails die NICHT in der Inbox liegen
+		// (User hat sie manuell verschoben) sind kein „to-do" mehr. Filter:
+		// parent_folder_id = inbox_folder_id (wenn beide bekannt). Solange
+		// inbox_folder_id noch NULL ist (vor Self-Healing), zeigt die Query
+		// alle Mails — Backwards-Compat.
 		$sql = "SELECT m.id, m.ms_message_id, m.subject, m.from_email, m.from_name, m.received_at,
-				s.inbox_score, s.spoof_suspect, s.folder_segments, s.label, s.priority
+				s.inbox_score, s.spoof_suspect, s.folder_segments, s.label, s.priority,
+				s.summary, s.action_required, s.action_owner
 			FROM mails m
 			INNER JOIN mail_scores s ON s.mail_id = m.id AND s.tenant_id = m.tenant_id
 			INNER JOIN mailboxes mb ON mb.id = m.mailbox_id
@@ -132,6 +137,8 @@ final class BriefingController extends BaseController
 			  AND s.priority >= :prio
 			  AND (mb.sent_folder_id IS NULL OR m.parent_folder_id IS NULL
 			       OR m.parent_folder_id <> mb.sent_folder_id)
+			  AND (mb.inbox_folder_id IS NULL OR m.parent_folder_id IS NULL
+			       OR m.parent_folder_id = mb.inbox_folder_id)
 			ORDER BY s.priority DESC, m.received_at DESC
 			LIMIT 50";
 		$stmt = $pdo->prepare($sql);
@@ -177,6 +184,10 @@ final class BriefingController extends BaseController
 				'priority'            => (int)($r['priority'] ?? 2),
 				'sender_display_name' => $bucket['display_name'] ?? null,
 				'preview_path'        => $preview,    // null = bleibt in Inbox auch nach Done
+				// Phase 9n (Marc 2026-05-21): KI-Empfehlung + Action-Hinweis fuer Briefing-Card.
+				'summary'             => $r['summary'] !== null ? (string)$r['summary'] : null,
+				'action_required'     => (bool)(int)($r['action_required'] ?? 0),
+				'action_owner'        => $r['action_owner'] !== null ? (string)$r['action_owner'] : null,
 			];
 		}
 		return $out;

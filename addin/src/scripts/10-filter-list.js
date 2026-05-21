@@ -230,41 +230,54 @@ function buildPinnedCard(m) {
 	const li = document.createElement('li');
 	li.className = 'mp-pin-card';
 	if (m.spoof_suspect) li.classList.add('is-spoof');
+	// Phase 9n (Marc 2026-05-21): Priority-Balken links via CSS-Klasse.
+	const prio = Math.max(1, Math.min(5, Number(m.priority) || 0));
+	li.classList.add(`mp-prio-${prio}`);
 	li.dataset.mailId = m.mail_id;
 
-	// Head: Score + Sender + Spoof-Badge
+	// Head: Sender + Priority-Pill + Action-Icons (Öffnen, Done). Kompakt.
 	const head = document.createElement('div');
 	head.className = 'mp-pin-head';
-	// Phase 9f (Marc 2026-05-19): Badge zeigt jetzt Priority statt inbox_score —
-	// konsistent zur Pin-Logik und zu dem was der User korrigieren kann.
-	const score = document.createElement('span');
-	score.className = 'mp-pin-score';
-	score.textContent = `P${m.priority ?? '?'}`;
-	score.title = 'Priorität (1=ignorierbar, 5=sofort)';
-	head.appendChild(score);
+
+	const prioBadge = document.createElement('span');
+	prioBadge.className = 'mp-pin-prio';
+	prioBadge.textContent = `P${prio}`;
+	prioBadge.title = 'Priorität (1=ignorierbar, 5=sofort)';
+	head.appendChild(prioBadge);
+
 	if (m.spoof_suspect) {
 		const spoof = document.createElement('span');
 		spoof.className = 'mp-pin-spoof';
-		spoof.textContent = '⚠ Verdächtig';
+		spoof.textContent = '⚠';
 		spoof.title = 'Lookalike-Domain — könnte Phishing sein';
 		head.appendChild(spoof);
 	}
+
 	const from = document.createElement('span');
 	from.className = 'mp-pin-from';
 	from.textContent = m.sender_display_name || m.from_name || m.from_email;
 	head.appendChild(from);
 
-	// Phase 9e (Marc 2026-05-19): Done-Icon rechts oben in der Card, konsistent
-	// mit current-mail-Header. Tooltip zeigt Pfad-Vorschau; disabled wenn die
-	// KI keinen Sortier-Vorschlag geliefert hat.
+	// Action-Icons rechts: Öffnen + Done. Beide reine Icons (Marc-Wunsch).
+	const openIcon = document.createElement('button');
+	openIcon.type = 'button';
+	openIcon.className = 'mp-action-icon mp-pin-open';
+	openIcon.setAttribute('aria-label', 'In Outlook öffnen');
+	openIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+	openIcon.title = 'In Outlook öffnen';
+	openIcon.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
+	head.appendChild(openIcon);
+
 	const doneIcon = document.createElement('button');
 	doneIcon.type = 'button';
 	doneIcon.className = 'mp-done-icon mp-pin-done';
-	doneIcon.setAttribute('aria-label', 'Erledigt — verschieben');
-	doneIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+	doneIcon.setAttribute('aria-label', m.preview_path
+		? `Erledigt — verschiebe nach ${m.preview_path}`
+		: 'Als erledigt markieren');
+	doneIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 	doneIcon.title = m.preview_path
 		? `Erledigt → ${m.preview_path}`
-		: 'Als erledigt markieren (kein Sortier-Vorschlag — bleibt in Inbox)';
+		: 'Als erledigt markieren (bleibt in Inbox)';
 	doneIcon.addEventListener('click', () => markPinnedDone(m.mail_id, li));
 	head.appendChild(doneIcon);
 
@@ -276,17 +289,33 @@ function buildPinnedCard(m) {
 	subj.textContent = m.subject || '(ohne Betreff)';
 	li.appendChild(subj);
 
-	// Aktionen — nur noch Oeffnen (Done ist als Icon im Head).
-	const actions = document.createElement('div');
-	actions.className = 'mp-pin-actions';
+	// Phase 9n: Pfad-Vorschau als sichtbarer Chip (statt nur Tooltip).
+	// Zeigt dem User wohin die Mail bei „Erledigt" geht.
+	const path = document.createElement('div');
+	if (m.preview_path) {
+		path.className = 'mp-pin-pathchip';
+		path.innerHTML = `<span class="mp-pin-pathicon">→</span><span>${escape(m.preview_path)}</span>`;
+		path.title = `Bei „Erledigt" → ${m.preview_path}`;
+	} else {
+		path.className = 'mp-pin-pathchip is-empty';
+		path.textContent = '↺ Bleibt in Inbox (kein Sortier-Vorschlag)';
+	}
+	li.appendChild(path);
 
-	const openBtn = document.createElement('button');
-	openBtn.className = 'mp-btn mp-btn-ghost';
-	openBtn.textContent = 'Öffnen';
-	openBtn.addEventListener('click', () => openMailInOutlook(m.ms_message_id || m.mail_id));
-	actions.appendChild(openBtn);
+	// Phase 9n: KI-Empfehlung — kompakte 1-Zeilen-Zusammenfassung warum
+	// diese Mail Aufmerksamkeit braucht. summary kommt aus mail_scores.summary
+	// (vom P-SCORE-Prompt erstellt, max 160 chars).
+	if (m.summary) {
+		const reco = document.createElement('div');
+		reco.className = 'mp-pin-reco';
+		let prefix = '';
+		if (m.action_required && m.action_owner === 'user') {
+			prefix = '✋ ';
+		}
+		reco.textContent = prefix + m.summary;
+		li.appendChild(reco);
+	}
 
-	li.appendChild(actions);
 	return li;
 }
 
