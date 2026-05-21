@@ -137,8 +137,13 @@ final class BriefingController extends BaseController
 			  AND s.priority >= :prio
 			  AND (mb.sent_folder_id IS NULL OR m.parent_folder_id IS NULL
 			       OR m.parent_folder_id <> mb.sent_folder_id)
-			  AND (mb.inbox_folder_id IS NULL OR m.parent_folder_id IS NULL
-			       OR m.parent_folder_id = mb.inbox_folder_id)
+			  -- Phase 9n-Hotfix (Marc 2026-05-21): wenn inbox_folder_id
+			  -- bekannt ist, MUSS parent_folder_id passen. Mails ohne
+			  -- parent_folder_id (Pre-Phase-9h.4 Altdaten) verschwinden
+			  -- aus der Pin-Liste — der Worker-Backfill (Phase 9o) holt
+			  -- sie nach. Verhindert Geist-Mails im Briefing.
+			  AND (mb.inbox_folder_id IS NULL
+			       OR (m.parent_folder_id IS NOT NULL AND m.parent_folder_id = mb.inbox_folder_id))
 			ORDER BY s.priority DESC, m.received_at DESC
 			LIMIT 50";
 		$stmt = $pdo->prepare($sql);

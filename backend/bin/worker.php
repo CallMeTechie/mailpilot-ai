@@ -66,6 +66,10 @@ $backgroundIntervalSec = 300; // schedule a sync_job per mailbox every 5 min
 $staleRunningTimeoutMin = 10; // jobs running > N min are auto-recovered
 $lastAutoReplyTick = 0;
 $autoReplyIntervalSec = 300; // Sprint 6f: Auto-Reply-Drafts Tick alle 5 min
+// Phase 9n-Hotfix (Marc 2026-05-21): Parent-Folder-Backfill alle 60s, max
+// 20 Mails pro Tick. Bei initialen ~400 NULL-Mails ~20 min Aufholjagd.
+$lastBackfillTick = 0;
+$backfillIntervalSec = 60;
 
 while (true) {
 	try {
@@ -115,6 +119,19 @@ while (true) {
 
 		if ($job !== null) {
 			runSyncJob($kernel, $log, $pdo, $job);
+		}
+
+		// Phase 9n-Hotfix (Marc 2026-05-21): Parent-Folder-Backfill-Tick.
+		// Mails mit parent_folder_id IS NULL bekommen den Wert per Graph
+		// fetchMessage nachgezogen, damit BriefingController's strikter
+		// Inbox-Filter wieder echte Mails zeigt.
+		if (($now = time()) - $lastBackfillTick >= $backfillIntervalSec) {
+			$lastBackfillTick = $now;
+			try {
+				$kernel->get(\MailPilot\Services\ParentFolderBackfillService::class)->tick();
+			} catch (\Throwable $e) {
+				$log->error('worker.backfill_tick_failed', ['err' => $e->getMessage()]);
+			}
 		}
 
 		// Phase 9l (Marc 2026-05-21): Bulk-Rescore-Tick. Eigene Tabelle

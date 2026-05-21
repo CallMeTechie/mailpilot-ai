@@ -198,6 +198,14 @@ class Kernel
 				$this->get(PDO::class),
 				$this->get(SettingsRepository::class),
 			),
+			// Phase 9n-Hotfix: Backfill fuer Mails ohne parent_folder_id.
+			\MailPilot\Services\ParentFolderBackfillService::class => new \MailPilot\Services\ParentFolderBackfillService(
+				$this->get(PDO::class),
+				$this->get(MailboxRepository::class),
+				$this->get(TokenService::class),
+				$this->get(GraphClient::class),
+				$this->get(Logger::class),
+			),
 			JwtService::class         => new JwtService(
 				(string)$this->config['app']['jwt_secret'],
 				(string)$this->config['app']['jwt_issuer'],
