@@ -94,58 +94,28 @@ final class InboxProtectionResolverTest extends TestCase
 		$this->assertSame('vip_sender', $res['reason']);
 	}
 
-	public function testToListContainingUserEmailIsProtected(): void
+	// Phase 9n-Hotfix (2026-05-21): TO/CC und Alias-Match wieder entfernt.
+	// Newsletter und auto-Mails sind oft an Marc gerichtet ("Hallo Marc,
+	// deine Amazon-Bestellung..."), aber sollen trotzdem verschoben werden.
+	// KI-Label gewinnt jetzt — kein deterministischer Override.
+
+	public function testToListContainingUserEmailIsNotProtectedAlone(): void
 	{
 		$res = $this->resolver->evaluate($this->tenantId, $this->userId,
 			$this->basicMail(['to_json' => json_encode(['marc@test.de'], JSON_UNESCAPED_UNICODE)]),
-			['priority' => 1, 'label' => 'cc']);
-		$this->assertTrue($res['protected']);
-		$this->assertSame('addressed_directly', $res['reason']);
+			['priority' => 1, 'label' => 'newsletter']);
+		$this->assertFalse($res['protected'], 'TO=user darf alleine nicht schuetzen — Amazon-Bestellbestaetigung ist auch an user gerichtet');
 	}
 
-	public function testToListContainingAliasEmailIsProtected(): void
-	{
-		$res = $this->resolver->evaluate($this->tenantId, $this->userId,
-			$this->basicMail(['to_json' => json_encode(['marc.backes@privat.de'], JSON_UNESCAPED_UNICODE)]),
-			['priority' => 1, 'label' => 'cc']);
-		$this->assertTrue($res['protected']);
-		$this->assertSame('addressed_directly', $res['reason']);
-	}
-
-	public function testAliasInSubjectIsProtected(): void
+	public function testAliasInSubjectIsNotProtectedAlone(): void
 	{
 		$res = $this->resolver->evaluate($this->tenantId, $this->userId,
 			$this->basicMail([
-				'subject'   => 'Hallo Marc, kurze Frage zum Vertrag',
-				'body_text' => 'Mit freundlichen Gruessen',
-			]),
-			['priority' => 1, 'label' => 'cc']);
-		$this->assertTrue($res['protected']);
-		$this->assertStringStartsWith('alias_match:', $res['reason']);
-	}
-
-	public function testAliasInBodyIsProtected(): void
-	{
-		$res = $this->resolver->evaluate($this->tenantId, $this->userId,
-			$this->basicMail([
-				'subject'   => 'Quartalsmeeting',
-				'body_text' => 'Hallo MB, bitte um Bestaetigung des Termins.',
-			]),
-			['priority' => 1, 'label' => 'cc']);
-		$this->assertTrue($res['protected']);
-		$this->assertStringStartsWith('alias_match:', $res['reason']);
-	}
-
-	public function testAliasInSubstringIsNotProtected(): void
-	{
-		// Word-Boundary: "Marc" matched nicht in "Marca de Agua"
-		$res = $this->resolver->evaluate($this->tenantId, $this->userId,
-			$this->basicMail([
-				'subject'   => 'Marca de Agua Newsletter',
-				'body_text' => 'Promo info',
+				'subject'   => 'Hallo Marc, dein Wochenangebot bei Penny',
+				'body_text' => 'Diese Woche im Angebot',
 			]),
 			['priority' => 1, 'label' => 'newsletter']);
-		$this->assertFalse($res['protected']);
+		$this->assertFalse($res['protected'], 'Personalisierte Newsletter-Anrede darf nicht schuetzen');
 	}
 
 	public function testNoMarkersIsNotProtected(): void

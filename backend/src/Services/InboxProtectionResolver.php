@@ -9,35 +9,30 @@ use PDO;
 /**
  * Phase 9m (Marc 2026-05-21) — deterministische Inbox-Schutz-Schicht.
  *
- * Marc-Regel (woertlich, 2026-05-21):
- *   "E-Mail bei denen ich auf CC stehe, keine direkte Aktion von mir
- *   erwartet wird, keine Anrede-Alias getroffen wird und/oder kein
- *   VIP-Absender ist werden verschoben. Emails die direkt an mich gesendet
- *   werden, ich angesprochen werde oder das Anrede-Alias wie in den
- *   Einstellungen unter Profil & Filter getroffen wird oder ein VIP-Absender
- *   ist, oder eine Anweisung, eine Bitte, oder Aehnliches enthalten, was
- *   eine Aktion oder eine Antwort von mir erfordert verbleiben in der
- *   Inbox."
+ * Phase 9n-Hotfix (Marc 2026-05-21, abends): TO/CC-Match und Alias-Body-Match
+ * wieder entfernt. Grund: jede Mail die Marc im Reading-Pane oeffnet ist an
+ * ihn gerichtet (TO=marc@...) und/oder mit personalisierter Anrede ("Hallo
+ * Marc, deine Amazon-Bestellung..."). Beide Marker triggerten reflexartig
+ * den Inbox-Schutz — auch fuer Newsletter und auto-Mails die laengst raus
+ * sollten. Ergebnis: gar kein Auto-Move mehr, alles blieb in Inbox.
  *
- * Diese Klasse setzt das deterministisch um — unabhaengig davon was die KI
- * klassifiziert hat. Schutz greift wenn IRGENDEINER der folgenden Marker
- * zutrifft:
+ * Neue Erkenntnis: Die KI-Klassifizierung (label) ist das staerkere Signal.
+ * Wenn die KI newsletter/auto/noise sagt, hat sie schon abgewaegt dass es
+ * nicht persoenlich ist. Deterministische TO/Alias-Marker duerfen das nicht
+ * overrulen.
  *
- *   1. priority >= inbox_pin_priority_min                  (Phase 9f)
- *   2. label === 'direct'                                  (an mich)
- *   3. action_required=true AND action_owner='user'        (Aktion verlangt)
- *   4. from_email in vip_senders                           (VIP-Absender)
- *   5. TO oder CC enthaelt user.email oder einen Alias     (direkt adressiert)
- *   6. Subject oder Body-Anfang enthaelt einen Alias       (angesprochen)
+ * Aktive Schutz-Marker (Marc-Regel: Prio 4+5 in Inbox, 1-3 verschieben):
+ *   1. priority >= inbox_pin_priority_min     (KI: stark wichtig, default 4)
+ *   2. label === 'direct'                     (KI: persoenlich an Marc)
+ *   3. action_required + action_owner='user'  (KI: Marc muss handeln)
+ *   4. from_email in vip_senders              (explizite User-Konfig)
  *
- * Word-Boundary-Match in (6) verhindert false-positives wie "Marc" in
- * "Marca de Agua". Body wird nur in den ersten 1000 Zeichen gescannt
- * (Anrede steht uebliche praefixiert).
+ * Entfernt aus Phase 9m:
+ *   - TO/CC enthaelt user/alias  → false-positive bei jedem Bestaetigungs-Mail
+ *   - Alias-Match im Body         → false-positive bei personalisierten Newslettern
  */
 final class InboxProtectionResolver
 {
-	private const BODY_SCAN_BYTES = 1000;
-
 	public function __construct(
 		private readonly PDO $db,
 		private readonly SettingsRepository $settings,
@@ -47,7 +42,7 @@ final class InboxProtectionResolver
 	/**
 	 * Hauptcheck. Returnt {protected: bool, reason: string}.
 	 *
-	 * @param array<string,mixed> $mail   mit to_json, cc_json, from_email, subject, body_text
+	 * @param array<string,mixed> $mail   mit from_email
 	 * @param array<string,mixed> $score  mit label, priority, action_required, action_owner
 	 * @return array{protected:bool, reason:string}
 	 */
@@ -78,74 +73,7 @@ final class InboxProtectionResolver
 			return ['protected' => true, 'reason' => 'vip_sender'];
 		}
 
-		// 5+6. User-Identifier laden (email + aliases) — nur einmal pro Aufruf.
-		$identifiers = $this->loadUserIdentifiers($userId);
-		if ($identifiers === []) {
-			return ['protected' => false, 'reason' => 'no_protection_markers'];
-		}
-
-		// 5. TO/CC enthaelt user oder alias.
-		$toCc = $this->collectAddresses($mail);
-		foreach ($toCc as $addr) {
-			if (in_array($addr, $identifiers['emails'], true)) {
-				return ['protected' => true, 'reason' => 'addressed_directly'];
-			}
-		}
-
-		// 6. Subject oder Body-Anfang enthaelt Alias (word-boundary, case-insensitive).
-		$haystack = (string)($mail['subject'] ?? '') . "\n"
-			. mb_substr((string)($mail['body_text'] ?? ''), 0, self::BODY_SCAN_BYTES);
-		if ($haystack !== '' && $identifiers['aliases'] !== []) {
-			$matchedAlias = $this->matchesAnyAliasWordBoundary($haystack, $identifiers['aliases']);
-			if ($matchedAlias !== null) {
-				return ['protected' => true, 'reason' => 'alias_match:' . $matchedAlias];
-			}
-		}
-
 		return ['protected' => false, 'reason' => 'no_protection_markers'];
-	}
-
-	/**
-	 * Laedt user.email + alle aliases. Aliases werden in Email-Identifier
-	 * (enthaelt @) und Name-Alias (Body-Match) aufgespalten.
-	 *
-	 * @return array{emails:list<string>, aliases:list<string>}|array{}
-	 */
-	private function loadUserIdentifiers(string $userId): array
-	{
-		$stmt = $this->db->prepare('SELECT email, aliases FROM users WHERE id = :id LIMIT 1');
-		$stmt->execute([':id' => $userId]);
-		$row = $stmt->fetch(PDO::FETCH_ASSOC);
-		if ($row === false) {
-			return [];
-		}
-		$emails  = [];
-		$aliases = [];
-
-		$primary = strtolower(trim((string)($row['email'] ?? '')));
-		if ($primary !== '') {
-			$emails[] = $primary;
-		}
-
-		$decoded = $row['aliases'] !== null && $row['aliases'] !== ''
-			? json_decode((string)$row['aliases'], true)
-			: [];
-		if (!is_array($decoded)) {
-			$decoded = [];
-		}
-		foreach ($decoded as $a) {
-			$s = trim((string)$a);
-			if ($s === '') continue;
-			if (str_contains($s, '@')) {
-				$emails[] = strtolower($s);
-			} else {
-				$aliases[] = $s; // Original-Case fuer Logging, Match ist ci
-			}
-		}
-		return [
-			'emails'  => array_values(array_unique($emails)),
-			'aliases' => array_values(array_unique($aliases)),
-		];
 	}
 
 	private function isVipSender(string $userId, string $fromEmail): bool
@@ -159,44 +87,4 @@ final class InboxProtectionResolver
 		return $stmt->fetchColumn() !== false;
 	}
 
-	/**
-	 * Sammelt alle Email-Adressen aus to_json + cc_json (lowercase).
-	 *
-	 * @return list<string>
-	 */
-	private function collectAddresses(array $mail): array
-	{
-		$result = [];
-		foreach (['to_json', 'cc_json'] as $field) {
-			$raw = $mail[$field] ?? null;
-			$decoded = is_string($raw) ? json_decode($raw, true) : $raw;
-			if (!is_array($decoded)) continue;
-			foreach ($decoded as $entry) {
-				if (is_string($entry)) {
-					$result[] = strtolower(trim($entry));
-				} elseif (is_array($entry) && isset($entry['email'])) {
-					$result[] = strtolower(trim((string)$entry['email']));
-				}
-			}
-		}
-		return array_values(array_filter(array_unique($result), fn(string $s): bool => $s !== ''));
-	}
-
-	/**
-	 * Word-Boundary-Match: alias ist nur Treffer wenn er als ganzes Wort
-	 * vorkommt. Verhindert false-positive von "Marc" in "Marca de Agua".
-	 * Returnt den ersten gematchten Alias oder null.
-	 *
-	 * @param list<string> $aliases
-	 */
-	private function matchesAnyAliasWordBoundary(string $haystack, array $aliases): ?string
-	{
-		foreach ($aliases as $alias) {
-			$escaped = preg_quote($alias, '/');
-			if (preg_match('/\b' . $escaped . '\b/iu', $haystack) === 1) {
-				return $alias;
-			}
-		}
-		return null;
-	}
 }
