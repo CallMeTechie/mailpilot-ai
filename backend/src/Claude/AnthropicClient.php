@@ -176,6 +176,15 @@ final class AnthropicClient implements ClaudeProvider
 				'curl_err' => $err,
 				'body'     => $snippet,
 			]);
+			// Phase 9p-Hotfix (Marc 2026-05-22): Anthropic-Auslastung (529)
+			// als eigene Exception werfen — Router mappt sie auf 503 +
+			// Retry-After, Add-in zeigt Toast statt „Interner Fehler".
+			if ($status === 529 || ($status >= 500 && str_contains($snippet, 'overloaded_error'))) {
+				throw new AnthropicOverloadedException(
+					sprintf('Anthropic API ueberlastet (status=%d, %d Versuche)', $status, $attempt),
+					30,
+				);
+			}
 			throw new RuntimeException(sprintf(
 				'Anthropic API failed: status=%d attempt=%d curlErr=%s body=%s',
 				$status, $attempt, $err ?: 'none', $snippet,

@@ -127,6 +127,20 @@ final class Router
 			// Budget gate refused the call. 429 lets the add-in show
 			// a specific toast instead of a generic error.
 			Response::error(429, 'BUDGET_EXCEEDED', $e->getMessage());
+		} catch (\MailPilot\Claude\AnthropicOverloadedException $e) {
+			// Phase 9p-Hotfix (Marc 2026-05-22): Anthropic ueberlastet (529).
+			// 503 + Retry-After signalisiert dem Add-in einen transient Outage —
+			// dort wird ein Toast „KI-Anbieter ueberlastet" gezeigt statt
+			// „Interner Fehler". Wir loggen nur kurz (kein Stack-Trace, weil
+			// Upstream-Cause).
+			$this->kernel->get(\Monolog\Logger::class)->warning('dispatch.upstream_overloaded', [
+				'handler' => $handler,
+				'err'     => $e->getMessage(),
+			]);
+			header('Retry-After: ' . $e->retryAfterSeconds);
+			Response::error(503, 'AI_OVERLOADED', $e->getMessage(), [
+				'retry_after' => $e->retryAfterSeconds,
+			]);
 		} catch (\Throwable $e) {
 			$this->kernel->get(\Monolog\Logger::class)->error('dispatch.error', [
 				'handler' => $handler,
