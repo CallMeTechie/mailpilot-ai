@@ -1,7 +1,9 @@
 // ============================================================
 // Auto-refresh — quietly reload briefing every 60 s while the user
-// is sitting on the briefing summary view. Pauses during filter view
-// and when the document is hidden, so we don't burn API calls.
+// sitzt auf dem Briefing-Tab. Pausiert wenn das Dokument unsichtbar
+// ist, damit wir keine API-Calls verbrennen.
+// Phase 9p (Marc 2026-05-22): Filter-View entfernt — die separate
+// state.filterLabel-Bedingung ist damit obsolet.
 // ============================================================
 let autoRefreshTimer = null;
 
@@ -12,9 +14,8 @@ function startAutoRefresh() {
 		if (!localStorage.getItem('mp_jwt')) return;
 		const activeTab = document.querySelector('.mp-tab.is-active')?.dataset.tab;
 
-		// Briefing-Counts nur refreshen wenn der User wirklich darauf
-		// schaut (Liste ist groß, vermeidet Render-Flackern).
-		if (activeTab === 'briefing' && state.filterLabel === null) {
+		// Briefing nur refreshen wenn der User wirklich darauf schaut.
+		if (activeTab === 'briefing') {
 			loadBriefing();
 		}
 

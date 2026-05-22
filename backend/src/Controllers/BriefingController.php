@@ -6,7 +6,6 @@ namespace MailPilot\Controllers;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Response;
 use MailPilot\Repositories\MailboxRepository;
-use MailPilot\Repositories\ScoreRepository;
 use MailPilot\Repositories\SenderRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Repositories\UsageRepository;
@@ -27,25 +26,13 @@ final class BriefingController extends BaseController
 			throw HttpException::preconditionFailed('MAILBOX_NOT_CONNECTED', 'Kein Postfach verbunden');
 		}
 
-		$scores = $this->kernel->get(ScoreRepository::class);
-
-		// Last 7 days — covers the realistic "what's in my inbox right now"
-		// window. A pure "today UTC" filter looked empty for users whose
-		// initial sync brought in mostly older mail.
-		$sinceUtc = gmdate('Y-m-d H:i:s.000', time() - 7 * 86400);
-
-		// Phase 9n (Marc 2026-05-21): „Top Priorität"-Sektion entfernt —
-		// die Pin-Liste deckt das gleiche Use-Case mit besseren Filtern
-		// (Inbox-Check, user_cleared_at, auto_sorted_at) ab. Doppelte
-		// Listen waren verwirrend und Top-Priorität hatte den gleichen
-		// Bug wie die alte Pin-Liste vor 9n.
-		$countersTotal = ['direct' => 0, 'action' => 0, 'cc' => 0, 'newsletter' => 0, 'auto' => 0, 'noise' => 0];
-		foreach ($mailboxes as $mb) {
-			$c = $scores->countByLabelSince($ctx['tenant_id'], (string)$mb['id'], $sinceUtc);
-			foreach ($c as $k => $v) {
-				$countersTotal[$k] = ($countersTotal[$k] ?? 0) + $v;
-			}
-		}
+		// Phase 9n (Marc 2026-05-21): „Top Priorität"-Sektion entfernt.
+		// Phase 9p (Marc 2026-05-22): Label-Counters (Direct/Action/CC/
+		// Newsletter/Auto/Noise) entfernt. Mit der Sender-zentrierten
+		// Folder-Architektur ab 9m zaehlten die Karten Mails die laengst
+		// im Sender-Ordner liegen — Ghost-Counts in der Inbox-Ansicht.
+		// Die Pin-Liste reicht als To-Do-Indikator; Counts ohne Inbox-
+		// Filter sind irrefuehrend.
 
 		// Budget + worker info so the add-in footer can show a live
 		// "12k / 100k Tokens" badge and a worker-alive indicator. Both
@@ -75,7 +62,6 @@ final class BriefingController extends BaseController
 
 		Response::json([
 			'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
-			'counters'     => $countersTotal,
 			'pinned'       => $pinned,
 			'budget'       => [
 				'user_used'  => $userUsed,

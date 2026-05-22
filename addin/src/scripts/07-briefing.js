@@ -27,15 +27,9 @@ function initBriefing() {
 		}
 	});
 
-	// Counter cards: click → open filtered list for that label
-	document.querySelectorAll('.mp-counter[data-label]').forEach((card) => {
-		card.addEventListener('click', () => {
-			openFilteredList(card.dataset.label);
-		});
-	});
-
-	// Back button from the filter view
-	document.getElementById('btn-back-summary').addEventListener('click', closeFilteredList);
+	// Phase 9p (Marc 2026-05-22): Counter-Karten + Filter-View entfernt.
+	// Pin-Liste ist der einzige Inbox-Indikator — Counter-Klicks fuehrten
+	// zu Ghost-Mail-Listen nach der Sender-Folder-Architektur-Umstellung.
 
 	document.getElementById('btn-connect').addEventListener('click', async () => {
 		try {

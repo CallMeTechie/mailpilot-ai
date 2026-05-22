@@ -1,5 +1,3 @@
-async function addAutoSortSubRule
-async function applyAutoSortNow
 async function approvePending
 async function bulkApproveAllPending
 async function correctOwnerInline
@@ -20,7 +18,6 @@ async function loadTopicSuggestions
 async function markCurrentMailDone
 async function markPinnedDone
 async function onDeleteLegacyRules
-async function openFilteredList
 async function patchSender
 async function persistAliases
 async function persistKeywords
@@ -28,24 +25,21 @@ async function persistMailpilotRoot
 async function pollRescoreJob
 async function regenerateDraft
 async function rejectPending
-async function reloadFilterList
 async function rescoreAll
 async function rescoreCurrent
 async function rescoreCurrentFolder
 async function resolveConflictKeep
-async function runBulkAction
+async function runRuleCleanupNow
 async function saveAutoReplySettings
-async function saveAutoSort
 async function saveCorrection
 async function saveModes
+async function saveRuleAutoclean
 async function saveRuleInference
 async function summarizeCurrent
 async function toggleScoreOverride
 async function tryMerge
 const aliasState
-const BULK_ACTIONS
 const keywordState
-const LABEL_META
 const PENDING_KIND_META
 const pendingState
 const state
@@ -55,11 +49,7 @@ const TRUST_LABEL
 function applyMailpilotRootFromModes
 function approveButtonText
 function bounceToLogin
-function buildAutoSortRow
 function buildConflictCard
-function buildIconElement
-function buildLabelTd
-function buildMailListItem
 function buildPendingCard
 function buildPinnedCard
 function buildRuleSuggestionBody
@@ -67,15 +57,11 @@ function buildScoreOverrideRow
 function buildSenderAvatar
 function buildTodayCard
 function clearBusy
-function closeFilteredList
 function compactNumber
 function consumeHandoff
-function dependentRulesForSubLabel
 function describeRuleCompact
 function dismissToast
 function escape
-function filterSinceUtc
-function findSubLabelMetaById
 function formatRelativeAge
 function handleCurrentMailError
 function handleError
@@ -99,12 +85,10 @@ function pendingAffectedCount
 function pendingTarget
 function pendingTitle
 function pollSyncStatus
-function populateAutoSortSubPick
 function refreshButtonStates
 function refreshModeHints
 function renderAliasChips
 function renderAliasSuggestions
-function renderAutoSortRules
 function renderBriefing
 function renderCurrentMail
 function renderFooterStats
@@ -114,9 +98,9 @@ function renderOverrideConflicts
 function renderPending
 function renderPendingList
 function renderPinnedList
+function renderRuleAutocleanConfig
 function renderScoreOverrides
 function renderSenders
-function renderSubLabels
 function renderTodaySection
 function resetCurrentMailUi
 function setBusy
@@ -130,10 +114,8 @@ function toggle
 function updateDoneIcon
 function useDraft
 let autoRefreshTimer
-let autoSortRulesCache
 let _draftState
 let mpBusy
 let pendingLoading
 let settingsGen
-let subLabelsByParent
 let toastSeq

@@ -78,6 +78,10 @@ $router->delete('/api/v1/settings/score-overrides/{id}',      'ScoreOverrideCont
 $router->get   ('/api/v1/settings/score-overrides/conflicts',     'ScoreOverrideController@listConflicts');
 $router->post  ('/api/v1/settings/score-overrides/merge',         'ScoreOverrideController@mergeRules');
 $router->post  ('/api/v1/settings/score-overrides/merge/accept',  'ScoreOverrideController@acceptMerge');
+// Phase 9p — Auto-Cleanup fuer Override-Regeln
+$router->post  ('/api/v1/settings/score-overrides/cleanup',        'ScoreOverrideController@cleanup');
+$router->get   ('/api/v1/settings/score-overrides/cleanup-config', 'ScoreOverrideController@getCleanupConfig');
+$router->patch ('/api/v1/settings/score-overrides/cleanup-config', 'ScoreOverrideController@patchCleanupConfig');
 
 $router->get ('/api/v1/me/export',               'MeController@export');
 $router->delete('/api/v1/me',                    'MeController@delete');

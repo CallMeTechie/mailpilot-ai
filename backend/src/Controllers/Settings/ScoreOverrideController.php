@@ -144,4 +144,59 @@ final class ScoreOverrideController extends BaseController
 		$repo->softDelete($ctx['tenant_id'], $ctx['user_id'], $bId);
 		Response::json(['ok' => true, 'merged_id' => $newId, 'deleted' => [$aId, $bId]]);
 	}
+
+	/**
+	 * Phase 9p (Marc 2026-05-22) — Auto-Cleanup: manuell triggern.
+	 * Soft-Delete fuer Regeln gemaess Settings-Heuristik. Liefert die
+	 * Anzahl der affected rows zurueck.
+	 */
+	public function cleanup(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$deleted = $this->kernel
+			->get(\MailPilot\Services\ScoreOverrideCleanupService::class)
+			->cleanup();
+		Response::json(['ok' => true, 'deleted' => $deleted]);
+	}
+
+	/**
+	 * Phase 9p — aktuelle Auto-Cleanup-Settings auslesen.
+	 */
+	public function getCleanupConfig(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$cfg = $this->kernel
+			->get(\MailPilot\Services\ScoreOverrideCleanupService::class)
+			->readConfig();
+		Response::json($cfg);
+	}
+
+	/**
+	 * Phase 9p — Auto-Cleanup-Settings teilweise updaten.
+	 * Body: { enabled?: bool, delete_disabled?: bool, delete_unused_after_days?: int }
+	 */
+	public function patchCleanupConfig(array $params, array $body): void
+	{
+		$this->requireAuth();
+		$patch = [];
+		if (array_key_exists('enabled', $body)) {
+			$patch['enabled'] = (bool)$body['enabled'];
+		}
+		if (array_key_exists('delete_disabled', $body)) {
+			$patch['delete_disabled'] = (bool)$body['delete_disabled'];
+		}
+		if (array_key_exists('delete_unused_after_days', $body)) {
+			$days = (int)$body['delete_unused_after_days'];
+			if ($days < 1 || $days > 365) {
+				throw HttpException::badRequest('VALIDATION', 'delete_unused_after_days muss zwischen 1 und 365 liegen');
+			}
+			$patch['delete_unused_after_days'] = $days;
+		}
+		if ($patch === []) {
+			throw HttpException::badRequest('VALIDATION', 'Keine bekannten Patch-Felder');
+		}
+		$svc = $this->kernel->get(\MailPilot\Services\ScoreOverrideCleanupService::class);
+		$svc->writeConfig($patch);
+		Response::json(['ok' => true, 'config' => $svc->readConfig()]);
+	}
 }

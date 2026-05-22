@@ -70,6 +70,10 @@ $autoReplyIntervalSec = 300; // Sprint 6f: Auto-Reply-Drafts Tick alle 5 min
 // 20 Mails pro Tick. Bei initialen ~400 NULL-Mails ~20 min Aufholjagd.
 $lastBackfillTick = 0;
 $backfillIntervalSec = 60;
+// Phase 9p (Marc 2026-05-22): Score-Override-Cleanup einmal pro Tag.
+// Liest Settings selbst — wenn enabled=false, no-op.
+$lastRuleCleanupTick = 0;
+$ruleCleanupIntervalSec = 86400;
 
 while (true) {
 	try {
@@ -131,6 +135,18 @@ while (true) {
 				$kernel->get(\MailPilot\Services\ParentFolderBackfillService::class)->tick();
 			} catch (\Throwable $e) {
 				$log->error('worker.backfill_tick_failed', ['err' => $e->getMessage()]);
+			}
+		}
+
+		// Phase 9p (Marc 2026-05-22): Score-Override-Cleanup-Tick (1×/Tag).
+		// Soft-Delete fuer Regeln die per Setting-Heuristik als ueberfluessig
+		// gelten. Service prueft enabled-Flag selbst — kein Pre-Check noetig.
+		if (($now = time()) - $lastRuleCleanupTick >= $ruleCleanupIntervalSec) {
+			$lastRuleCleanupTick = $now;
+			try {
+				$kernel->get(\MailPilot\Services\ScoreOverrideCleanupService::class)->tick();
+			} catch (\Throwable $e) {
+				$log->error('worker.rule_cleanup_tick_failed', ['err' => $e->getMessage()]);
 			}
 		}
 

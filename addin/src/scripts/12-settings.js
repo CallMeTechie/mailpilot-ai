@@ -23,18 +23,9 @@ function formatRelativeAge(isoUtc) {
 	return `vor ${diffMo} Monaten`;
 }
 
-// Cache of the user's sub-labels, grouped by primary. Populated by
-// loadSettings(), consumed by the "add sub-rule" dropdown in the
-// AutoSort section so the user can only pick a sub they actually
-// created — no free-form typos that would never match a score.
-/** @type {Record<string, Array<{id:string, name:string}>>} */
-let subLabelsByParent = {};
-
-// Last-loaded AutoSort rules, used by the sub-label-delete confirm
-// to preview which sub-rules will cascade with it. Kept in sync by
-// loadSettings + renderAutoSortRules.
-/** @type {Array<{label:string, sub_label:?string, enabled:boolean, folder_name:string}>} */
-let autoSortRulesCache = [];
+// Phase 9p (Marc 2026-05-22): subLabelsByParent + autoSortRulesCache
+// entfernt — die alte AutoSort-Tabelle ist seit Phase 9m durch das
+// Sender+ScoreOverride-Modell ersetzt.
 
 // Sprint 6a Alias-State. local hält die in-memory-Liste, die
 // renderAliasChips() rendert; privacyAck wird vom Profile-Load
@@ -242,26 +233,8 @@ function initSettings() {
 	document.getElementById('mp-mailpilot-root-custom')?.addEventListener('blur', persistMailpilotRoot);
 	document.getElementById('btn-delete-legacy-rules')?.addEventListener('click', onDeleteLegacyRules);
 
-	document.getElementById('btn-add-autosort-sub')?.addEventListener('click', addAutoSortSubRule);
-	document.getElementById('autosort-sub-rows')?.addEventListener('click', async (e) => {
-		const btn = e.target.closest('button.remove-sub-rule');
-		if (!btn) return;
-		const { label, name } = btn.dataset;
-		const ok = await mpConfirm({
-			title: 'Sub-Regel entfernen?',
-			body: `${label} / ${name}\n\nMails in diesem Topic werden nicht zurueckverschoben.`,
-			okLabel: 'Entfernen',
-			danger: true,
-		});
-		if (!ok) return;
-		try {
-			await api.settings.deleteAutoSortSub(label, name);
-			loadSettings();
-		} catch (err) { handleError(err); }
-	});
-
-	document.getElementById('btn-save-autosort')?.addEventListener('click', saveAutoSort);
-	document.getElementById('btn-apply-autosort-now')?.addEventListener('click', applyAutoSortNow);
+	// Phase 9p (Marc 2026-05-22): AutoSort-Tabellen entfernt — die Sender-
+	// Folder-Architektur ab 9m ersetzt das Catch-all + Sub-Regeln-Modell.
 	// Sprint 6g — Rule-Inference Save
 	document.getElementById('btn-save-rule-inference')?.addEventListener('click', saveRuleInference);
 	// Sprint 6f — Auto-Reply-Drafts
@@ -271,6 +244,9 @@ function initSettings() {
 	document.getElementById('btn-draft-regenerate')?.addEventListener('click', regenerateDraft);
 	document.getElementById('btn-draft-dismiss')?.addEventListener('click', dismissDraft);
 	document.getElementById('btn-rescore-all')?.addEventListener('click', rescoreAll);
+	// Phase 9p (Marc 2026-05-22) — Auto-Cleanup fuer Override-Regeln
+	document.getElementById('btn-save-rule-autoclean')?.addEventListener('click', saveRuleAutoclean);
+	document.getElementById('btn-rule-cleanup-now')?.addEventListener('click', runRuleCleanupNow);
 
 	document.getElementById('btn-export').addEventListener('click', async () => {
 		try {
@@ -309,19 +285,15 @@ let settingsGen = 0;
 async function loadSettings() {
 	const myGen = ++settingsGen;
 	try {
-		const [vip, red, autosort, subs, profile, userProfile] = await Promise.all([
+		const [vip, red, profile, userProfile] = await Promise.all([
 			api.settings.listVip(),
 			api.settings.listRedaction(),
-			api.settings.listAutoSort(),
-			api.settings.listSubLabels(),
 			api.me.profile(),
 			api.settings.getUser(),
 		]);
 		if (myGen !== settingsGen) return;
 		renderList('vip-list', vip.items ?? [], (v) => `${escape(v.email)}`, 'deleteVip');
 		renderList('red-list', red.items ?? [], (r) => `<code>${escape(r.pattern)}</code> — ${escape(r.description ?? '')}`, 'deleteRedaction');
-		renderSubLabels(subs.items ?? []);
-		renderAutoSortRules(autosort.rules ?? []);
 
 		// Sprint 6a: Alias-Chips aus Profil rendern, Privacy-Ack-Status merken
 		const user = profile?.user ?? {};
@@ -345,257 +317,14 @@ async function loadSettings() {
 	}
 }
 
-/**
- * Build a <td> with a small inline badge (label colour) followed by
- * arbitrary plain-text content. Uses textContent for the user-supplied
- * part so a sub-label called `<script>` can never escape.
- */
-function buildLabelTd(label, plainSuffix = '') {
-	const td = document.createElement('td');
-	const badge = document.createElement('span');
-	badge.className = 'mp-badge';
-	badge.dataset.label = label;
-	badge.textContent = labelText(label);
-	td.appendChild(badge);
-	if (plainSuffix) {
-		td.appendChild(document.createTextNode(' ' + plainSuffix));
-	}
-	return td;
-}
+// Phase 9p (Marc 2026-05-22): buildLabelTd entfernt — wurde nur fuer die
+// alte AutoSort-Tabelle gebraucht.
 
-function renderSubLabels(items) {
-	subLabelsByParent = {};
-	for (const it of items) {
-		(subLabelsByParent[it.parent] ??= []).push({ id: it.id, name: it.name });
-	}
-
-	const ul = document.getElementById('sub-list');
-	if (ul) {
-		ul.replaceChildren();
-		for (const s of items) {
-			const li = document.createElement('li');
-
-			const wrap = document.createElement('span');
-			const badge = document.createElement('span');
-			badge.className = 'mp-badge';
-			badge.dataset.label = s.parent;
-			badge.textContent = labelText(s.parent);
-			wrap.appendChild(badge);
-			wrap.appendChild(document.createTextNode(' ' + s.name));
-			if (s.description) {
-				wrap.appendChild(document.createTextNode(' — '));
-				const muted = document.createElement('span');
-				muted.className = 'mp-muted';
-				muted.textContent = s.description;
-				wrap.appendChild(muted);
-			}
-			li.appendChild(wrap);
-
-			const btn = document.createElement('button');
-			btn.className = 'remove';
-			btn.dataset.id = s.id;
-			btn.setAttribute('aria-label', 'Löschen');
-			btn.textContent = '×';
-			li.appendChild(btn);
-
-			ul.appendChild(li);
-		}
-	}
-
-	populateAutoSortSubPick();
-}
-
-/**
- * Walk subLabelsByParent and return { parent, name } for the given id,
- * or null when the cache is stale.
- */
-function findSubLabelMetaById(id) {
-	for (const [parent, list] of Object.entries(subLabelsByParent)) {
-		const hit = list.find((s) => s.id === id);
-		if (hit) return { parent, name: hit.name };
-	}
-	return null;
-}
-
-/**
- * Returns all AutoSort sub-rules that would cascade if the given
- * (parent, name) sub-label is removed. Driven by autoSortRulesCache
- * so no extra HTTP round-trip is needed.
- */
-function dependentRulesForSubLabel(parent, name) {
-	return autoSortRulesCache.filter((r) => r.label === parent && r.sub_label === name);
-}
-
-function populateAutoSortSubPick() {
-	const select = document.getElementById('autosort-sub-pick');
-	const addBtn = document.getElementById('btn-add-autosort-sub');
-	if (!select || !addBtn) return;
-
-	select.replaceChildren();
-	const totalSubs = Object.values(subLabelsByParent).reduce((n, arr) => n + arr.length, 0);
-
-	const placeholder = document.createElement('option');
-	placeholder.value = '';
-	placeholder.textContent = totalSubs === 0
-		? '— erst Unter-Kategorie anlegen —'
-		: '— Unter-Kategorie wählen —';
-	select.appendChild(placeholder);
-
-	for (const parent of ['direct', 'action', 'cc', 'newsletter', 'auto', 'noise']) {
-		for (const s of (subLabelsByParent[parent] ?? [])) {
-			const opt = document.createElement('option');
-			opt.value = parent + '|' + s.name;
-			opt.textContent = labelText(parent) + ' / ' + s.name;
-			select.appendChild(opt);
-		}
-	}
-
-	select.disabled = totalSubs === 0;
-	addBtn.disabled = totalSubs === 0;
-}
-
-function renderAutoSortRules(rules) {
-	autoSortRulesCache = rules;
-	const catchAlls = rules.filter((r) => r.sub_label === null);
-	const subRules  = rules.filter((r) => r.sub_label !== null);
-
-	const tbody = document.getElementById('autosort-rows');
-	if (tbody) {
-		tbody.replaceChildren();
-		for (const r of catchAlls) {
-			tbody.appendChild(buildAutoSortRow(r, false));
-		}
-	}
-
-	const subTbody = document.getElementById('autosort-sub-rows');
-	if (subTbody) {
-		subTbody.replaceChildren();
-		if (subRules.length === 0) {
-			const tr = document.createElement('tr');
-			const td = document.createElement('td');
-			td.colSpan = 5;
-			td.className = 'mp-muted';
-			td.textContent = 'Noch keine Sub-Regeln. Lege unten eine an.';
-			tr.appendChild(td);
-			subTbody.appendChild(tr);
-		} else {
-			for (const r of subRules) {
-				subTbody.appendChild(buildAutoSortRow(r, true));
-			}
-		}
-	}
-}
-
-/**
- * Build a single <tr> for the AutoSort table, either as a catch-all
- * row (4 cells: label, enabled, folder, optional error) or as a
- * sub-rule row (5 cells: label, sub, enabled, folder, controls).
- * All user-supplied text goes via textContent/dataset — no innerHTML
- * concatenation with untrusted values.
- */
-function buildAutoSortRow(r, isSub) {
-	const tr = document.createElement('tr');
-	tr.dataset.label = r.label;
-	if (isSub) tr.dataset.subLabel = r.sub_label;
-
-	// label badge
-	const labelTd = buildLabelTd(r.label);
-	if (!isSub && (r.label === 'direct' || r.label === 'action')) {
-		const small = document.createElement('small');
-		small.className = 'mp-muted';
-		small.textContent = ' (nur Prio < 4)';
-		labelTd.appendChild(small);
-	}
-	tr.appendChild(labelTd);
-
-	// sub-label cell (only on sub rows)
-	if (isSub) {
-		const subTd = document.createElement('td');
-		subTd.textContent = r.sub_label;
-		// Sprint 6b: KI-vorgeschlagene Rules bekommen einen Badge.
-		// Carry-Over DA-Impl 6b-4: Touch-Devices zeigen kein title-
-		// Tooltip. Statt cursor:help nutzen wir on-click ein Inline-
-		// Popover (mp-badge-tip), das auf jedem Device erreichbar ist.
-		if (r.created_by === 'ki') {
-			const badge = document.createElement('button');
-			badge.type = 'button';
-			badge.className = 'mp-badge-ki';
-			badge.textContent = 'KI-Vorschlag';
-			badge.setAttribute('aria-label',
-				'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = automatisch sortieren.');
-			badge.addEventListener('click', (e) => {
-				e.stopPropagation();
-				const tip = badge.nextElementSibling;
-				if (tip && tip.classList.contains('mp-badge-tip')) {
-					tip.dataset.hidden = tip.dataset.hidden === 'true' ? 'false' : 'true';
-				}
-			});
-			const tip = document.createElement('span');
-			tip.className = 'mp-badge-tip';
-			tip.dataset.hidden = 'true';
-			tip.textContent = 'Die KI hat dieses Topic in deinen Mails entdeckt. Aktivieren = wird ab jetzt automatisch sortiert.';
-			subTd.appendChild(document.createTextNode(' '));
-			subTd.appendChild(badge);
-			subTd.appendChild(tip);
-		}
-		tr.appendChild(subTd);
-	}
-
-	// enabled switch
-	const enabledTd = document.createElement('td');
-	const switchLbl = document.createElement('label');
-	switchLbl.className = 'mp-switch';
-	const cb = document.createElement('input');
-	cb.type = 'checkbox';
-	cb.className = 'autosort-enabled';
-	cb.checked = !!r.enabled;
-	const knob = document.createElement('span');
-	switchLbl.appendChild(cb);
-	switchLbl.appendChild(knob);
-	enabledTd.appendChild(switchLbl);
-	tr.appendChild(enabledTd);
-
-	// folder input
-	const folderTd = document.createElement('td');
-	const folderInput = document.createElement('input');
-	folderInput.type = 'text';
-	folderInput.className = 'autosort-folder';
-	folderInput.value = r.folder_name ?? '';
-	folderInput.placeholder = isSub
-		? `MailPilot/${labelText(r.label)}/${r.sub_label}`
-		: `MailPilot/${labelText(r.label)}`;
-	folderTd.appendChild(folderInput);
-	tr.appendChild(folderTd);
-
-	// controls (sub) / error indicator (catch-all)
-	if (isSub) {
-		const ctrlTd = document.createElement('td');
-		if (r.last_error) {
-			const errSpan = document.createElement('span');
-			errSpan.className = 'mp-error-hint';
-			errSpan.title = r.last_error;
-			errSpan.textContent = '⚠ ';
-			ctrlTd.appendChild(errSpan);
-		}
-		const rm = document.createElement('button');
-		rm.className = 'mp-icon-btn mp-icon-btn-ghost remove-sub-rule';
-		rm.dataset.label = r.label;
-		rm.dataset.name = r.sub_label;
-		rm.setAttribute('aria-label', 'Sub-Regel löschen');
-		rm.title = 'Sub-Regel löschen';
-		rm.textContent = '×';
-		ctrlTd.appendChild(rm);
-		tr.appendChild(ctrlTd);
-	} else if (r.last_error) {
-		const errTd = document.createElement('td');
-		errTd.className = 'mp-error-hint';
-		errTd.title = r.last_error;
-		errTd.textContent = '⚠';
-		tr.appendChild(errTd);
-	}
-
-	return tr;
-}
+// Phase 9p (Marc 2026-05-22): Folgende Funktionen entfernt, weil die Sender-
+// Folder-Architektur ab Phase 9m sie obsolet macht:
+//   renderSubLabels, findSubLabelMetaById, dependentRulesForSubLabel,
+//   populateAutoSortSubPick, renderAutoSortRules, buildAutoSortRow.
+// Auto-Sort laeuft jetzt ueber SenderRepository + ScoreOverrideRepository.
 
 async function rescoreAll() {
 	if (mpBusy !== null) return;
@@ -668,136 +397,9 @@ async function rescoreAll() {
 	}
 }
 
-async function addAutoSortSubRule() {
-	const pick   = document.getElementById('autosort-sub-pick');
-	const folder = document.getElementById('autosort-sub-folder');
-	const value  = pick?.value || '';
-	if (!value) return;
-	const [label, subName] = value.split('|');
-	const folderName = folder?.value.trim() || `MailPilot/${labelText(label)}/${subName}`;
-	try {
-		await api.settings.updateAutoSort([
-			{ label, sub_label: subName, enabled: true, folder_name: folderName },
-		]);
-		if (folder) folder.value = '';
-		pick.value = '';
-		loadSettings();
-		showToast(`Sub-Regel ${labelText(label)} / ${subName} angelegt`, 'success', 3000);
-	} catch (err) { handleError(err); }
-}
-
-async function applyAutoSortNow() {
-	if (mpBusy !== null) return;
-	const status = document.getElementById('autosort-status');
-
-	const ok = await mpConfirm({
-		title: 'Aktive Regeln auf bestehende Mails anwenden?',
-		body: 'Alle bereits gescorten Mails werden in die konfigurierten Ordner verschoben. Mails mit hoher Prio (direct/action ab Prio 4) bleiben in der Inbox.',
-		okLabel: 'Jetzt anwenden',
-	});
-	if (!ok) return;
-
-	setBusy('autosort');
-	const progress = mpProgress({
-		title: 'Regeln werden angewendet',
-		status: 'Sammle passende Mails ...',
-	});
-	let cancelled = false;
-	progress.waitForCancel().then(() => { cancelled = true; setBusy('canceling'); });
-
-	const totals = { processed: 0, moved: 0, protected: 0, errors: 0 };
-	let total = null;
-	let afterId = null;
-
-	try {
-		// Hard-Cap als Last-Resort gegen Backend-Bug oder bösen Cursor;
-		// die echte Stopbedingung ist has_more=false plus Cursor-Advance.
-		let safety = 1000;
-		while (safety-- > 0) {
-			if (cancelled) break;
-
-			const res = await api.settings.applyAutoSortNow(50, afterId);
-			if (res.total !== undefined && res.total !== null && total === null) {
-				total = res.total;
-			}
-
-			totals.processed += res.processed ?? 0;
-			totals.moved     += res.moved ?? 0;
-			totals.protected += res.protected ?? 0;
-			totals.errors    += res.errors ?? 0;
-
-			const parts = [`${totals.moved} verschoben`];
-			if (totals.protected) parts.push(`${totals.protected} geschuetzt`);
-			if (totals.errors)    parts.push(`${totals.errors} Fehler`);
-			progress.update({
-				done: totals.processed,
-				total: total ?? totals.processed,
-				status: parts.join(' · '),
-			});
-
-			if (!res.has_more) break;
-			// Cursor MUSS sich bewegen — wenn next_after_id wie vor dem
-			// Aufruf bleibt, ist das ein Backend-Bug; lieber abbrechen
-			// als endlos loopen wie vor Sprint 0.2.
-			if (!res.next_after_id || res.next_after_id === afterId) break;
-			afterId = res.next_after_id;
-		}
-
-		progress.close();
-		const finalParts = [`${totals.moved} verschoben`];
-		if (totals.protected) finalParts.push(`${totals.protected} geschuetzt (Prio>=4)`);
-		if (totals.errors)    finalParts.push(`${totals.errors} Fehler`);
-		const finalText = finalParts.join(' · ');
-		if (cancelled) {
-			showToast('Abgebrochen: ' + finalText, 'warn', 5000);
-			if (status) status.textContent = 'Abgebrochen: ' + finalText;
-		} else {
-			showToast('Regeln angewendet: ' + finalText, totals.errors ? 'error' : 'success', 6000);
-			if (status) status.textContent = `Fertig: ${finalText}.`;
-		}
-	} catch (err) {
-		progress.close();
-		handleError(err);
-	} finally {
-		clearBusy();
-	}
-}
-
-async function saveAutoSort() {
-	const tbody     = document.getElementById('autosort-rows');
-	const subTbody  = document.getElementById('autosort-sub-rows');
-	if (!tbody) return;
-
-	const collectFrom = (root, withSub) => Array.from(root.querySelectorAll('tr'))
-		// the "no sub-rules yet" placeholder has no .autosort-enabled — skip it.
-		.filter((tr) => tr.querySelector('.autosort-enabled'))
-		.map((tr) => {
-			const rule = {
-				label:       tr.dataset.label,
-				enabled:     tr.querySelector('.autosort-enabled').checked,
-				folder_name: tr.querySelector('.autosort-folder').value.trim(),
-			};
-			if (withSub && tr.dataset.subLabel) rule.sub_label = tr.dataset.subLabel;
-			return rule;
-		});
-
-	const rules = [
-		...collectFrom(tbody, false),
-		...(subTbody ? collectFrom(subTbody, true) : []),
-	];
-
-	const status = document.getElementById('autosort-status');
-	if (status) status.textContent = 'Speichere…';
-	try {
-		const res = await api.settings.updateAutoSort(rules);
-		renderAutoSortRules(res.rules ?? []);
-		if (status) status.textContent = `${res.updated ?? 0} Regeln gespeichert.`;
-		showToast('Auto-Sort gespeichert', 'success', 3000);
-	} catch (err) {
-		if (status) status.textContent = '';
-		handleError(err);
-	}
-}
+// Phase 9p (Marc 2026-05-22): addAutoSortSubRule / applyAutoSortNow /
+// saveAutoSort entfernt — die zugehoerigen HTML-Tabellen + Buttons sind
+// seit Phase 9m durch SenderRepository + ScoreOverrideRepository ersetzt.
 
 function renderList(id, items, labelFn, _deleteMethod) {
 	const ul = document.getElementById(id);
@@ -980,14 +582,70 @@ async function patchSender(senderId, rowEl, payload) {
 
 async function loadScoreOverrides() {
 	try {
-		const [res, conflicts] = await Promise.all([
+		const [res, conflicts, cleanupCfg] = await Promise.all([
 			api.settings.listScoreOverrides(),
 			api.settings.listOverrideConflicts().catch(() => ({ items: [], count: 0 })),
+			// Phase 9p (Marc 2026-05-22): Auto-Cleanup-Config in den Subtab
+			api.settings.getRuleCleanupConfig().catch(() => null),
 		]);
 		renderScoreOverrides(res?.items ?? []);
 		// Phase 9k (Marc 2026-05-20): Konflikt-Banner + Detail-Liste.
 		renderOverrideConflicts(conflicts?.items ?? []);
+		// Phase 9p: Auto-Cleanup-Form mit aktueller Config befuellen
+		if (cleanupCfg) renderRuleAutocleanConfig(cleanupCfg);
 	} catch (err) {
+		handleError(err);
+	}
+}
+
+// Phase 9p (Marc 2026-05-22) — Auto-Cleanup-Config in die UI laden.
+function renderRuleAutocleanConfig(cfg) {
+	const enabled = document.getElementById('score-rule-autoclean-enabled');
+	const delDis  = document.getElementById('score-rule-autoclean-delete-disabled');
+	const days    = document.getElementById('score-rule-autoclean-days');
+	if (enabled) enabled.checked = !!cfg.enabled;
+	if (delDis)  delDis.checked  = !!cfg.delete_disabled;
+	if (days)    days.value      = String(cfg.delete_unused_after_days ?? 7);
+}
+
+async function saveRuleAutoclean() {
+	const status = document.getElementById('rule-autoclean-status');
+	const patch = {
+		enabled:                  !!document.getElementById('score-rule-autoclean-enabled')?.checked,
+		delete_disabled:          !!document.getElementById('score-rule-autoclean-delete-disabled')?.checked,
+		delete_unused_after_days: Math.max(1, Math.min(365,
+			Number(document.getElementById('score-rule-autoclean-days')?.value) || 7)),
+	};
+	if (status) status.textContent = 'Speichere…';
+	try {
+		await api.settings.patchRuleCleanupConfig(patch);
+		if (status) status.textContent = 'Gespeichert.';
+		showToast('Auto-Cleanup-Einstellungen gespeichert', 'success', 3000);
+	} catch (err) {
+		if (status) status.textContent = '';
+		handleError(err);
+	}
+}
+
+async function runRuleCleanupNow() {
+	const ok = await mpConfirm({
+		title: 'Regeln jetzt aufräumen?',
+		body: 'Deaktivierte und ungenutzte Regeln gemäß deiner Einstellungen oben werden soft-gelöscht. Sie verschwinden aus der Liste — sind aber DB-seitig wiederherstellbar.',
+		okLabel: 'Aufräumen',
+	});
+	if (!ok) return;
+	const status = document.getElementById('rule-autoclean-status');
+	if (status) status.textContent = 'Räume auf…';
+	try {
+		const res = await api.settings.runRuleCleanup();
+		const n = Number(res?.deleted ?? 0);
+		if (status) status.textContent = n === 0 ? 'Keine Regel betroffen.' : `${n} Regel${n === 1 ? '' : 'n'} aufgeräumt.`;
+		showToast(n === 0 ? 'Keine Regel passte zur Heuristik' : `${n} Regel${n === 1 ? '' : 'n'} aufgeräumt`,
+			n === 0 ? 'info' : 'success', 4000);
+		// Liste neu laden, damit weggeräumte Regeln aus dem UI verschwinden
+		loadScoreOverrides();
+	} catch (err) {
+		if (status) status.textContent = '';
 		handleError(err);
 	}
 }

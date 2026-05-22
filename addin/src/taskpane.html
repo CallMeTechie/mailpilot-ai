@@ -81,42 +81,11 @@
 						<div class="mp-progress-bar"><div class="mp-progress-fill" id="sync-progress-fill" style="width: 0%"></div></div>
 					</div>
 
-					<div class="mp-counters">
-						<button type="button" class="mp-counter" data-label="direct" aria-label="Direkte Mails anzeigen">
-							<div class="mp-counter-dot" style="background:#ef4444"></div>
-							<span class="mp-counter-value" id="c-direct">0</span>
-							<span class="mp-counter-label">Direkt</span>
-						</button>
-						<button type="button" class="mp-counter" data-label="action" aria-label="Aktions-Mails anzeigen">
-							<div class="mp-counter-dot" style="background:#f97316"></div>
-							<span class="mp-counter-value" id="c-action">0</span>
-							<span class="mp-counter-label">Aktion</span>
-						</button>
-						<button type="button" class="mp-counter" data-label="cc" aria-label="CC-Mails anzeigen">
-							<div class="mp-counter-dot" style="background:#3b82f6"></div>
-							<span class="mp-counter-value" id="c-cc">0</span>
-							<span class="mp-counter-label">CC</span>
-						</button>
-						<button type="button" class="mp-counter" data-label="newsletter" aria-label="Newsletter anzeigen">
-							<div class="mp-counter-dot" style="background:#94a3b8"></div>
-							<span class="mp-counter-value" id="c-newsletter">0</span>
-							<span class="mp-counter-label">Newsletter</span>
-						</button>
-						<button type="button" class="mp-counter" data-label="auto" aria-label="Auto-Mails anzeigen">
-							<div class="mp-counter-dot" style="background:#64748b"></div>
-							<span class="mp-counter-value" id="c-auto">0</span>
-							<span class="mp-counter-label">Auto</span>
-						</button>
-						<button type="button" class="mp-counter" data-label="noise" aria-label="Noise-Mails anzeigen">
-							<div class="mp-counter-dot" style="background:#cbd5e1"></div>
-							<span class="mp-counter-value" id="c-noise">0</span>
-							<span class="mp-counter-label">Noise</span>
-						</button>
-					</div>
-
 					<!-- Phase 5 (Marc 2026-05-18): Pin-Liste — Mails mit hohem
-					     inbox_score warten auf User-Done-Klick. Ueber Top-Priorität
-					     platziert, weil eilig. -->
+					     inbox_score warten auf User-Done-Klick.
+					     Phase 9p (Marc 2026-05-22): Label-Counter-Karten entfernt.
+					     Mit Sender-zentrierter Folder-Architektur ab 9m zaehlten
+					     sie wegsortierte Mails als Ghost-Counts — Pin-Liste reicht. -->
 					<div class="mp-section mp-pin-section">
 						<h2>
 							In deiner Inbox: <span id="pinned-count" class="mp-pin-count">0</span>
@@ -124,22 +93,6 @@
 						<div id="pinned-spoof-banner" class="mp-pin-spoof-banner" data-hidden="true" role="alert"></div>
 						<ul class="mp-pin-list" id="pinned-list"></ul>
 					</div>
-
-					<!-- Phase 9n (2026-05-21): „Top-Priorität"-Sektion entfernt.
-					     Die Pin-Liste oben deckt das gleiche Use-Case mit besseren
-					     Filtern (Inbox-Check, erledigt-Check) ab. -->
-				</div>
-
-				<!-- Filter view: shown when a counter card is clicked -->
-				<div id="briefing-filtered" data-hidden="true">
-					<button class="mp-btn mp-btn-ghost" id="btn-back-summary">← Briefing</button>
-					<div class="mp-headline">
-						<h1 id="filter-title">—</h1>
-						<p class="mp-muted" id="filter-hint"></p>
-					</div>
-					<div class="mp-actions" id="filter-bulk-actions"></div>
-					<ul class="mp-mail-list" id="filter-mail-list"></ul>
-					<p class="mp-muted" id="filter-empty" data-hidden="true">Keine Mails dieser Kategorie in den letzten 7 Tagen.</p>
 				</div>
 			</div>
 
@@ -366,9 +319,7 @@
 			<button class="mp-subtab"           data-subtab="senders"  role="tab">Absender</button>
 			<button class="mp-subtab"           data-subtab="autosort" role="tab">Auto-Sort</button>
 			<button class="mp-subtab"           data-subtab="rules"    role="tab">Regeln</button>
-			<button class="mp-subtab"           data-subtab="modes"    role="tab">Modi</button>
 			<button class="mp-subtab"           data-subtab="maint"    role="tab">Wartung</button>
-			<button class="mp-subtab"           data-subtab="data"     role="tab">Daten</button>
 		</nav>
 
 		<div class="mp-settings-content">
@@ -447,18 +398,15 @@
 			     (SubLabelDiscoverer in Phase 3a/3b). User-Override falls
 			     gewuenscht: ueber den „Auto-Sort"-Subtab direkt unten. -->
 
-			<!-- Auto-Sort: Catch-all + Sub-Regeln + Apply -->
+			<!-- Auto-Sort: MailPilot-Wurzel + Legacy-Cleanup + Lern-Settings + Auto-Reply -->
 			<section class="mp-subpanel" data-subpanel="autosort">
 				<div class="mp-section">
 					<h2>Auto-Sort &amp; Aufräumen</h2>
-					<div class="mp-banner-info" role="note">
-						<strong>Phase 9m (2026-05-21):</strong> Auto-Sort läuft jetzt über
-						<strong>Absender-Ordner</strong> (Sub-Tab „Absender") und
-						<strong>Score-Regeln</strong> (Sub-Tab „Regeln"). Newsletter gehen nach
-						<code>Newsletter/{Absender}</code>, Spam in Outlook's eigenen
-						<code>Junk-E-Mail</code>-Ordner, der Rest in den von dir konfigurierten
-						Absender-Ordner. Keine <code>MailPilot/&lt;Label&gt;</code>-Ordner mehr.
-					</div>
+					<p class="mp-muted">
+						Auto-Sort läuft über <strong>Absender-Ordner</strong> (Subtab „Absender") und
+						<strong>Klassifikations-Regeln</strong> (Subtab „Regeln"). Hier konfigurierst du
+						wo MailPilot Ordner anlegen darf und wie es aus deinen Korrekturen lernt.
+					</p>
 
 					<h3>MailPilot-Arbeitswurzel</h3>
 					<p class="mp-muted">Wo darf MailPilot neue Ordner anlegen?</p>
@@ -474,41 +422,11 @@
 					<p class="mp-muted" id="mp-mailpilot-root-status"></p>
 
 					<h3>Legacy-Regeln</h3>
-					<p class="mp-muted">Diese Regeln stammen aus Sprint 5-7 und sind seit Phase 9m deaktiviert. Du kannst sie löschen wenn nicht mehr gebraucht.</p>
+					<p class="mp-muted">Alte <code>MailPilot/&lt;Label&gt;</code>-Regeln aus Sprint 5-7 sind seit Phase 9m deaktiviert. Hier endgültig löschen.</p>
 					<div class="mp-actions">
 						<button class="mp-btn mp-btn-danger" id="btn-delete-legacy-rules">Alle <code>MailPilot/*</code>-Regeln löschen</button>
 					</div>
 					<p class="mp-muted" id="legacy-cleanup-status"></p>
-
-					<h3>Bestehende Rule-Liste (read-only)</h3>
-					<table class="mp-autosort-table" id="autosort-table">
-						<thead>
-							<tr><th>Label</th><th>Aktiv</th><th>Ordner</th></tr>
-						</thead>
-						<tbody id="autosort-rows"><!-- catch-all-Zeilen, gefüllt durch initSettings() --></tbody>
-					</table>
-
-					<h3>Sub-Regeln</h3>
-					<p class="mp-muted">Genauere Routen für Unter-Kategorien — schlagen die Catch-all-Regel oben, wenn die KI diese Sub-Kategorie wählt.</p>
-					<table class="mp-autosort-table" id="autosort-sub-table">
-						<thead>
-							<tr><th>Label</th><th>Sub</th><th>Aktiv</th><th>Ordner</th><th></th></tr>
-						</thead>
-						<tbody id="autosort-sub-rows"><!-- gefüllt durch initSettings() --></tbody>
-					</table>
-					<div class="mp-field mp-field-row">
-						<select id="autosort-sub-pick" disabled>
-							<option value="">— Unter-Kategorie wählen —</option>
-						</select>
-						<input type="text" id="autosort-sub-folder" placeholder="MailPilot/Auto/CI">
-						<button class="mp-btn mp-btn-secondary" id="btn-add-autosort-sub" disabled>Sub-Regel hinzufügen</button>
-					</div>
-
-					<div class="mp-actions">
-						<button class="mp-btn mp-btn-primary" id="btn-save-autosort">Speichern</button>
-						<button class="mp-btn mp-btn-secondary" id="btn-apply-autosort-now">Regeln jetzt anwenden</button>
-					</div>
-					<p class="mp-muted" id="autosort-status"></p>
 
 					<!-- Sprint 6g — Auto-Rule-Inference aus Korrektur-Begründungen -->
 					<div class="mp-divider"></div>
@@ -570,15 +488,42 @@
 					<ul class="mp-conflicts-list" id="score-conflicts-list" data-hidden="true"></ul>
 					<ul class="mp-list" id="score-overrides-list"></ul>
 				</div>
+
+				<!-- Phase 9p (Marc 2026-05-22): Auto-Cleanup-Konfiguration -->
+				<div class="mp-section">
+					<h2>Auto-Cleanup</h2>
+					<p class="mp-muted">Überflüssige Regeln automatisch entfernen, damit die Liste nicht zuwächst. Cleanup läuft einmal pro Tag im Hintergrund.</p>
+					<div class="mp-field">
+						<label>
+							<input type="checkbox" id="score-rule-autoclean-enabled">
+							Regeln automatisch löschen
+						</label>
+					</div>
+					<div class="mp-field">
+						<label>
+							<input type="checkbox" id="score-rule-autoclean-delete-disabled">
+							Deaktivierte Regeln löschen
+						</label>
+					</div>
+					<div class="mp-field">
+						<label for="score-rule-autoclean-days">Ungenutzte Regeln entfernen nach (Tagen):</label>
+						<input type="number" id="score-rule-autoclean-days" min="1" max="365" step="1" value="7">
+					</div>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-primary" id="btn-save-rule-autoclean">Speichern</button>
+						<button class="mp-btn mp-btn-secondary" id="btn-rule-cleanup-now">Jetzt aufräumen</button>
+					</div>
+					<p class="mp-muted" id="rule-autoclean-status"></p>
+				</div>
 			</section>
 
-			<!-- Wartung: Re-Score -->
-			<!-- Modi: 3 Toggles × 3 Stufen (PRD §3) -->
-			<section class="mp-subpanel" data-subpanel="modes">
+			<!-- Phase 9p (Marc 2026-05-22): Modi + Wartung + Daten zu einem
+			     „Wartung"-Tab konsolidiert. Drei dünne Tabs mit je 1-2
+			     Controls werden zu einem mit klaren Sektionen. -->
+			<section class="mp-subpanel" data-subpanel="maint">
 				<div class="mp-section">
-					<h2>Wie autonom darf die KI handeln?</h2>
-					<p class="mp-muted">Ein einziger Schalter für alle Auto-Sort-Entscheidungen: Verschieben, Topic-Discovery und Antwort-Entwürfe folgen demselben Modus.</p>
-
+					<h2>Auto-Sort-Modus</h2>
+					<p class="mp-muted">Wie autonom darf die KI handeln? Ein Schalter steuert Verschieben, Topic-Discovery und Antwort-Entwürfe.</p>
 					<div class="mp-modes">
 						<label class="mp-mode">
 							<span class="mp-mode-title">Auto-Sort-Modus</span>
@@ -590,29 +535,26 @@
 							<small class="mp-muted" id="mode-master-hint"></small>
 						</label>
 					</div>
-
 					<div class="mp-actions">
 						<button class="mp-btn mp-btn-primary" id="btn-save-modes">Modus speichern</button>
 					</div>
 					<p class="mp-muted" id="modes-status"></p>
 				</div>
-			</section>
 
-			<section class="mp-subpanel" data-subpanel="maint">
 				<div class="mp-section">
-					<h2>Wartung</h2>
-					<p class="mp-muted">Wenn du gerade neue Unter-Kategorien angelegt hast und alte Mails noch nicht passend einsortiert sind — hier den Re-Score erzwingen. Die KI bewertet alle nicht-korrigierten Mails neu mit deinem aktuellen Pool.</p>
+					<h2>Re-Klassifikation</h2>
+					<p class="mp-muted">Wenn du gerade neue Regeln oder Topics angelegt hast und alte Mails noch nicht passend bewertet sind — hier alle nicht-korrigierten Mails neu klassifizieren lassen.</p>
 					<button class="mp-btn mp-btn-secondary" id="btn-rescore-all">Mails neu klassifizieren</button>
 					<p class="mp-muted" id="rescore-status"></p>
 				</div>
-			</section>
 
-			<!-- Daten: Export + Account-Delete -->
-			<section class="mp-subpanel" data-subpanel="data">
 				<div class="mp-section mp-danger">
-					<h2>Daten</h2>
-					<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
-					<button class="mp-btn mp-btn-danger" id="btn-delete">Account + alle Daten löschen</button>
+					<h2>Daten-Export &amp; Löschen</h2>
+					<p class="mp-muted">DSGVO-konforme Datenausgabe + vollständige Account-Löschung.</p>
+					<div class="mp-actions">
+						<button class="mp-btn mp-btn-ghost" id="btn-export">Meine Daten exportieren</button>
+						<button class="mp-btn mp-btn-danger" id="btn-delete">Account + alle Daten löschen</button>
+					</div>
 				</div>
 			</section>
 		</div>

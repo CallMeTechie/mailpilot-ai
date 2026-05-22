@@ -18,7 +18,14 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: 
 p  { margin: 0; }
 
 button { font-family: inherit; font-size: inherit; cursor: pointer; border: none; background: none; color: inherit; }
-input, textarea {
+
+/* Phase 9p (Marc 2026-05-22): select erbte vorher Browser-Default-Combo-Look
+   (alte Win32-Optik in Outlook-Desktop). Jetzt konsistent zu input/textarea
+   mit subtilem Caret-SVG rechts. input[type=checkbox|radio] muss aus dem
+   full-width/padding-Selektor raus, sonst werden Boxes unleserlich verzerrt. */
+input:not([type=checkbox]):not([type=radio]):not([type=range]),
+textarea,
+select {
 	font-family: inherit; font-size: inherit;
 	background: var(--mp-surface);
 	border: 1px solid var(--mp-border);
@@ -27,9 +34,37 @@ input, textarea {
 	color: var(--mp-text);
 	width: 100%;
 }
-input:focus, textarea:focus {
+select {
+	appearance: none;
+	-webkit-appearance: none;
+	background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+	background-repeat: no-repeat;
+	background-position: right 10px center;
+	padding-right: 30px;
+	cursor: pointer;
+}
+select:disabled {
+	background-color: #f1f5f9;
+	color: var(--mp-text-muted);
+	cursor: not-allowed;
+}
+input:focus, textarea:focus, select:focus {
 	outline: none;
 	border-color: var(--mp-primary);
 	box-shadow: 0 0 0 3px var(--mp-primary-bg);
+}
+input[type=checkbox], input[type=radio] {
+	width: auto;
+	margin-right: var(--mp-sp-2);
+	accent-color: var(--mp-primary);
+	cursor: pointer;
+}
+/* Labels mit Checkbox/Radio nach links ausrichten, nicht stretchen */
+label:has(> input[type=checkbox]),
+label:has(> input[type=radio]) {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--mp-sp-2);
+	cursor: pointer;
 }
 

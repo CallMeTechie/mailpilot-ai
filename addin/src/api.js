@@ -205,6 +205,10 @@ export const api = {
 		// Phase 9m (Marc 2026-05-21) — MailPilot-Arbeitswurzel + Legacy-Cleanup
 		saveMailpilotRoot:        (root) => request('POST',   '/settings/mailpilot-root', { mailpilot_root: root }),
 		deleteLegacyAutoSortRules: ()    => request('DELETE', '/settings/legacy-autosort-rules'),
+		// Phase 9p (Marc 2026-05-22) — Auto-Cleanup fuer Score-Override-Regeln
+		runRuleCleanup:           ()        => request('POST',  '/settings/score-overrides/cleanup'),
+		getRuleCleanupConfig:     ()        => request('GET',   '/settings/score-overrides/cleanup-config'),
+		patchRuleCleanupConfig:   (patch)   => request('PATCH', '/settings/score-overrides/cleanup-config', patch),
 	},
 	// Phase 9e Hotfix #5 — Tenant-weite Pfad-Vorschlaege fuer Datalist
 	senders: {

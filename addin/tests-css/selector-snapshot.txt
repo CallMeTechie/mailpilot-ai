@@ -9,6 +9,8 @@
 #correct-section .mp-reasoning-hint strong
 #correct-section textarea
 *
+.mp-action-icon
+.mp-action-icon:hover
 .mp-action-text
 .mp-actions
 .mp-autosort-table
@@ -194,13 +196,28 @@
 .mp-pending-total
 .mp-pin-actions
 .mp-pin-card
+.mp-pin-card .mp-done-icon
 .mp-pin-card .mp-pin-done
 .mp-pin-card.is-fading
 .mp-pin-card.is-spoof
+.mp-pin-card.mp-prio-1
+.mp-pin-card.mp-prio-2
+.mp-pin-card.mp-prio-3
+.mp-pin-card.mp-prio-3 .mp-pin-prio
+.mp-pin-card.mp-prio-4
+.mp-pin-card.mp-prio-4 .mp-pin-prio
+.mp-pin-card.mp-prio-5
+.mp-pin-card.mp-prio-5 .mp-pin-prio
 .mp-pin-count
 .mp-pin-from
 .mp-pin-head
 .mp-pin-list
+.mp-pin-open
+.mp-pin-pathchip
+.mp-pin-pathchip.is-empty
+.mp-pin-pathicon
+.mp-pin-prio
+.mp-pin-reco
 .mp-pin-score
 .mp-pin-section h2
 .mp-pin-spoof
@@ -222,6 +239,7 @@
 .mp-rescore-icon:disabled
 .mp-rescore-icon:hover:not(:disabled)
 .mp-rule-applies
+.mp-rule-applies.is-unused
 .mp-rule-body
 .mp-rule-delete
 .mp-rule-head
@@ -324,8 +342,15 @@ h2
 h3
 h4
 html
-input
 input:focus
+input:not([type=checkbox]):not([type=radio]):not([type=range])
+input[type=checkbox]
+input[type=radio]
+label:has(> input[type=checkbox])
+label:has(> input[type=radio])
 p
+select
+select:disabled
+select:focus
 textarea
 textarea:focus

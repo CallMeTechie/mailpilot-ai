@@ -187,6 +187,12 @@ class Kernel
 				$this->get(ScoreOverrideRepository::class),
 				$this->get(Logger::class),
 			),
+			// Phase 9p: Auto-Cleanup fuer Score-Override-Regeln
+			\MailPilot\Services\ScoreOverrideCleanupService::class => new \MailPilot\Services\ScoreOverrideCleanupService(
+				$this->get(PDO::class),
+				$this->get(SettingsRepository::class),
+				$this->get(Logger::class),
+			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 				// Phase 9m (Marc 2026-05-21): mailpilot_root steuert die
