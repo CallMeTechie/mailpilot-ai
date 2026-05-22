@@ -144,9 +144,11 @@ final class OpenAiProvider implements LlmProvider
 			}
 
 			// 4xx (Auth, Bad Request, Quota) — kein Failover, das ist unser Bug.
+			// Bei diesem Pfad ist $err per Logik oben immer '' (Overload-Branch
+			// behandelt $err !== '' bereits).
 			throw new RuntimeException(sprintf(
-				'OpenAI API failed: status=%d attempt=%d curlErr=%s body=%s',
-				$status, $attempt, $err ?: 'none', $snippet,
+				'OpenAI API failed: status=%d attempt=%d body=%s',
+				$status, $attempt, $snippet,
 			));
 		}
 	}
