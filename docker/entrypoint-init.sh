@@ -35,6 +35,13 @@ if [ "${RUN_INIT_TASKS:-0}" = "1" ]; then
 
 	echo "[entrypoint-init] Applying migrations ..."
 	cd /app && php bin/migrate.php
+
+	# Phase 9q-A.5 (Marc 2026-05-22): API-Keys aus env-Vars in
+	# llm_providers.api_key_encrypted ueberfuehren. Idempotent — wenn der
+	# Key schon in der DB liegt, no-op. Schweigt wenn kein Master-Key
+	# vorhanden ist (Backend laeuft via env-Fallback weiter).
+	echo "[entrypoint-init] Migrating secrets ..."
+	cd /app && php bin/migrate-secrets.php || true
 fi
 
 exec "$@"

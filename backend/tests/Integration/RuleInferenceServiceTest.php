@@ -33,6 +33,11 @@ final class RuleInferenceServiceTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		// truncateAll laesst system_settings stehen — Tests in InferAll-
+		// FromCorrectionTest schalten rule_inference_enabled='0' und resetten
+		// nicht. Wir setzen den Default hier hart wieder zurueck, damit der
+		// Test-Order keinen Einfluss hat. (Phase 9q-A, Marc 2026-05-22.)
+		$this->setSetting('rule_inference_enabled', '1');
 	}
 
 	private function makeService(FakeClaudeClient $claude): RuleInferenceService
