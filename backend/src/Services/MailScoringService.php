@@ -52,11 +52,9 @@ final class MailScoringService
 		\MailPilot\Repositories\SubLabelRepository $subLabels,
 		\MailPilot\Repositories\AutoSortRepository $autoSortRules,
 		private readonly PromptRepository $prompts,
-		// Nach Phase-1-Split wandern alle SettingsRepository-Nutzungen in
-		// ScoringPromptBuilder / SubLabelDiscoverer / ActionOwnerResolver.
-		// Hier nur noch durchreichen, keine Property-Speicherung (PHPStan
-		// L5: "never read, only written").
-		SettingsRepository $settings,
+		// Phase 9q-B (Marc 2026-05-22): Settings jetzt Promoted-Property,
+		// weil callClaude den routing_mode-Schalter prueft.
+		private readonly SettingsRepository $settings,
 		private readonly int $batchSize,
 		private readonly int $maxBodyBytes,
 		private readonly \Psr\Log\LoggerInterface $logger,
@@ -72,6 +70,10 @@ final class MailScoringService
 		// label gemaess User-Regeln. Optional damit bestehende Tests
 		// unangetastet bleiben.
 		private readonly ?ScoreOverrideService $scoreOverride = null,
+		// Phase 9q-B (Marc 2026-05-22): Multi-Provider-Failover-Router. Nur
+		// aktiv wenn Setting llm.routing_mode='router'. Default null = bestehender
+		// Pfad direkt ueber ClaudeProvider/AnthropicClient. Zero behavior change.
+		private readonly ?\MailPilot\Llm\LlmRouter $llmRouter = null,
 	) {
 		$this->promptBuilder = new ScoringPromptBuilder($settings, $corrections, $autoSortCorrections);
 		$this->actionOwner = new ActionOwnerResolver(
@@ -369,12 +371,22 @@ final class MailScoringService
 
 		$start = microtime(true);
 		try {
-			$response = $this->claude->messages([
-				'model'      => $model,
-				'max_tokens' => $maxTokens,
-				'system'     => $systemSegments,
-				'messages'   => [['role' => 'user', 'content' => $user]],
-			]);
+			// Phase 9q-B (Marc 2026-05-22): wenn routing_mode='router' und Router
+			// verdrahtet ist, geht der Call ueber den LlmRouter mit Failover-Chain.
+			// Andernfalls bleibt der direkte AnthropicClient-Pfad — zero behavior
+			// change fuer alle Tests + initial nach Deploy.
+			$useRouter = $this->llmRouter !== null
+				&& $this->settings->getString('llm.routing_mode', 'direct') === 'router';
+			if ($useRouter) {
+				$response = $this->callViaRouter($systemSegments, $user, $model, $maxTokens, (float)($activePrompt['temperature'] ?? 0.1));
+			} else {
+				$response = $this->claude->messages([
+					'model'      => $model,
+					'max_tokens' => $maxTokens,
+					'system'     => $systemSegments,
+					'messages'   => [['role' => 'user', 'content' => $user]],
+				]);
+			}
 		} catch (\Throwable $e) {
 			$this->recordCall($tenantId, $userId, $mailboxId, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage(), $promptVersionTag, $model);
 			throw $e;
@@ -390,6 +402,57 @@ final class MailScoringService
 		}
 
 		return $json['results'] ?? [];
+	}
+
+	/**
+	 * Phase 9q-B (Marc 2026-05-22) — Inferenz ueber LlmRouter (Failover-Chain).
+	 * Baut NormalizedRequest aus Anthropic-spezifischen system_segments
+	 * (Cache-Hints werden zu Block-Index uebersetzt), ruft Router, mapped
+	 * NormalizedResponse zurueck in das Anthropic-Response-Shape damit der
+	 * Downstream-Code (extractText, recordCall) unveraendert weiterlaeuft.
+	 *
+	 * @param list<array<string,mixed>> $systemSegments
+	 * @return array<string,mixed>
+	 */
+	private function callViaRouter(array $systemSegments, string $user, string $model, int $maxTokens, float $temperature): array
+	{
+		// System-Segmente zu einem String konkatieren — Cache-Granularitaet
+		// geht bei Multi-Provider sowieso verloren (nur Anthropic kann pro
+		// Segment cachen). cacheSegments=[0] markiert das gesamte System-
+		// Prompt als 1h-cached bei Anthropic; OpenAI ignoriert es.
+		$systemText = '';
+		foreach ($systemSegments as $seg) {
+			if (is_array($seg) && isset($seg['text'])) {
+				if ($systemText !== '') {
+					$systemText .= "\n\n";
+				}
+				$systemText .= (string)$seg['text'];
+			}
+		}
+
+		$req = new \MailPilot\Llm\NormalizedRequest(
+			systemPrompt:   $systemText,
+			messages:       [['role' => 'user', 'content' => $user]],
+			maxTokens:      $maxTokens,
+			temperature:    $temperature,
+			modelHint:      $model,
+			responseFormat: 'json_object',
+			cacheSegments:  [0],
+		);
+
+		assert($this->llmRouter !== null);
+		$resp = $this->llmRouter->complete($req, 'score');
+
+		// Anthropic-Response-Shape rekonstruieren — extractText liest content[].
+		return [
+			'content' => [['type' => 'text', 'text' => $resp->content]],
+			'usage'   => [
+				'input_tokens'  => $resp->usage['inputTokens']  ?? 0,
+				'output_tokens' => $resp->usage['outputTokens'] ?? 0,
+				'cache_read_input_tokens' => $resp->usage['cachedTokens'] ?? 0,
+			],
+			'model' => $resp->modelId,
+		];
 	}
 
 	/**

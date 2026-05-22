@@ -193,6 +193,34 @@ class Kernel
 				$this->get(SettingsRepository::class),
 				$this->get(Logger::class),
 			),
+			// Phase 9q-A/B: Multi-Provider-LLM-Schicht. SecretBox laed beim
+			// Konstruktor den Master-Key — wirft wenn LLM_MASTER_KEY fehlt.
+			// Daher nur instantiieren wenn wirklich gebraucht (lazy via match):
+			// Solange routing_mode='direct' ist, wird LlmRouter nie gebaut.
+			\MailPilot\Security\SecretBox::class => new \MailPilot\Security\SecretBox(),
+			\MailPilot\Repositories\LlmProviderRepository::class =>
+				new \MailPilot\Repositories\LlmProviderRepository($this->get(PDO::class)),
+			\MailPilot\Llm\Providers\AnthropicProvider::class =>
+				new \MailPilot\Llm\Providers\AnthropicProvider(
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Security\SecretBox::class),
+					$this->get(Logger::class),
+				),
+			\MailPilot\Llm\Providers\OpenAiProvider::class =>
+				new \MailPilot\Llm\Providers\OpenAiProvider(
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Security\SecretBox::class),
+					$this->get(Logger::class),
+				),
+			\MailPilot\Llm\LlmRouter::class => new \MailPilot\Llm\LlmRouter(
+				[
+					'anthropic' => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
+					'openai'    => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+				],
+				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+				$this->get(SettingsRepository::class),
+				$this->get(Logger::class),
+			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 				// Phase 9m (Marc 2026-05-21): mailpilot_root steuert die
@@ -248,6 +276,10 @@ class Kernel
 				$this->get(LookalikeDetector::class),
 				// Phase 9a: Klassifikations-Overrides nach KI-Score.
 				$this->get(ScoreOverrideService::class),
+				// Phase 9q-B (Marc 2026-05-22): optionaler Failover-Router.
+				// Aktiv wenn Setting llm.routing_mode='router'. Default 'direct'
+				// → bestehender Pfad via ClaudeProvider.
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

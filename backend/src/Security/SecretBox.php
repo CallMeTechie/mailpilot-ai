@@ -31,18 +31,46 @@ final class SecretBox
 	private const SECRET_FILE = '/run/secrets/llm_master_key';
 	private const ENV_VAR     = 'LLM_MASTER_KEY';
 
-	private readonly string $key;
+	private ?string $key = null;
 
+	/**
+	 * Phase 9q-B (Marc 2026-05-22): lazy-load. Wenn $masterKey beim Konstruktor
+	 * uebergeben wird (Tests), wird die Laenge sofort validiert. Sonst wird der
+	 * Key erst beim ersten encrypt/decrypt-Call aus /run/secrets/llm_master_key
+	 * oder env LLM_MASTER_KEY gelesen. Dadurch crasht der Kernel-Boot NICHT
+	 * wenn der Key fehlt — nur die tatsaechlich verschluesselungs-bedingten
+	 * Calls werfen.
+	 */
 	public function __construct(?string $masterKey = null)
 	{
-		$raw = $masterKey ?? self::loadKey();
-		if (strlen($raw) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
-			throw new RuntimeException(sprintf(
-				'Master-Key muss exakt %d Bytes haben (gefunden: %d)',
-				SODIUM_CRYPTO_SECRETBOX_KEYBYTES, strlen($raw)
-			));
+		if ($masterKey !== null) {
+			if (strlen($masterKey) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
+				throw new RuntimeException(sprintf(
+					'Master-Key muss exakt %d Bytes haben (gefunden: %d)',
+					SODIUM_CRYPTO_SECRETBOX_KEYBYTES, strlen($masterKey)
+				));
+			}
+			$this->key = $masterKey;
 		}
-		$this->key = $raw;
+	}
+
+	/**
+	 * Stellt sicher, dass $this->key gesetzt ist. Wirft RuntimeException
+	 * wenn weder Konstruktor-Arg, Docker-Secret-File, noch env-Var nutzbar.
+	 */
+	private function ensureKey(): string
+	{
+		if ($this->key === null) {
+			$raw = self::loadKey();
+			if (strlen($raw) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
+				throw new RuntimeException(sprintf(
+					'Master-Key muss exakt %d Bytes haben (gefunden: %d)',
+					SODIUM_CRYPTO_SECRETBOX_KEYBYTES, strlen($raw)
+				));
+			}
+			$this->key = $raw;
+		}
+		return $this->key;
 	}
 
 	/**
@@ -76,8 +104,9 @@ final class SecretBox
 	 */
 	public function encrypt(string $plaintext): string
 	{
+		$key = $this->ensureKey();
 		$nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-		$cipher = sodium_crypto_secretbox($plaintext, $nonce, $this->key);
+		$cipher = sodium_crypto_secretbox($plaintext, $nonce, $key);
 		return base64_encode($nonce . $cipher);
 	}
 
@@ -93,7 +122,7 @@ final class SecretBox
 		}
 		$nonce  = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
 		$cipher = substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-		$plain  = sodium_crypto_secretbox_open($cipher, $nonce, $this->key);
+		$plain  = sodium_crypto_secretbox_open($cipher, $nonce, $this->ensureKey());
 		if ($plain === false) {
 			throw new RuntimeException('SecretBox: Entschluesselung fehlgeschlagen (MAC mismatch oder falscher Master-Key)');
 		}
