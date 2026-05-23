@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MailPilot\Llm;
 
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\SettingsRepository;
 use Psr\Log\LoggerInterface;
@@ -34,6 +35,12 @@ final class LlmRouter
 		private readonly LlmProviderRepository $repo,
 		private readonly SettingsRepository $settings,
 		private readonly LoggerInterface $logger,
+		// Phase 9q-C (Marc 2026-05-23): wenn NormalizedRequest.modelHint leer
+		// ist, resolved der Router das Model pro (provider_id, role) aus
+		// llm_models. Bei null bleibt das alte Verhalten — Caller muss
+		// modelHint setzen. Optional damit Tests mit Mocks ohne Model-Repo
+		// weiterfunktionieren.
+		private readonly ?LlmModelRepository $models = null,
 	) {
 	}
 
@@ -67,8 +74,32 @@ final class LlmRouter
 				]);
 				continue;
 			}
+
+			// Phase 9q-C: wenn der Caller keinen modelHint gesetzt hat,
+			// resolved der Router pro Provider+Task das Model. Damit muss
+			// MailScoringService nur „score" sagen, kein „claude-haiku-4-5".
+			$effectiveRequest = $request;
+			if ($request->modelHint === '' && $this->models !== null) {
+				$modelRow = $this->models->findForProviderAndRole((string)$providerRow['id'], $taskType);
+				if ($modelRow === null) {
+					$this->logger->warning('llm.router.no_model_for_role', [
+						'provider_id' => $providerRow['id'], 'task' => $taskType,
+					]);
+					continue;
+				}
+				$effectiveRequest = new NormalizedRequest(
+					systemPrompt:   $request->systemPrompt,
+					messages:       $request->messages,
+					maxTokens:      $request->maxTokens,
+					temperature:    $request->temperature,
+					modelHint:      (string)$modelRow['model_id'],
+					responseFormat: $request->responseFormat,
+					cacheSegments:  $request->cacheSegments,
+				);
+			}
+
 			try {
-				$response = $provider->complete($request);
+				$response = $provider->complete($effectiveRequest);
 				if ($idx > 0) {
 					$this->logger->info('llm.router.failover_succeeded', [
 						'task'          => $taskType,
@@ -97,7 +128,15 @@ final class LlmRouter
 	}
 
 	/**
-	 * Liest die Provider-Chain aus den Settings + DB.
+	 * Liest die Provider-Chain aus den Settings + DB und wendet Privacy-
+	 * Mode-Filter an.
+	 *
+	 * Privacy-Modi (Phase 9q-C):
+	 *   - cloud_allowed    (default) — alle Provider in Reihenfolge.
+	 *   - local_preferred  — erst alle is_local=1, dann der Rest.
+	 *   - local_only       — nur is_local=1. Cloud-Provider werden
+	 *                        komplett entfernt; wenn alle lokalen down →
+	 *                        LlmAllProvidersDownException, KEIN Cloud-Fallback.
 	 *
 	 * @return list<array<string,mixed>>
 	 */
@@ -127,6 +166,38 @@ final class LlmRouter
 				$chain[] = $row;
 			}
 		}
-		return $chain;
+
+		// Privacy-Mode-Filter (Phase 9q-C).
+		$mode = $this->settings->getString('llm.privacy_mode', 'cloud_allowed');
+		return $this->applyPrivacyMode($chain, $mode);
+	}
+
+	/**
+	 * @param  list<array<string,mixed>> $chain
+	 * @return list<array<string,mixed>>
+	 */
+	private function applyPrivacyMode(array $chain, string $mode): array
+	{
+		switch ($mode) {
+			case 'local_only':
+				return array_values(array_filter(
+					$chain,
+					static fn(array $r): bool => (int)($r['is_local'] ?? 0) === 1,
+				));
+			case 'local_preferred':
+				$local = [];
+				$cloud = [];
+				foreach ($chain as $r) {
+					if ((int)($r['is_local'] ?? 0) === 1) {
+						$local[] = $r;
+					} else {
+						$cloud[] = $r;
+					}
+				}
+				return array_merge($local, $cloud);
+			case 'cloud_allowed':
+			default:
+				return $chain;
+		}
 	}
 }

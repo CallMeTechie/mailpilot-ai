@@ -9,8 +9,10 @@ use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\LlmRouter;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Llm\NormalizedResponse;
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Util\Uuid;
 use MailPilot\Tests\TestCase;
 use Monolog\Handler\NullHandler;
 use Monolog\Logger;
@@ -24,6 +26,7 @@ final class LlmRouterFailoverTest extends TestCase
 {
 	private const PRIMARY_ID  = '00000000-0000-4000-8000-0000000000a1';
 	private const FALLBACK_ID = '00000000-0000-4000-8000-0000000000a2';
+	private const LOCAL_ID    = '00000000-0000-4000-8000-0000000000a3';
 
 	protected function setUp(): void
 	{
@@ -50,16 +53,35 @@ final class LlmRouterFailoverTest extends TestCase
 			->execute([':k' => $key, ':v' => $value]);
 	}
 
-	private function makeRouter(LlmProvider $anthropic, LlmProvider $openai): LlmRouter
-	{
+	private function makeRouter(
+		LlmProvider $anthropic,
+		LlmProvider $openai,
+		?LlmProvider $local = null,
+		?LlmModelRepository $models = null,
+	): LlmRouter {
 		$logger = new Logger('test');
 		$logger->pushHandler(new NullHandler());
+		$providers = ['anthropic' => $anthropic, 'openai' => $openai];
+		if ($local !== null) {
+			$providers['openai_compatible'] = $local;
+		}
 		return new LlmRouter(
-			['anthropic' => $anthropic, 'openai' => $openai],
+			$providers,
 			new LlmProviderRepository($this->pdo()),
 			new SettingsRepository($this->pdo()),
 			$logger,
+			$models,
 		);
+	}
+
+	private function seedLocalProvider(): void
+	{
+		$pdo = $this->pdo();
+		$pdo->exec("DELETE FROM llm_providers WHERE id = '" . self::LOCAL_ID . "'");
+		$pdo->prepare(
+			"INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
+			 VALUES (?, 'TestLocal', 'openai_compatible', 'http://localhost:11434', 1, 1, 5)"
+		)->execute([self::LOCAL_ID]);
 	}
 
 	private function makeRequest(): NormalizedRequest
@@ -175,5 +197,104 @@ final class LlmRouterFailoverTest extends TestCase
 
 		self::assertSame('openai', $resp->providerKind);
 		self::assertSame(0, $anthropic->callCount, 'Disabled Provider darf nicht gecallt werden');
+	}
+
+	// =============================================================
+	// Phase 9q-C: Privacy-Mode + Model-Resolution
+	// =============================================================
+
+	public function testLocalOnlyFiltersAllCloudProviders(): void
+	{
+		// Chain enthaelt einen lokalen + zwei Cloud-Provider.
+		$this->seedLocalProvider();
+		$this->setSetting('llm.score.fallback_chain',
+			'["' . self::PRIMARY_ID . '","' . self::FALLBACK_ID . '","' . self::LOCAL_ID . '"]');
+		$this->setSetting('llm.privacy_mode', 'local_only');
+
+		$anthropic = $this->fakeProvider('anthropic'); // soll NICHT gerufen werden
+		$openai    = $this->fakeProvider('openai');    // soll NICHT gerufen werden
+		$local     = $this->fakeProvider('openai_compatible');
+
+		$resp = $this->makeRouter($anthropic, $openai, $local)->complete($this->makeRequest(), 'score');
+
+		self::assertSame('openai_compatible', $resp->providerKind);
+		self::assertSame(0, $anthropic->callCount, 'Cloud-Provider darf in local_only nicht gerufen werden');
+		self::assertSame(0, $openai->callCount);
+		self::assertSame(1, $local->callCount);
+	}
+
+	public function testLocalOnlyAllDownThrows(): void
+	{
+		$this->seedLocalProvider();
+		$this->setSetting('llm.score.fallback_chain',
+			'["' . self::PRIMARY_ID . '","' . self::LOCAL_ID . '"]');
+		$this->setSetting('llm.privacy_mode', 'local_only');
+
+		$anthropic = $this->fakeProvider('anthropic');                    // gefiltert weg
+		$openai    = $this->fakeProvider('openai');
+		$local     = $this->fakeProvider('openai_compatible', unavailable: true);
+
+		$this->expectException(LlmAllProvidersDownException::class);
+		$this->makeRouter($anthropic, $openai, $local)->complete($this->makeRequest(), 'score');
+	}
+
+	public function testLocalPreferredSortsLocalFirst(): void
+	{
+		// Chain ist Anthropic→OpenAI→Local. local_preferred → Local→Anthropic→OpenAI.
+		$this->seedLocalProvider();
+		$this->setSetting('llm.score.fallback_chain',
+			'["' . self::PRIMARY_ID . '","' . self::FALLBACK_ID . '","' . self::LOCAL_ID . '"]');
+		$this->setSetting('llm.privacy_mode', 'local_preferred');
+
+		$anthropic = $this->fakeProvider('anthropic');                  // wird nicht gerufen
+		$openai    = $this->fakeProvider('openai');
+		$local     = $this->fakeProvider('openai_compatible');          // wird zuerst gerufen
+
+		$resp = $this->makeRouter($anthropic, $openai, $local)->complete($this->makeRequest(), 'score');
+
+		self::assertSame('openai_compatible', $resp->providerKind, 'Lokales Modell hatte Vorrang');
+		self::assertSame(1, $local->callCount);
+		self::assertSame(0, $anthropic->callCount);
+	}
+
+	public function testModelHintResolvedFromRepoWhenEmpty(): void
+	{
+		// Test-Model in llm_models seedeen + Request mit leerem modelHint.
+		$pdo = $this->pdo();
+		$pdo->exec("DELETE FROM llm_models WHERE provider_id = '" . self::PRIMARY_ID . "'");
+		$pdo->prepare(
+			"INSERT INTO llm_models (id, provider_id, model_id, role, enabled, priority)
+			 VALUES (?, ?, 'resolved-test-model', 'score', 1, 10)"
+		)->execute([Uuid::v4(), self::PRIMARY_ID]);
+
+		$capturedHint = '';
+		$anthropic = new class('anthropic', $capturedHint) implements LlmProvider {
+			public int $callCount = 0;
+			public string $capturedHint = '';
+			public function __construct(private readonly string $k, string &$cap) {}
+			public function kind(): string { return $this->k; }
+			public function isHealthy(): bool { return true; }
+			public function complete(NormalizedRequest $request): NormalizedResponse {
+				$this->callCount++;
+				$this->capturedHint = $request->modelHint;
+				return new NormalizedResponse(
+					content: '{}', usage: ['inputTokens' => 0, 'outputTokens' => 0],
+					finishReason: 'stop', modelId: $request->modelHint, providerKind: 'anthropic',
+				);
+			}
+		};
+		$openai = $this->fakeProvider('openai');
+
+		$request = new NormalizedRequest(
+			systemPrompt: 'sys', messages: [['role' => 'user', 'content' => 'x']],
+			maxTokens: 100, temperature: 0.1, modelHint: '',  // leer!
+		);
+
+		$models = new LlmModelRepository($this->pdo());
+		$router = $this->makeRouter($anthropic, $openai, models: $models);
+		$router->complete($request, 'score');
+
+		self::assertSame('resolved-test-model', $anthropic->capturedHint,
+			'Router resolved modelHint aus llm_models wenn Request leer ist');
 	}
 }

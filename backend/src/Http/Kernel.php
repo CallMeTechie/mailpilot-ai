@@ -200,6 +200,8 @@ class Kernel
 			\MailPilot\Security\SecretBox::class => new \MailPilot\Security\SecretBox(),
 			\MailPilot\Repositories\LlmProviderRepository::class =>
 				new \MailPilot\Repositories\LlmProviderRepository($this->get(PDO::class)),
+			\MailPilot\Repositories\LlmModelRepository::class =>
+				new \MailPilot\Repositories\LlmModelRepository($this->get(PDO::class)),
 			\MailPilot\Llm\Providers\AnthropicProvider::class =>
 				new \MailPilot\Llm\Providers\AnthropicProvider(
 					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
@@ -212,14 +214,23 @@ class Kernel
 					$this->get(\MailPilot\Security\SecretBox::class),
 					$this->get(Logger::class),
 				),
+			// Phase 9q-D: lokale + Ollama/LM-Studio/llama.cpp via OpenAI-API
+			\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class =>
+				new \MailPilot\Llm\Providers\OpenAiCompatibleProvider(
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Security\SecretBox::class),
+					$this->get(Logger::class),
+				),
 			\MailPilot\Llm\LlmRouter::class => new \MailPilot\Llm\LlmRouter(
 				[
-					'anthropic' => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
-					'openai'    => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+					'anthropic'         => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
+					'openai'            => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+					'openai_compatible' => $this->get(\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class),
 				],
 				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 				$this->get(SettingsRepository::class),
 				$this->get(Logger::class),
+				$this->get(\MailPilot\Repositories\LlmModelRepository::class),
 			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
