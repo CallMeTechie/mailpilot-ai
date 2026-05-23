@@ -538,7 +538,9 @@ final class MailScoringService
 		if ($this->llmProviders === null) {
 			return null;
 		}
-		foreach ($this->llmProviders->listAll(includeDisabled: false) as $p) {
+		// includeDisabled=true: AnthropicClient läuft im direct-Mode unabhängig
+		// vom enabled-Flag (der Flag steuert nur die Failover-Chain-Auswahl).
+		foreach ($this->llmProviders->listAll(includeDisabled: true) as $p) {
 			if (($p['kind'] ?? null) === 'anthropic') {
 				return (string)$p['id'];
 			}
