@@ -43,6 +43,10 @@ final class LlmRouterFailoverTest extends TestCase
 
 		$this->setSetting('llm.score.fallback_chain',
 			'["' . self::PRIMARY_ID . '","' . self::FALLBACK_ID . '"]');
+		// Phase 9q-E (Marc 2026-05-23): privacy_mode-Reset auf Default —
+		// testLocalOnly*-Tests setzen 'local_only', das leakt sonst in
+		// nachfolgende Tests und filtert alle Cloud-Provider weg.
+		$this->setSetting('llm.privacy_mode', 'cloud_allowed');
 	}
 
 	private function setSetting(string $key, string $value): void

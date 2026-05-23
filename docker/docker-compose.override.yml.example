@@ -1,0 +1,37 @@
+# Phase 9q-Drift (Marc 2026-05-23) — Dev-Override-Template fuer Entwickler-
+# Setups, die einen `nginx-proxy`-Container im Netzwerk haben (z.B. via
+# jwilder/nginx-proxy oder dem JrCs-Companion fuer Let's Encrypt).
+#
+# Nutzung:
+#   cp docker/docker-compose.override.yml.example docker/docker-compose.override.yml
+#   # Dann VIRTUAL_HOST und LETSENCRYPT_HOST in env-Vars oder hier hardcoden.
+#   docker compose up -d   # Override wird automatisch gemerged
+#
+# Wenn Du keinen nginx-proxy benutzt: einfach NICHT kopieren. Der NAS-Pfad
+# laeuft ueber Port-Mappings + Synology DSM Reverse Proxy ohne external
+# nginx-proxy-Container.
+
+services:
+  backend:
+    environment:
+      VIRTUAL_HOST: ${API_VIRTUAL_HOST:-api.mailpilot.local}
+      VIRTUAL_PORT: "80"
+      LETSENCRYPT_HOST: ${API_VIRTUAL_HOST:-api.mailpilot.local}
+    networks:
+      - proxy
+    # Port-Mapping nicht noetig, wenn nginx-proxy uebernimmt:
+    ports: !reset []
+
+  admin:
+    environment:
+      VIRTUAL_HOST: ${ADMIN_VIRTUAL_HOST:-admin.mailpilot.local}
+      VIRTUAL_PORT: "80"
+      LETSENCRYPT_HOST: ${ADMIN_VIRTUAL_HOST:-admin.mailpilot.local}
+    networks:
+      - proxy
+    ports: !reset []
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-nginx-proxy}

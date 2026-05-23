@@ -35,7 +35,11 @@ services:
       - ./var/log:/app/var/log
     networks:
       - mailpilot
-      - proxy
+    # Phase 9q-Drift (Marc 2026-05-23): kein external nginx-proxy mehr im
+    # Repo. NAS nutzt Synology DSM Reverse Proxy mit Port-Mapping; Dev-
+    # Setups mit nginx-proxy verwenden docker-compose.override.yml.example.
+    ports:
+      - "${BACKEND_PORT:-19080}:80"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -136,7 +140,9 @@ services:
       LLM_MASTER_KEY: ${LLM_MASTER_KEY:-}
     networks:
       - mailpilot
-      - proxy
+    # Phase 9q-Drift (Marc 2026-05-23): Port-Mapping fuer NAS-DSM-Proxy.
+    ports:
+      - "${ADMIN_PORT:-19081}:80"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -146,9 +152,6 @@ services:
 networks:
   mailpilot:
     driver: bridge
-  proxy:
-    external: true
-    name: nginx-proxy
 
 volumes:
   mailpilot-db:

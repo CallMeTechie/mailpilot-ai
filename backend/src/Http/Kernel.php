@@ -221,11 +221,27 @@ class Kernel
 					$this->get(\MailPilot\Security\SecretBox::class),
 					$this->get(Logger::class),
 				),
+			// Phase 9q-E: Cloud-Provider mit eigener API-Shape (Gemini)
+			// + eigenem kind fuer Display/Pricing (Mistral).
+			\MailPilot\Llm\Providers\GeminiProvider::class =>
+				new \MailPilot\Llm\Providers\GeminiProvider(
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Security\SecretBox::class),
+					$this->get(Logger::class),
+				),
+			\MailPilot\Llm\Providers\MistralProvider::class =>
+				new \MailPilot\Llm\Providers\MistralProvider(
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Security\SecretBox::class),
+					$this->get(Logger::class),
+				),
 			\MailPilot\Llm\LlmRouter::class => new \MailPilot\Llm\LlmRouter(
 				[
 					'anthropic'         => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
 					'openai'            => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
 					'openai_compatible' => $this->get(\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class),
+					'gemini'            => $this->get(\MailPilot\Llm\Providers\GeminiProvider::class),
+					'mistral'           => $this->get(\MailPilot\Llm\Providers\MistralProvider::class),
 				],
 				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 				$this->get(SettingsRepository::class),
