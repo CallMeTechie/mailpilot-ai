@@ -12,6 +12,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	<h1>LLM-Provider</h1>
 	<p class="muted">Multi-Provider-Inferenz mit Failover-Chain. Cloud + lokale Modelle (Ollama/LM-Studio). Privacy-Mode steuert ob Mails das Netz verlassen duerfen.</p>
 	<div class="form-actions">
+		<a class="btn btn-secondary" href="/admin/llm/usage">Usage &amp; Kosten →</a>
 		<a class="btn btn-secondary" href="/admin/llm/routing">Routing &amp; Privacy-Mode →</a>
 	</div>
 </header>

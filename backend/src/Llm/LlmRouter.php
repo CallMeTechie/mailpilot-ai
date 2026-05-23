@@ -41,6 +41,9 @@ final class LlmRouter
 		// modelHint setzen. Optional damit Tests mit Mocks ohne Model-Repo
 		// weiterfunktionieren.
 		private readonly ?LlmModelRepository $models = null,
+		// Phase 9q-G (Marc 2026-05-23): per-Call Audit + Health-Update.
+		// Optional — wenn null, kein Logging (Backwards-compat fuer Tests).
+		private readonly ?LlmCallLogger $callLogger = null,
 	) {
 	}
 
@@ -98,8 +101,10 @@ final class LlmRouter
 				);
 			}
 
+			$start = microtime(true);
 			try {
 				$response = $provider->complete($effectiveRequest);
+				$latencyMs = (int)((microtime(true) - $start) * 1000);
 				if ($idx > 0) {
 					$this->logger->info('llm.router.failover_succeeded', [
 						'task'          => $taskType,
@@ -107,8 +112,12 @@ final class LlmRouter
 						'failover_step' => $idx,
 					]);
 				}
+				$this->callLogger?->logSuccess(
+					(string)$providerRow['id'], $taskType, $response, $latencyMs,
+				);
 				return $response;
 			} catch (LlmOverloadedException | LlmUnavailableException $e) {
+				$latencyMs = (int)((microtime(true) - $start) * 1000);
 				$lastException = $e;
 				$this->logger->warning('llm.router.provider_failed', [
 					'task'    => $taskType,
@@ -116,6 +125,11 @@ final class LlmRouter
 					'err'     => $e->getMessage(),
 					'will_try_next' => $idx < count($chain) - 1,
 				]);
+				$this->callLogger?->logFailure(
+					(string)$providerRow['id'], $taskType, $effectiveRequest->modelHint,
+					$e instanceof LlmOverloadedException ? 'overloaded' : 'unavailable',
+					$e->getMessage(), $latencyMs,
+				);
 				continue;
 			}
 			// Andere Exceptions (Auth, Bad-Request) propagieren — KEIN Failover.

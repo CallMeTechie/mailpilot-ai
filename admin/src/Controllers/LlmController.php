@@ -5,6 +5,7 @@ namespace MailPilot\Admin\Controllers;
 
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\NormalizedRequest;
+use MailPilot\Repositories\LlmCallLogRepository;
 use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\SettingsRepository;
@@ -269,6 +270,40 @@ final class LlmController extends BaseController
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');
 		$this->redirect('/admin/llm/routing');
+	}
+
+	public function showUsage(array $params): void
+	{
+		$days = max(1, min(365, (int)($_GET['days'] ?? 30)));
+		$log  = $this->kernel->get(LlmCallLogRepository::class);
+		$providers = $this->kernel->get(LlmProviderRepository::class)->listAll(includeDisabled: true);
+
+		// Provider-ID → Display-Name fuer Tabellen-Joins ohne SQL.
+		$nameById = [];
+		foreach ($providers as $p) {
+			$nameById[(string)$p['id']] = (string)$p['name'];
+		}
+
+		$perProvider = $log->aggregateByProvider($days);
+		foreach ($perProvider as &$row) {
+			$row['provider_name'] = $nameById[$row['provider_id']] ?? '(unbekannt)';
+		}
+		unset($row);
+
+		$perModel = $log->aggregateByProviderModel($days);
+		foreach ($perModel as &$row) {
+			$row['provider_name'] = $nameById[(string)$row['provider_id']] ?? '(unbekannt)';
+		}
+		unset($row);
+
+		$this->render('llm/usage', [
+			'days'        => $days,
+			'perProvider' => $perProvider,
+			'perModel'    => $perModel,
+			'totalCalls'  => array_sum(array_column($perProvider, 'calls')),
+			'totalErrors' => array_sum(array_column($perProvider, 'errors')),
+			'totalUsd'    => array_sum(array_column($perProvider, 'total_usd')),
+		]);
 	}
 
 	/**

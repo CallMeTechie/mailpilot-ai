@@ -202,6 +202,15 @@ class Kernel
 				new \MailPilot\Repositories\LlmProviderRepository($this->get(PDO::class)),
 			\MailPilot\Repositories\LlmModelRepository::class =>
 				new \MailPilot\Repositories\LlmModelRepository($this->get(PDO::class)),
+			\MailPilot\Repositories\LlmCallLogRepository::class =>
+				new \MailPilot\Repositories\LlmCallLogRepository($this->get(PDO::class)),
+			\MailPilot\Llm\LlmCallLogger::class =>
+				new \MailPilot\Llm\LlmCallLogger(
+					$this->get(\MailPilot\Repositories\LlmCallLogRepository::class),
+					$this->get(\MailPilot\Repositories\LlmModelRepository::class),
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(Logger::class),
+				),
 			\MailPilot\Llm\Providers\AnthropicProvider::class =>
 				new \MailPilot\Llm\Providers\AnthropicProvider(
 					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
@@ -247,6 +256,7 @@ class Kernel
 				$this->get(SettingsRepository::class),
 				$this->get(Logger::class),
 				$this->get(\MailPilot\Repositories\LlmModelRepository::class),
+				$this->get(\MailPilot\Llm\LlmCallLogger::class),
 			),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
