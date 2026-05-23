@@ -90,6 +90,8 @@ $routes = [
 	// Phase 9q-F (Marc 2026-05-23): LLM-Provider-Verwaltung
 	['GET',  '#^/admin/llm$#',                            LlmController::class, 'index'],
 	['GET',  '#^/admin/llm/usage$#',                      LlmController::class, 'showUsage'],
+	['GET',  '#^/admin/llm/golden$#',                     LlmController::class, 'showGolden'],
+	['POST', '#^/admin/llm/golden/run$#',                 LlmController::class, 'runGolden'],
 	['GET',  '#^/admin/llm/routing$#',                    LlmController::class, 'showRouting'],
 	['POST', '#^/admin/llm/routing$#',                    LlmController::class, 'saveRouting'],
 	['POST', '#^/admin/llm/models/(?P<mid>[^/]+)$#',      LlmController::class, 'saveModel'],

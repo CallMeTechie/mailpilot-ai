@@ -204,6 +204,22 @@ class Kernel
 				new \MailPilot\Repositories\LlmModelRepository($this->get(PDO::class)),
 			\MailPilot\Repositories\LlmCallLogRepository::class =>
 				new \MailPilot\Repositories\LlmCallLogRepository($this->get(PDO::class)),
+			\MailPilot\Repositories\LlmGoldenRepository::class =>
+				new \MailPilot\Repositories\LlmGoldenRepository($this->get(PDO::class)),
+			\MailPilot\Llm\GoldenSetRunner::class =>
+				new \MailPilot\Llm\GoldenSetRunner(
+					$this->get(\MailPilot\Repositories\LlmGoldenRepository::class),
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(\MailPilot\Repositories\LlmModelRepository::class),
+					[
+						'anthropic'         => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
+						'openai'            => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+						'openai_compatible' => $this->get(\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class),
+						'gemini'            => $this->get(\MailPilot\Llm\Providers\GeminiProvider::class),
+						'mistral'           => $this->get(\MailPilot\Llm\Providers\MistralProvider::class),
+					],
+					$this->get(Logger::class),
+				),
 			\MailPilot\Llm\LlmCallLogger::class =>
 				new \MailPilot\Llm\LlmCallLogger(
 					$this->get(\MailPilot\Repositories\LlmCallLogRepository::class),

@@ -5,7 +5,9 @@ namespace MailPilot\Admin\Controllers;
 
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\NormalizedRequest;
+use MailPilot\Llm\GoldenSetRunner;
 use MailPilot\Repositories\LlmCallLogRepository;
+use MailPilot\Repositories\LlmGoldenRepository;
 use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\SettingsRepository;
@@ -270,6 +272,55 @@ final class LlmController extends BaseController
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');
 		$this->redirect('/admin/llm/routing');
+	}
+
+	public function showGolden(array $params): void
+	{
+		$goldenRepo = $this->kernel->get(LlmGoldenRepository::class);
+		$providers  = $this->kernel->get(LlmProviderRepository::class)->listAll(includeDisabled: false);
+		$modelsRepo = $this->kernel->get(LlmModelRepository::class);
+
+		// Provider → liste verfuegbare Modelle pro Rolle fuer den Trigger-Button.
+		$runnableTargets = [];
+		foreach ($providers as $p) {
+			foreach (['score', 'inference'] as $role) {
+				$model = $modelsRepo->findForProviderAndRole((string)$p['id'], $role);
+				if ($model !== null) {
+					$runnableTargets[] = [
+						'provider_id'   => (string)$p['id'],
+						'provider_name' => (string)$p['name'],
+						'model_id_str'  => (string)$model['model_id'],
+						'role'          => $role,
+					];
+				}
+			}
+		}
+
+		$this->render('llm/golden', [
+			'set'              => $goldenRepo->listSet(includeDisabled: true),
+			'recentRuns'       => $goldenRepo->listRecentRuns(30),
+			'runnableTargets'  => $runnableTargets,
+			'csrfToken'        => $this->csrfToken(),
+		]);
+	}
+
+	public function runGolden(array $params): void
+	{
+		$this->verifyCsrf();
+		$providerId = (string)($_POST['provider_id'] ?? '');
+		$role       = (string)($_POST['role'] ?? 'score');
+		if (!in_array($role, ['score', 'summary', 'draft', 'inference'], true)) {
+			$role = 'score';
+		}
+
+		try {
+			$runner = $this->kernel->get(GoldenSetRunner::class);
+			$runId = $runner->runForModel($providerId, $role);
+			$this->flash('success', "Run abgeschlossen — siehe Details unten (run_id={$runId}).");
+		} catch (Throwable $e) {
+			$this->flash('error', 'Run fehlgeschlagen: ' . $e->getMessage());
+		}
+		$this->redirect('/admin/llm/golden');
 	}
 
 	public function showUsage(array $params): void
