@@ -1,10 +1,10 @@
--- Phase 9q B7 (Marc 2026-05-23): Soft-Delete fuer prompt_versions.
+-- Phase 9q B7 (Marc 2026-05-23): Soft-Delete für prompt_versions.
 --
--- Bisher konnten verworfene Prompt-Versionen nur per SQL geloescht
--- werden. Soft-Delete ueber Admin-UI: deleted_at IS NOT NULL filtert
--- sie aus der Liste, history bleibt fuer audit_log-Trace.
+-- Bisher konnten verworfene Prompt-Versionen nur per SQL gelöscht
+-- werden. Soft-Delete über Admin-UI: deleted_at IS NOT NULL filtert
+-- sie aus der Liste, history bleibt für audit_log-Trace.
 --
--- Aktive Prompt-Version (active=1) kann nicht geloescht werden — der
+-- Aktive Prompt-Version (active=1) kann nicht gelöscht werden — der
 -- Controller validiert.
 
 ALTER TABLE prompt_versions

@@ -2,7 +2,7 @@
 <div class="breadcrumb"><a href="/admin/prompts">← Prompts</a></div>
 <h1><?= $prompt ? 'Prompt ansehen' : 'Neue Prompt-Version' ?></h1>
 
-<?php /* Phase 9q B9 (Marc 2026-05-23): Field-Hints fuer jedes Eingabefeld. */ ?>
+<?php /* Phase 9q B9 (Marc 2026-05-23): Field-Hints für jedes Eingabefeld. */ ?>
 <form method="POST" action="/admin/prompts" class="form-stack">
 	<input type="hidden" name="_csrf" value="<?= $this->csrfToken() ?>">
 
@@ -14,8 +14,8 @@
 			<option value="P-REPLY" <?= ($prompt['key_name'] ?? '') === 'P-REPLY' ? 'selected' : '' ?>>P-REPLY</option>
 		</select>
 		<small class="muted">
-			<strong>P-SCORE</strong>: Triage-Batch (Haiku, Label+Priority).
-			<strong>P-SUMMARY</strong>: ein-Mail-Zusammenfassung (Opus).
+			<strong>P-SCORE</strong>: Triage-Batch (Haiku, Label + Priority).
+			<strong>P-SUMMARY</strong>: Ein-Mail-Zusammenfassung (Opus).
 			<strong>P-REPLY</strong>: Reply-Draft (Opus).
 			Jeder Key kann genau eine aktive Version haben.
 		</small>
@@ -24,7 +24,7 @@
 	<label class="settings-field">
 		<span>Version</span>
 		<input type="text" name="version" value="<?= htmlspecialchars($prompt['version'] ?? 'v1.1') ?>" required <?= $prompt ? 'disabled' : '' ?>>
-		<small class="muted">Freitext, z.B. <code>v1.7</code> oder <code>v2.0-experimental</code>. UNIQUE pro (key_name, version) — Duplikat wird vom DB-Index abgewiesen.</small>
+		<small class="muted">Freitext, z. B. <code>v1.7</code> oder <code>v2.0-experimental</code>. UNIQUE pro (key_name, version) — Duplikat wird vom DB-Index abgewiesen.</small>
 	</label>
 
 	<label class="settings-field">
@@ -37,19 +37,19 @@
 			<option value="claude-sonnet-4-6">Mittlerer Tier — Allgemein</option>
 			<option value="claude-opus-4-7">Höchste Qualität — Summary / Reply</option>
 		</datalist>
-		<small class="muted">Modell-ID der LLM-API (Anthropic). Bei Router-Modus uebernimmt die Provider-Chain aus <a href="/admin/llm/routing">/admin/llm/routing</a> — dieses Feld ist dann nur Fallback fuer direct-Modus.</small>
+		<small class="muted">Modell-ID der LLM-API (Anthropic). Bei Router-Modus übernimmt die Provider-Chain aus <a href="/admin/llm/routing">/admin/llm/routing</a> — dieses Feld ist dann nur Fallback für direct-Modus.</small>
 	</label>
 
 	<div class="field-row">
 		<label class="settings-field">
 			<span>Max Tokens</span>
 			<input type="number" name="max_tokens" value="<?= $prompt['max_tokens'] ?? 2000 ?>" required <?= $prompt ? 'disabled' : '' ?>>
-			<small class="muted">Obergrenze fuer Output-Tokens pro Call. P-SCORE: 2000 (Batch). P-SUMMARY: 400. P-REPLY: 800. Hoeher = teurer + langsamer.</small>
+			<small class="muted">Obergrenze für Output-Tokens pro Call. P-SCORE: 2000 (Batch). P-SUMMARY: 400. P-REPLY: 800. Höher = teurer + langsamer.</small>
 		</label>
 		<label class="settings-field">
 			<span>Temperature</span>
 			<input type="number" name="temperature" step="0.01" min="0" max="1" value="<?= $prompt['temperature'] ?? 0.1 ?>" required <?= $prompt ? 'disabled' : '' ?>>
-			<small class="muted">Determinismus: 0.0 = identisch, 1.0 = kreativ. Scoring: 0.0-0.1, Summary: 0.1-0.2, Reply: 0.3-0.5. Werte &gt; 0.7 verfaelschen JSON-Antworten.</small>
+			<small class="muted">Determinismus: 0.0 = identisch, 1.0 = kreativ. Scoring: 0.0-0.1, Summary: 0.1-0.2, Reply: 0.3-0.5. Werte &gt; 0.7 verfälschen JSON-Antworten.</small>
 		</label>
 	</div>
 
@@ -62,13 +62,13 @@
 	<label class="settings-field">
 		<span>User Template</span>
 		<textarea name="user_template" rows="8" <?= $prompt ? 'disabled' : '' ?>><?= htmlspecialchars($prompt['user_template'] ?? '') ?></textarea>
-		<small class="muted">Optional. Falls leer wird der Default-Render (From/Subject/Body) verwendet. Platzhalter <code>{{from}}</code>, <code>{{subject}}</code>, <code>{{body}}</code> verfuegbar.</small>
+		<small class="muted">Optional. Falls leer wird der Default-Render (From/Subject/Body) verwendet. Platzhalter <code>{{from}}</code>, <code>{{subject}}</code>, <code>{{body}}</code> verfügbar.</small>
 	</label>
 
 	<?php if (!$prompt): ?>
 		<div class="form-actions">
 			<button type="submit" class="btn btn-primary">Anlegen (inaktiv)</button>
 		</div>
-		<p class="muted"><small>Neue Versionen werden <strong>inaktiv</strong> erstellt. Aktivierung erfolgt aus der Liste; dabei wird der Cache fuer den Key invalidiert.</small></p>
+		<p class="muted"><small>Neue Versionen werden <strong>inaktiv</strong> erstellt. Aktivierung erfolgt aus der Liste; dabei wird der Cache für den Key invalidiert.</small></p>
 	<?php endif; ?>
 </form>

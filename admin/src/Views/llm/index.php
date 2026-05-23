@@ -10,7 +10,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 
 <header class="page-head">
 	<h1>LLM-Provider</h1>
-	<p class="muted">Multi-Provider-Inferenz mit Failover-Chain. Cloud + lokale Modelle (Ollama/LM-Studio). Privacy-Mode steuert ob Mails das Netz verlassen duerfen.</p>
+	<p class="muted">Multi-Provider-Inferenz mit Failover-Chain. Cloud + lokale Modelle (Ollama/LM-Studio). Privacy-Mode steuert ob Mails das Netz verlassen dürfen.</p>
 	<div class="form-actions">
 		<a class="btn btn-secondary" href="/admin/llm/usage">Usage &amp; Kosten →</a>
 		<a class="btn btn-secondary" href="/admin/llm/golden">Golden-Set Quality →</a>
@@ -41,7 +41,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 				<td><?= ((int)$p['is_local'] === 1) ? '✓ ja' : '–' ?></td>
 				<td>
 					<?php if ($p['has_api_key']): ?>
-						<span class="badge badge-ok">verschluesselt</span>
+						<span class="badge badge-ok">verschlüsselt</span>
 					<?php elseif (!empty($p['api_key_env_fallback'])): ?>
 						<span class="badge">env: <?= $h((string)$p['api_key_env_fallback']) ?></span>
 					<?php else: ?>
@@ -57,12 +57,15 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 					<?php endif; ?>
 				</td>
 				<td class="actions">
-					<a class="btn btn-secondary btn-sm" href="/admin/llm/<?= $h((string)$p['id']) ?>">Bearbeiten</a>
+					<?php /* Phase 9q B-Fix (Marc 2026-05-23): Text-Buttons → Icon-Buttons. */ ?>
+					<a class="btn btn-secondary btn-sm" href="/admin/llm/<?= $h((string)$p['id']) ?>" title="Bearbeiten" aria-label="Provider bearbeiten">✎</a>
 					<form method="post" action="/admin/llm/<?= $h((string)$p['id']) ?>/toggle" style="display:inline">
 						<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
-						<button class="btn btn-sm" type="submit">
-							<?= (int)$p['enabled'] === 1 ? 'Deaktivieren' : 'Aktivieren' ?>
-						</button>
+						<?php if ((int)$p['enabled'] === 1): ?>
+							<button class="btn btn-sm" type="submit" title="Deaktivieren" aria-label="Provider deaktivieren">⏻</button>
+						<?php else: ?>
+							<button class="btn btn-sm" type="submit" title="Aktivieren" aria-label="Provider aktivieren">▶</button>
+						<?php endif; ?>
 					</form>
 				</td>
 			</tr>

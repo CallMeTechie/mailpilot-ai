@@ -25,7 +25,7 @@ final class PromptController extends BaseController
 
 	/**
 	 * Phase 9q B7 (Marc 2026-05-23): Soft-Delete einer Prompt-Version.
-	 * Aktive Versionen koennen nicht geloescht werden.
+	 * Aktive Versionen können nicht gelöscht werden.
 	 */
 	public function delete(array $params): void
 	{
@@ -41,7 +41,7 @@ final class PromptController extends BaseController
 			return;
 		}
 		if ((int)$row['active'] === 1) {
-			$this->flash('error', 'Aktive Prompt-Version kann nicht geloescht werden — zuerst andere Version aktivieren.');
+			$this->flash('error', 'Aktive Prompt-Version kann nicht gelöscht werden — zuerst andere Version aktivieren.');
 			$this->redirect('/admin/prompts');
 			return;
 		}
@@ -51,7 +51,7 @@ final class PromptController extends BaseController
 		$pdo->prepare('INSERT INTO audit_log (event, entity, entity_id) VALUES ("admin.prompt.delete", "prompt", :id)')
 			->execute([':id' => $params['id']]);
 
-		$this->flash('success', 'Prompt-Version geloescht (Soft-Delete).');
+		$this->flash('success', 'Prompt-Version gelöscht (Soft-Delete).');
 		$this->redirect('/admin/prompts');
 	}
 

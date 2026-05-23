@@ -16,10 +16,10 @@ use PDO;
 use Throwable;
 
 /**
- * Phase 9q-F (Marc 2026-05-23) — Admin-UI fuer LLM-Provider-Verwaltung.
+ * Phase 9q-F (Marc 2026-05-23) — Admin-UI für LLM-Provider-Verwaltung.
  *
  * Kapselt alle Operationen zur Multi-Provider-Schicht in einem Controller
- * (Marc-Wunsch: ein Admin-Surface fuer LLM, nicht 3 separate). Methoden:
+ * (Marc-Wunsch: ein Admin-Surface für LLM, nicht 3 separate). Methoden:
  *
  *   index           — Liste aller Provider + ihrer Modelle
  *   edit            — Provider-Edit-Form
@@ -280,7 +280,7 @@ final class LlmController extends BaseController
 		$providers  = $this->kernel->get(LlmProviderRepository::class)->listAll(includeDisabled: false);
 		$modelsRepo = $this->kernel->get(LlmModelRepository::class);
 
-		// Provider → liste verfuegbare Modelle pro Rolle fuer den Trigger-Button.
+		// Provider → liste verfügbare Modelle pro Rolle für den Trigger-Button.
 		$runnableTargets = [];
 		foreach ($providers as $p) {
 			foreach (['score', 'inference'] as $role) {
@@ -333,7 +333,7 @@ final class LlmController extends BaseController
 		}
 		$repo = $this->kernel->get(LlmGoldenRepository::class);
 		$ok = $repo->deleteRun($runId);
-		$this->flash($ok ? 'success' : 'error', $ok ? 'Run geloescht.' : 'Run nicht gefunden.');
+		$this->flash($ok ? 'success' : 'error', $ok ? 'Run gelöscht.' : 'Run nicht gefunden.');
 		$this->redirect('/admin/llm/golden');
 	}
 
@@ -344,7 +344,7 @@ final class LlmController extends BaseController
 		$repo = $this->kernel->get(LlmGoldenRepository::class);
 		$n = $repo->deleteRunsOlderThan($days);
 		$suffix = $n === 1 ? '' : 's';
-		$this->flash('success', "{$n} Run{$suffix} aelter als {$days}d geloescht.");
+		$this->flash('success', "{$n} Run{$suffix} älter als {$days}d gelöscht.");
 		$this->redirect('/admin/llm/golden');
 	}
 
@@ -354,7 +354,7 @@ final class LlmController extends BaseController
 		$log  = $this->kernel->get(LlmCallLogRepository::class);
 		$providers = $this->kernel->get(LlmProviderRepository::class)->listAll(includeDisabled: true);
 
-		// Provider-ID → Display-Name fuer Tabellen-Joins ohne SQL.
+		// Provider-ID → Display-Name für Tabellen-Joins ohne SQL.
 		$nameById = [];
 		foreach ($providers as $p) {
 			$nameById[(string)$p['id']] = (string)$p['name'];
@@ -372,13 +372,24 @@ final class LlmController extends BaseController
 		}
 		unset($row);
 
+		// Phase 9q B5-Fix (Marc 2026-05-23): USD-Aggregat aus llm_call_log
+		// in EUR konvertieren — konsistent zu /admin/usage und /admin/settings/budgets.
+		// FX-Rate per Setting; Default 0.92 (Stand Q2/2026).
+		$settings = $this->kernel->get(\MailPilot\Repositories\SettingsRepository::class);
+		$usdToEur = (float)$settings->getString('pricing.usd_to_eur_rate', '0.92');
+		if ($usdToEur <= 0.0) {
+			$usdToEur = 0.92;
+		}
+		$totalUsd = array_sum(array_column($perProvider, 'total_usd'));
+
 		$this->render('llm/usage', [
 			'days'        => $days,
 			'perProvider' => $perProvider,
 			'perModel'    => $perModel,
 			'totalCalls'  => array_sum(array_column($perProvider, 'calls')),
 			'totalErrors' => array_sum(array_column($perProvider, 'errors')),
-			'totalUsd'    => array_sum(array_column($perProvider, 'total_usd')),
+			'totalEur'    => $totalUsd * $usdToEur,
+			'usdToEur'    => $usdToEur,
 		]);
 	}
 

@@ -56,7 +56,7 @@ final class GoldenSetRunner
 		private readonly LoggerInterface $log,
 		// Phase 9q B3 (Marc 2026-05-23): Logger optional. Wenn gesetzt,
 		// landen auch Test-Calls im llm_call_log → Usage-Dashboard zeigt
-		// die Cost von Golden-Runs.
+		// die Kosten von Golden-Runs.
 		private readonly ?LlmCallLogger $callLogger = null,
 	) {
 	}
@@ -129,7 +129,7 @@ final class GoldenSetRunner
 					$predLabel, $predPriority, $lat, $labelOk, $priorityOk,
 				);
 				// Phase 9q B3: auch im llm_call_log persistieren, damit
-				// Test-Runs im Usage/Cost-Dashboard auftauchen.
+				// Test-Runs im Usage-/Kosten-Dashboard auftauchen.
 				$this->callLogger?->logSuccess($providerId, $role, $resp, $lat);
 			} catch (Throwable $e) {
 				$lat = (int)((microtime(true) - $start) * 1000);

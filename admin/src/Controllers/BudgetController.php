@@ -125,14 +125,14 @@ final class BudgetController extends BaseController
 
 	/**
 	 * Phase 9q B8 (Marc 2026-05-23): Hartes Delete einer Pricing-Row.
-	 * UI bestaetigt via JS-confirm vor Submit. Audit-Trail in audit_log.
+	 * UI bestätigt via JS-confirm vor Submit. Audit-Trail in audit_log.
 	 */
 	public function deletePricing(array $params): void
 	{
 		$this->verifyCsrf();
 		$model = trim((string)($_POST['model'] ?? ''));
 		if ($model === '') {
-			$this->flash('error', 'Kein Modell-Bezeichner uebergeben.');
+			$this->flash('error', 'Kein Modell-Bezeichner übergeben.');
 			$this->redirect('/admin/settings/budgets');
 			return;
 		}
@@ -144,7 +144,7 @@ final class BudgetController extends BaseController
 			->prepare('INSERT INTO audit_log (event, entity, entity_id, meta_json) VALUES ("admin.pricing.delete", "model_pricing", :id, :m)')
 			->execute([':id' => $model, ':m' => json_encode(['deleted' => $ok], JSON_UNESCAPED_UNICODE)]);
 
-		$this->flash($ok ? 'success' : 'error', $ok ? "Pricing fuer '{$model}' geloescht." : "Pricing fuer '{$model}' nicht gefunden.");
+		$this->flash($ok ? 'success' : 'error', $ok ? "Pricing für '{$model}' gelöscht." : "Pricing für '{$model}' nicht gefunden.");
 		$this->redirect('/admin/settings/budgets');
 	}
 

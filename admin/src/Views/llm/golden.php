@@ -103,9 +103,9 @@ $pct = fn(int $correct, int $total): string => $total > 0
 						<?php endif; ?>
 					</td>
 					<td>
-						<form method="post" action="/admin/llm/golden/<?= $h((string)$r['id']) ?>/delete" style="display:inline" onsubmit="return confirm('Run wirklich loeschen?');">
+						<form method="post" action="/admin/llm/golden/<?= $h((string)$r['id']) ?>/delete" style="display:inline" onsubmit="return confirm('Run wirklich löschen?');">
 							<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
-							<button type="submit" class="btn btn-sm" title="Run loeschen">×</button>
+							<button type="submit" class="btn btn-sm" title="Run löschen">×</button>
 						</form>
 					</td>
 				</tr>
@@ -114,11 +114,11 @@ $pct = fn(int $correct, int $total): string => $total > 0
 		</table>
 
 		<!-- Bulk-Purge (Phase 9q B2) -->
-		<form method="post" action="/admin/llm/golden/purge" onsubmit="return confirm('Alle Runs aelter als ' + this.days.value + ' Tagen loeschen?');" class="form-inline" style="margin-top: var(--mp-sp-3)">
+		<form method="post" action="/admin/llm/golden/purge" onsubmit="return confirm('Alle Runs älter als ' + this.days.value + ' Tagen löschen?');" class="form-inline" style="margin-top: var(--mp-sp-3)">
 			<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
-			<label>Aelter als
+			<label>Älter als
 				<input type="number" name="days" value="30" min="1" max="365" style="width:5em">
-				Tage loeschen
+				Tage löschen
 			</label>
 			<button type="submit" class="btn btn-secondary btn-sm">Bulk-Cleanup</button>
 		</form>
@@ -126,7 +126,7 @@ $pct = fn(int $correct, int $total): string => $total > 0
 </section>
 
 <script>
-// Phase 9q B1 (Marc 2026-05-23): Loading-State fuer Golden-Test-Submit.
+// Phase 9q B1 (Marc 2026-05-23): Loading-State für Golden-Test-Submit.
 // Run dauert 10-30s — ohne Feedback denkt User es passiert nichts.
 function mpGoldenRunSubmit(form) {
 	const allButtons = document.querySelectorAll('form[action="/admin/llm/golden/run"] button[type=submit]');

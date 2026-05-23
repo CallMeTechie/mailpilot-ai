@@ -127,8 +127,8 @@ final class LlmGoldenRepository
 	}
 
 	/**
-	 * Phase 9q B2 (Marc 2026-05-23): einzelnen Run loeschen. CASCADE
-	 * raeumt llm_golden_run_detail mit.
+	 * Phase 9q B2 (Marc 2026-05-23): einzelnen Run löschen. CASCADE
+	 * räumt llm_golden_run_detail mit.
 	 */
 	public function deleteRun(string $runId): bool
 	{
@@ -138,8 +138,8 @@ final class LlmGoldenRepository
 	}
 
 	/**
-	 * Bulk-Cleanup: alle Runs aelter als N Tage loeschen.
-	 * Returnt Anzahl geloeschter Rows.
+	 * Bulk-Cleanup: alle Runs älter als N Tage löschen.
+	 * Returnt Anzahl gelöschter Rows.
 	 */
 	public function deleteRunsOlderThan(int $days): int
 	{

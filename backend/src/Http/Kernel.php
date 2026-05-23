@@ -335,6 +335,10 @@ class Kernel
 				// Aktiv wenn Setting llm.routing_mode='router'. Default 'direct'
 				// → bestehender Pfad via ClaudeProvider.
 				$this->get(\MailPilot\Llm\LlmRouter::class),
+				// Phase 9q B-Fix (Marc 2026-05-23): direct-Mode-Calls in
+				// llm_call_log spiegeln, sonst zeigt /admin/llm/usage = 0.
+				$this->get(\MailPilot\Llm\LlmCallLogger::class),
+				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(ClaudeProvider::class),

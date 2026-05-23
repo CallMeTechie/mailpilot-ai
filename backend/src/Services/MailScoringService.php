@@ -72,8 +72,14 @@ final class MailScoringService
 		private readonly ?ScoreOverrideService $scoreOverride = null,
 		// Phase 9q-B (Marc 2026-05-22): Multi-Provider-Failover-Router. Nur
 		// aktiv wenn Setting llm.routing_mode='router'. Default null = bestehender
-		// Pfad direkt ueber ClaudeProvider/AnthropicClient. Zero behavior change.
+		// Pfad direkt über ClaudeProvider/AnthropicClient. Zero behavior change.
 		private readonly ?\MailPilot\Llm\LlmRouter $llmRouter = null,
+		// Phase 9q B-Fix (Marc 2026-05-23): auch direct-Mode-Calls ins
+		// llm_call_log spiegeln, damit /admin/llm/usage NICHT 0 zeigt
+		// solange routing_mode='direct' default ist. Beide optional damit
+		// Tests + ältere Konstruktor-Aufrufe nicht brechen.
+		private readonly ?\MailPilot\Llm\LlmCallLogger $callLogger = null,
+		private readonly ?\MailPilot\Repositories\LlmProviderRepository $llmProviders = null,
 	) {
 		$this->promptBuilder = new ScoringPromptBuilder($settings, $corrections, $autoSortCorrections);
 		$this->actionOwner = new ActionOwnerResolver(
@@ -370,13 +376,14 @@ final class MailScoringService
 		}
 
 		$start = microtime(true);
+		// Phase 9q-B (Marc 2026-05-22): wenn routing_mode='router' und Router
+		// verdrahtet ist, geht der Call über den LlmRouter mit Failover-Chain.
+		// Andernfalls bleibt der direkte AnthropicClient-Pfad — zero behavior
+		// change für alle Tests + initial nach Deploy.
+		// Pre-try definiert, damit der catch-Block ihn ebenfalls sehen kann.
+		$useRouter = $this->llmRouter !== null
+			&& $this->settings->getString('llm.routing_mode', 'direct') === 'router';
 		try {
-			// Phase 9q-B (Marc 2026-05-22): wenn routing_mode='router' und Router
-			// verdrahtet ist, geht der Call ueber den LlmRouter mit Failover-Chain.
-			// Andernfalls bleibt der direkte AnthropicClient-Pfad — zero behavior
-			// change fuer alle Tests + initial nach Deploy.
-			$useRouter = $this->llmRouter !== null
-				&& $this->settings->getString('llm.routing_mode', 'direct') === 'router';
 			if ($useRouter) {
 				$response = $this->callViaRouter($systemSegments, $user, $model, $maxTokens, (float)($activePrompt['temperature'] ?? 0.1));
 			} else {
@@ -388,10 +395,23 @@ final class MailScoringService
 				]);
 			}
 		} catch (\Throwable $e) {
-			$this->recordCall($tenantId, $userId, $mailboxId, [], (int)((microtime(true) - $start) * 1000), 'error', $e->getMessage(), $promptVersionTag, $model);
+			$latency = (int)((microtime(true) - $start) * 1000);
+			$this->recordCall($tenantId, $userId, $mailboxId, [], $latency, 'error', $e->getMessage(), $promptVersionTag, $model);
+			if (!$useRouter) {
+				$this->mirrorDirectCallToLlmLog($model, 'score', null, [], $latency, 'error', $e->getMessage());
+			}
 			throw $e;
 		}
-		$this->recordCall($tenantId, $userId, $mailboxId, $response['usage'] ?? [], (int)((microtime(true) - $start) * 1000), 'success', null, $promptVersionTag, $model);
+		$latency = (int)((microtime(true) - $start) * 1000);
+		$this->recordCall($tenantId, $userId, $mailboxId, $response['usage'] ?? [], $latency, 'success', null, $promptVersionTag, $model);
+
+		// Phase 9q B-Fix (Marc 2026-05-23): direct-Mode-Calls auch ins
+		// llm_call_log spiegeln, sonst zeigt /admin/llm/usage = 0 für
+		// alle Production-Calls (LlmCallLogger wird sonst nur vom Router
+		// getriggert). Router-Pfad logged sich selbst.
+		if (!$useRouter) {
+			$this->mirrorDirectCallToLlmLog($model, 'score', $response['model'] ?? $model, $response['usage'] ?? [], $latency, 'ok', null);
+		}
 
 		$text = ScoringPromptBuilder::stripCodeFences(ClaudeClient::extractText($response));
 		try {
@@ -453,6 +473,77 @@ final class MailScoringService
 			],
 			'model' => $resp->modelId,
 		];
+	}
+
+	/** Memoized Anthropic-Provider-ID — vermeidet DB-Lookup pro Call. */
+	private ?string $anthropicProviderIdCached = null;
+
+	/**
+	 * Phase 9q B-Fix (Marc 2026-05-23): direct-Mode AnthropicClient-Calls in
+	 * llm_call_log spiegeln. Sonst zeigt /admin/llm/usage = 0 für alle
+	 * Production-Calls, weil LlmCallLogger nur vom LlmRouter getriggert
+	 * wird und die meiste Marc-Installation routing_mode='direct' fährt.
+	 *
+	 * Best-effort: schluckt alle Fehler — Logging darf den Scoring-Pfad
+	 * nie blockieren.
+	 *
+	 * @param array<string,mixed> $usage Anthropic-Style: input_tokens/output_tokens/cache_read_input_tokens.
+	 */
+	private function mirrorDirectCallToLlmLog(
+		string $modelHint,
+		string $role,
+		?string $respModelId,
+		array $usage,
+		int $latencyMs,
+		string $status,
+		?string $errorMsg,
+	): void {
+		if ($this->callLogger === null || $this->llmProviders === null) {
+			return;
+		}
+		try {
+			$providerId = $this->anthropicProviderIdCached
+				?? $this->resolveAnthropicProviderId();
+			if ($providerId === null) {
+				return;
+			}
+			$this->anthropicProviderIdCached = $providerId;
+
+			if ($status === 'ok') {
+				$resp = new \MailPilot\Llm\NormalizedResponse(
+					content:      '',
+					usage:        [
+						'inputTokens'  => (int)($usage['input_tokens']  ?? 0),
+						'outputTokens' => (int)($usage['output_tokens'] ?? 0),
+						'cachedTokens' => (int)($usage['cache_read_input_tokens'] ?? 0),
+					],
+					finishReason: 'stop',
+					modelId:      $respModelId ?? $modelHint,
+					providerKind: 'anthropic',
+				);
+				$this->callLogger->logSuccess($providerId, $role, $resp, $latencyMs);
+			} else {
+				$this->callLogger->logFailure(
+					$providerId, $role, $modelHint,
+					$status, (string)$errorMsg, $latencyMs,
+				);
+			}
+		} catch (\Throwable $e) {
+			$this->logger->debug('llm_call_log.mirror_failed', ['err' => $e->getMessage()]);
+		}
+	}
+
+	private function resolveAnthropicProviderId(): ?string
+	{
+		if ($this->llmProviders === null) {
+			return null;
+		}
+		foreach ($this->llmProviders->listAll(includeDisabled: false) as $p) {
+			if (($p['kind'] ?? null) === 'anthropic') {
+				return (string)$p['id'];
+			}
+		}
+		return null;
 	}
 
 	/**

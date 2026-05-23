@@ -57,7 +57,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	referenzieren sie per `form=`-Attribut auf dem Button in der Tabellenzeile. */ ?>
 <?php foreach ($prices as $i => $p): ?>
 	<form id="del_pricing_<?= $i ?>" method="post" action="/admin/settings/budgets/pricing/delete" style="display:none"
-		onsubmit="return confirm('Pricing fuer <?= $h((string)$p['model']) ?> wirklich loeschen?');">
+		onsubmit="return confirm('Pricing für <?= $h((string)$p['model']) ?> wirklich löschen?');">
 		<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
 		<input type="hidden" name="model" value="<?= $h((string)$p['model']) ?>">
 	</form>
@@ -92,7 +92,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 						<td><input type="text" inputmode="decimal" name="pricing[<?= $i ?>][cache_creation]" value="<?= $p['cache_creation_eur_per_1m'] !== null ? $h(number_format((float)$p['cache_creation_eur_per_1m'], 4, '.', '')) : '' ?>"></td>
 						<td class="muted"><?= $h(substr((string)$p['updated_at'], 0, 10)) ?></td>
 						<td>
-							<button type="submit" form="del_pricing_<?= $i ?>" class="btn btn-sm" title="Pricing-Row loeschen">×</button>
+							<button type="submit" form="del_pricing_<?= $i ?>" class="btn btn-sm" title="Pricing-Row löschen">×</button>
 						</td>
 					</tr>
 				<?php endforeach; ?>

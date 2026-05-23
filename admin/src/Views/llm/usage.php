@@ -2,19 +2,21 @@
 /**
  * Phase 9q-G (Marc 2026-05-23) — Usage- und Cost-Dashboard.
  *
- * @var int $days
+ * @var int   $days
  * @var list<array<string,mixed>> $perProvider
  * @var list<array<string,mixed>> $perModel
  * @var int   $totalCalls
  * @var int   $totalErrors
- * @var float $totalUsd
+ * @var float $totalEur
+ * @var float $usdToEur
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$eur = fn(float $v): string => number_format($v, 4, ',', '.');
 ?>
 
 <header class="page-head">
 	<h1>LLM Usage &amp; Kosten</h1>
-	<p class="muted">Aus <code>llm_call_log</code>. Aggregation pro Provider/Model fuer den gewaehlten Zeitraum.</p>
+	<p class="muted">Aus <code>llm_call_log</code>. Aggregation pro Provider/Model für den gewählten Zeitraum.</p>
 	<div class="form-actions">
 		<a class="btn btn-secondary btn-sm" href="/admin/llm">← LLM-Provider</a>
 		<a class="btn btn-secondary btn-sm" href="/admin/llm/golden">Golden-Set Quality →</a>
@@ -36,19 +38,14 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	<dl class="kv-grid">
 		<dt>Calls gesamt</dt>          <dd><?= number_format($totalCalls) ?></dd>
 		<dt>Errors</dt>                 <dd><?= number_format($totalErrors) ?> (<?= $totalCalls ? number_format($totalErrors / $totalCalls * 100, 1) : '0' ?> %)</dd>
-		<dt>Token-Kosten</dt>           <dd>$<?= number_format($totalUsd, 4) ?> <small class="muted">USD</small></dd>
+		<dt>Token-Kosten</dt>           <dd><?= $eur($totalEur) ?> € <small class="muted">@ <?= number_format($usdToEur, 4, ',', '.') ?> EUR/USD</small></dd>
 	</dl>
-	<p class="muted" style="margin-top: var(--mp-sp-2); font-size: 11px">
-		<strong>Hinweis Waehrung:</strong> Alle Kosten in USD — LLM-APIs (Anthropic/OpenAI/Gemini/Mistral)
-		rechnen ausschliesslich in USD. EUR-Konversion bewusst weggelassen, weil Wechselkurs-Schwankungen
-		Kosten-Trends verfaelschen wuerden. Faustregel: 1 USD ≈ 0,92 EUR (Stand Q2/2026).
-	</p>
 </section>
 
 <section class="panel">
 	<h2>Pro Provider</h2>
 	<?php if ($perProvider === []): ?>
-		<p class="muted">Keine Calls im gewaehlten Zeitraum.</p>
+		<p class="muted">Keine Calls im gewählten Zeitraum.</p>
 	<?php else: ?>
 	<table class="data">
 		<thead>
@@ -59,7 +56,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 				<th>Input-Tokens</th>
 				<th>Output-Tokens</th>
 				<th>Cached</th>
-				<th>Cost (USD)</th>
+				<th>Kosten (EUR)</th>
 				<th>Avg-Latenz</th>
 			</tr>
 		</thead>
@@ -78,7 +75,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 				<td><?= number_format((int)$r['input_tokens']) ?></td>
 				<td><?= number_format((int)$r['output_tokens']) ?></td>
 				<td><?= number_format((int)$r['cached_tokens']) ?></td>
-				<td>$<?= number_format((float)$r['total_usd'], 4) ?></td>
+				<td><?= $eur((float)$r['total_usd'] * $usdToEur) ?> €</td>
 				<td><?= number_format((int)$r['avg_latency_ms']) ?> ms</td>
 			</tr>
 		<?php endforeach; ?>
@@ -90,7 +87,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 <section class="panel">
 	<h2>Pro Provider × Model × Rolle</h2>
 	<?php if ($perModel === []): ?>
-		<p class="muted">Keine Calls im gewaehlten Zeitraum.</p>
+		<p class="muted">Keine Calls im gewählten Zeitraum.</p>
 	<?php else: ?>
 	<table class="data">
 		<thead>
@@ -101,7 +98,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 				<th>Calls</th>
 				<th>Input</th>
 				<th>Output</th>
-				<th>Cost (USD)</th>
+				<th>Kosten (EUR)</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -113,7 +110,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 				<td><?= number_format((int)$r['calls']) ?></td>
 				<td><?= number_format((int)$r['input_tokens']) ?></td>
 				<td><?= number_format((int)$r['output_tokens']) ?></td>
-				<td>$<?= number_format((float)$r['total_usd'], 4) ?></td>
+				<td><?= $eur((float)$r['total_usd'] * $usdToEur) ?> €</td>
 			</tr>
 		<?php endforeach; ?>
 		</tbody>

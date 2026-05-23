@@ -25,8 +25,9 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 <?php if ($routingMode === 'direct'): ?>
 <div class="flash flash-warn" style="margin-bottom: var(--mp-sp-3)">
 	<strong>Aktueller Routing-Modus: <code>direct</code></strong> — Failover-Chain ist <strong>INAKTIV</strong>.
-	MailScoringService ruft AnthropicClient direkt; Usage-/Cost-Dashboard bleibt leer fuer Production-Calls.
-	Aktivieren: unten „router" waehlen und speichern.
+	MailScoringService ruft AnthropicClient direkt; Usage-/Cost-Dashboard bleibt leer für Production-Calls
+	(es sei denn der MailScoringService loggt seine Calls separat — Marc-2026-05-23-Hotfix).
+	Aktivieren: unten „router" wählen und speichern.
 </div>
 <?php else: ?>
 <div class="flash flash-success" style="margin-bottom: var(--mp-sp-3)">
@@ -68,7 +69,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 						<input type="text" name="chain_<?= $h($role) ?>" value="<?= $h(implode(',', $chains[$role]['configured'])) ?>" style="width:100%; font-family:monospace; font-size:11px">
 					</label>
 					<div>
-						<small class="muted">Verfuegbare Modelle fuer diese Rolle:</small>
+						<small class="muted">Verfügbare Modelle für diese Rolle:</small>
 						<ul style="font-size:12px">
 						<?php foreach ($chains[$role]['available'] as $a): ?>
 							<li>

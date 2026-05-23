@@ -58,4 +58,4 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	Folder-Mapping wird pro User im Add-in (Settings → Auto-Sort) gesetzt.
 	System-weite Fallbacks bleiben in der DB (Read-Pfad via SubLabelDiscoverer +
 	AutoSortRepository) — aber nicht mehr per UI editierbar. Hartkodierter
-	Default 'MailPilot/<Primary>' greift wenn DB-Wert leer. */ ?>
+	Default 'MailPilot/<Primary>' greift, wenn DB-Wert leer ist. */ ?>
