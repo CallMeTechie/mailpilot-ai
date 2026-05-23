@@ -33,8 +33,24 @@ abstract class BaseController
 		include __DIR__ . '/../Views/_layout.php';
 	}
 
-	protected function redirect(string $path): void
+	/**
+	 * Phase 9q-F (Marc 2026-05-23) — Open-Redirect-Schutz (CWE-601).
+	 * Nur same-origin-Pfade erlaubt: muessen mit / beginnen, duerfen NICHT
+	 * mit // anfangen (cross-protocol-Redirect wie //evil.com/...) und
+	 * keine Newlines enthalten (Header-Injection). Bei Verstoss faellt
+	 * der Redirect auf /admin/ zurueck statt zur Angreifer-URL.
+	 */
+	protected function redirect(string $path): never
 	{
+		if (
+			$path === ''
+			|| !str_starts_with($path, '/')
+			|| str_starts_with($path, '//')
+			|| str_contains($path, "\n")
+			|| str_contains($path, "\r")
+		) {
+			$path = '/admin/';
+		}
 		header('Location: ' . $path);
 		exit;
 	}

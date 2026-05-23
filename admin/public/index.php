@@ -21,6 +21,7 @@ use MailPilot\Admin\Controllers\AuditController;
 use MailPilot\Admin\Controllers\CacheController;
 use MailPilot\Admin\Controllers\SyncJobsController;
 use MailPilot\Admin\Controllers\SystemSettingsController;
+use MailPilot\Admin\Controllers\LlmController;
 use MailPilot\Admin\Kernel as AdminKernel;
 
 session_start();
@@ -85,6 +86,17 @@ $routes = [
 	['POST', '#^/admin/settings/system/snippets$#',       SystemSettingsController::class, 'saveSnippets'],
 	['POST', '#^/admin/settings/system/tuning$#',         SystemSettingsController::class, 'saveTuning'],
 	['POST', '#^/admin/settings/system/folders$#',        SystemSettingsController::class, 'saveFolders'],
+
+	// Phase 9q-F (Marc 2026-05-23): LLM-Provider-Verwaltung
+	['GET',  '#^/admin/llm$#',                            LlmController::class, 'index'],
+	['GET',  '#^/admin/llm/routing$#',                    LlmController::class, 'showRouting'],
+	['POST', '#^/admin/llm/routing$#',                    LlmController::class, 'saveRouting'],
+	['POST', '#^/admin/llm/models/(?P<mid>[^/]+)$#',      LlmController::class, 'saveModel'],
+	['GET',  '#^/admin/llm/(?P<id>[^/]+)$#',              LlmController::class, 'edit'],
+	['POST', '#^/admin/llm/(?P<id>[^/]+)$#',              LlmController::class, 'save'],
+	['POST', '#^/admin/llm/(?P<id>[^/]+)/api-key$#',      LlmController::class, 'saveApiKey'],
+	['POST', '#^/admin/llm/(?P<id>[^/]+)/toggle$#',       LlmController::class, 'toggleEnabled'],
+	['POST', '#^/admin/llm/(?P<id>[^/]+)/test$#',         LlmController::class, 'testConnection'],
 ];
 
 foreach ($routes as [$m, $pattern, $class, $action]) {
