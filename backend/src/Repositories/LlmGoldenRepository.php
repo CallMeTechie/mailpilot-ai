@@ -127,6 +127,32 @@ final class LlmGoldenRepository
 	}
 
 	/**
+	 * Phase 9q B2 (Marc 2026-05-23): einzelnen Run loeschen. CASCADE
+	 * raeumt llm_golden_run_detail mit.
+	 */
+	public function deleteRun(string $runId): bool
+	{
+		$stmt = $this->db->prepare('DELETE FROM llm_golden_run WHERE id = :id');
+		$stmt->execute([':id' => $runId]);
+		return $stmt->rowCount() > 0;
+	}
+
+	/**
+	 * Bulk-Cleanup: alle Runs aelter als N Tage loeschen.
+	 * Returnt Anzahl geloeschter Rows.
+	 */
+	public function deleteRunsOlderThan(int $days): int
+	{
+		$stmt = $this->db->prepare(
+			'DELETE FROM llm_golden_run
+			 WHERE started_at < (UTC_TIMESTAMP(3) - INTERVAL :d DAY)'
+		);
+		$stmt->bindValue(':d', max(1, $days), PDO::PARAM_INT);
+		$stmt->execute();
+		return $stmt->rowCount();
+	}
+
+	/**
 	 * @return list<array<string,mixed>>
 	 */
 	public function runDetails(string $runId): array

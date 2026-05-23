@@ -44,7 +44,7 @@ $pct = fn(int $correct, int $total): string => $total > 0
 					<td><code><?= $h((string)$t['model_id_str']) ?></code></td>
 					<td><span class="badge"><?= $h((string)$t['role']) ?></span></td>
 					<td>
-						<form method="post" action="/admin/llm/golden/run" style="display:inline">
+						<form method="post" action="/admin/llm/golden/run" style="display:inline" onsubmit="return mpGoldenRunSubmit(this);">
 							<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
 							<input type="hidden" name="provider_id" value="<?= $h((string)$t['provider_id']) ?>">
 							<input type="hidden" name="role" value="<?= $h((string)$t['role']) ?>">
@@ -76,6 +76,7 @@ $pct = fn(int $correct, int $total): string => $total > 0
 					<th>Cost</th>
 					<th>Started</th>
 					<th>Status</th>
+					<th></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -101,12 +102,44 @@ $pct = fn(int $correct, int $total): string => $total > 0
 							<span class="badge">running</span>
 						<?php endif; ?>
 					</td>
+					<td>
+						<form method="post" action="/admin/llm/golden/<?= $h((string)$r['id']) ?>/delete" style="display:inline" onsubmit="return confirm('Run wirklich loeschen?');">
+							<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+							<button type="submit" class="btn btn-sm" title="Run loeschen">×</button>
+						</form>
+					</td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
 		</table>
+
+		<!-- Bulk-Purge (Phase 9q B2) -->
+		<form method="post" action="/admin/llm/golden/purge" onsubmit="return confirm('Alle Runs aelter als ' + this.days.value + ' Tagen loeschen?');" class="form-inline" style="margin-top: var(--mp-sp-3)">
+			<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+			<label>Aelter als
+				<input type="number" name="days" value="30" min="1" max="365" style="width:5em">
+				Tage loeschen
+			</label>
+			<button type="submit" class="btn btn-secondary btn-sm">Bulk-Cleanup</button>
+		</form>
 	<?php endif; ?>
 </section>
+
+<script>
+// Phase 9q B1 (Marc 2026-05-23): Loading-State fuer Golden-Test-Submit.
+// Run dauert 10-30s — ohne Feedback denkt User es passiert nichts.
+function mpGoldenRunSubmit(form) {
+	const allButtons = document.querySelectorAll('form[action="/admin/llm/golden/run"] button[type=submit]');
+	allButtons.forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+	const btn = form.querySelector('button[type=submit]');
+	if (btn) {
+		btn.dataset.original = btn.textContent;
+		btn.textContent = '⏳ Test läuft… (~15s)';
+		btn.style.opacity = '1';
+	}
+	return true;
+}
+</script>
 
 <section class="panel">
 	<h2>Test-Mail-Set</h2>

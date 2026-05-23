@@ -59,6 +59,18 @@ final class PricingRepository
 		], $rows);
 	}
 
+	/**
+	 * Phase 9q B8 (Marc 2026-05-23): Hartes Delete einer veralteten Pricing-Row.
+	 * Aufrufer (BudgetController) zeigt Bestaetigungs-Dialog vor Aufruf.
+	 */
+	public function delete(string $model): bool
+	{
+		$stmt = $this->db->prepare('DELETE FROM model_pricing WHERE model = :m');
+		$stmt->execute([':m' => $model]);
+		$this->cache = null;
+		return $stmt->rowCount() > 0;
+	}
+
 	public function upsert(
 		string $model,
 		float $inputPer1m,

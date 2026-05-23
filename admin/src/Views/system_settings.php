@@ -2,7 +2,6 @@
 /**
  * @var list<array{key:string,value:string,type:string,description:string}> $snippets
  * @var list<array{key:string,value:string,type:string,description:string}> $tuning
- * @var list<array{key:string,value:string,type:string,description:string}> $folders
  * @var string $csrfToken
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -55,20 +54,8 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	</form>
 </section>
 
-<section class="panel">
-	<h2>Default-Folder pro Primary-Label</h2>
-	<p class="muted">Werden in den AutoSort-Catch-All-Rules verwendet, wenn der User noch keinen eigenen Pfad gesetzt hat. Slashes erzeugen Outlook-Unterordner.</p>
-	<form method="post" action="/admin/settings/system/folders" class="form-grid">
-		<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
-		<?php foreach ($folders as $f): ?>
-			<label class="settings-field">
-				<span class="settings-key"><code><?= $h($f['key']) ?></code></span>
-				<input type="text" name="<?= $h($f['key']) ?>" value="<?= $h($f['value']) ?>" spellcheck="false">
-				<small class="muted"><?= $h($f['description']) ?></small>
-			</label>
-		<?php endforeach; ?>
-		<div class="form-actions">
-			<button type="submit" class="btn btn-primary">Folder-Defaults speichern</button>
-		</div>
-	</form>
-</section>
+<?php /* Phase 9q B6 (Marc 2026-05-23): folder_default.*-Section entfernt.
+	Folder-Mapping wird pro User im Add-in (Settings → Auto-Sort) gesetzt.
+	System-weite Fallbacks bleiben in der DB (Read-Pfad via SubLabelDiscoverer +
+	AutoSortRepository) — aber nicht mehr per UI editierbar. Hartkodierter
+	Default 'MailPilot/<Primary>' greift wenn DB-Wert leer. */ ?>

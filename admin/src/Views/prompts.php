@@ -25,6 +25,13 @@
 						<input type="hidden" name="_csrf" value="<?= $this->csrfToken() ?>">
 						<button type="submit" class="btn btn-primary">Aktivieren</button>
 					</form>
+					<?php /* Phase 9q B7 (Marc 2026-05-23): Soft-Delete fuer inaktive Versionen. */ ?>
+					<form method="POST" action="/admin/prompts/<?= htmlspecialchars($p['id']) ?>/delete"
+						style="display:inline"
+						onsubmit="return confirm('Prompt-Version <?= htmlspecialchars($p['key_name']) ?>/<?= htmlspecialchars($p['version']) ?> wirklich loeschen? (Soft-Delete — DB-Restore moeglich.)');">
+						<input type="hidden" name="_csrf" value="<?= $this->csrfToken() ?>">
+						<button type="submit" class="btn btn-sm" title="Soft-Delete">×</button>
+					</form>
 				<?php endif; ?>
 			</td>
 		</tr>

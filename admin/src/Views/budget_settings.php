@@ -52,6 +52,17 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	</form>
 </section>
 
+<?php /* Phase 9q B8 (Marc 2026-05-23): Versteckte Delete-Forms — HTML5 verbietet
+	Form-Schachtelung, daher rendern wir sie hier vor der Save-Form und
+	referenzieren sie per `form=`-Attribut auf dem Button in der Tabellenzeile. */ ?>
+<?php foreach ($prices as $i => $p): ?>
+	<form id="del_pricing_<?= $i ?>" method="post" action="/admin/settings/budgets/pricing/delete" style="display:none"
+		onsubmit="return confirm('Pricing fuer <?= $h((string)$p['model']) ?> wirklich loeschen?');">
+		<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+		<input type="hidden" name="model" value="<?= $h((string)$p['model']) ?>">
+	</form>
+<?php endforeach; ?>
+
 <section class="panel">
 	<h2>Modell-Preise (EUR pro 1 Mio Tokens)</h2>
 	<form method="post" action="/admin/settings/budgets/pricing">
@@ -65,6 +76,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 					<th>Cache-Read €/M</th>
 					<th>Cache-Creation €/M</th>
 					<th>Stand</th>
+					<th></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -79,6 +91,9 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 						<td><input type="text" inputmode="decimal" name="pricing[<?= $i ?>][cache_read]"     value="<?= $p['cache_read_eur_per_1m']     !== null ? $h(number_format((float)$p['cache_read_eur_per_1m'],     4, '.', '')) : '' ?>"></td>
 						<td><input type="text" inputmode="decimal" name="pricing[<?= $i ?>][cache_creation]" value="<?= $p['cache_creation_eur_per_1m'] !== null ? $h(number_format((float)$p['cache_creation_eur_per_1m'], 4, '.', '')) : '' ?>"></td>
 						<td class="muted"><?= $h(substr((string)$p['updated_at'], 0, 10)) ?></td>
+						<td>
+							<button type="submit" form="del_pricing_<?= $i ?>" class="btn btn-sm" title="Pricing-Row loeschen">×</button>
+						</td>
 					</tr>
 				<?php endforeach; ?>
 			</tbody>

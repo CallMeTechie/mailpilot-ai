@@ -21,6 +21,20 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	</div>
 </header>
 
+<?php /* Phase 9q B4 (Marc 2026-05-23): aktueller Status prominent. */ ?>
+<?php if ($routingMode === 'direct'): ?>
+<div class="flash flash-warn" style="margin-bottom: var(--mp-sp-3)">
+	<strong>Aktueller Routing-Modus: <code>direct</code></strong> — Failover-Chain ist <strong>INAKTIV</strong>.
+	MailScoringService ruft AnthropicClient direkt; Usage-/Cost-Dashboard bleibt leer fuer Production-Calls.
+	Aktivieren: unten „router" waehlen und speichern.
+</div>
+<?php else: ?>
+<div class="flash flash-success" style="margin-bottom: var(--mp-sp-3)">
+	<strong>Aktueller Routing-Modus: <code>router</code></strong> — Failover-Chain ist <strong>AKTIV</strong>.
+	Privacy-Mode <code><?= $h($privacyMode) ?></code>.
+</div>
+<?php endif; ?>
+
 <form method="post" action="/admin/llm/routing" class="form-stack">
 	<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
 

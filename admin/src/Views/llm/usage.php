@@ -36,8 +36,13 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	<dl class="kv-grid">
 		<dt>Calls gesamt</dt>          <dd><?= number_format($totalCalls) ?></dd>
 		<dt>Errors</dt>                 <dd><?= number_format($totalErrors) ?> (<?= $totalCalls ? number_format($totalErrors / $totalCalls * 100, 1) : '0' ?> %)</dd>
-		<dt>Token-Kosten</dt>           <dd>$<?= number_format($totalUsd, 4) ?></dd>
+		<dt>Token-Kosten</dt>           <dd>$<?= number_format($totalUsd, 4) ?> <small class="muted">USD</small></dd>
 	</dl>
+	<p class="muted" style="margin-top: var(--mp-sp-2); font-size: 11px">
+		<strong>Hinweis Waehrung:</strong> Alle Kosten in USD — LLM-APIs (Anthropic/OpenAI/Gemini/Mistral)
+		rechnen ausschliesslich in USD. EUR-Konversion bewusst weggelassen, weil Wechselkurs-Schwankungen
+		Kosten-Trends verfaelschen wuerden. Faustregel: 1 USD ≈ 0,92 EUR (Stand Q2/2026).
+	</p>
 </section>
 
 <section class="panel">

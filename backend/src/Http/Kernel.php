@@ -219,6 +219,8 @@ class Kernel
 						'mistral'           => $this->get(\MailPilot\Llm\Providers\MistralProvider::class),
 					],
 					$this->get(Logger::class),
+					// Phase 9q B3: Test-Runs landen im Usage-Dashboard.
+					$this->get(\MailPilot\Llm\LlmCallLogger::class),
 				),
 			\MailPilot\Llm\LlmCallLogger::class =>
 				new \MailPilot\Llm\LlmCallLogger(

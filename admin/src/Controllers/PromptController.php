@@ -11,11 +11,48 @@ final class PromptController extends BaseController
 	public function list(array $params): void
 	{
 		$pdo = $this->kernel->get(PDO::class);
+		// Phase 9q B7 (Marc 2026-05-23): Soft-Delete-Filter.
 		$rows = $pdo->query('SELECT id, key_name, version, model, max_tokens, temperature, active, created_at
 			FROM prompt_versions
+			WHERE deleted_at IS NULL
 			ORDER BY key_name, created_at DESC')->fetchAll();
 
-		$this->render('prompts', ['prompts' => $rows]);
+		$this->render('prompts', [
+			'prompts'   => $rows,
+			'csrfToken' => $this->csrfToken(),
+		]);
+	}
+
+	/**
+	 * Phase 9q B7 (Marc 2026-05-23): Soft-Delete einer Prompt-Version.
+	 * Aktive Versionen koennen nicht geloescht werden.
+	 */
+	public function delete(array $params): void
+	{
+		$this->verifyCsrf();
+		$pdo = $this->kernel->get(PDO::class);
+
+		$stmt = $pdo->prepare('SELECT active, key_name FROM prompt_versions WHERE id = :id AND deleted_at IS NULL');
+		$stmt->execute([':id' => $params['id']]);
+		$row = $stmt->fetch();
+		if ($row === false) {
+			$this->flash('error', 'Prompt-Version nicht gefunden.');
+			$this->redirect('/admin/prompts');
+			return;
+		}
+		if ((int)$row['active'] === 1) {
+			$this->flash('error', 'Aktive Prompt-Version kann nicht geloescht werden — zuerst andere Version aktivieren.');
+			$this->redirect('/admin/prompts');
+			return;
+		}
+
+		$pdo->prepare('UPDATE prompt_versions SET deleted_at = CURRENT_TIMESTAMP(3) WHERE id = :id')
+			->execute([':id' => $params['id']]);
+		$pdo->prepare('INSERT INTO audit_log (event, entity, entity_id) VALUES ("admin.prompt.delete", "prompt", :id)')
+			->execute([':id' => $params['id']]);
+
+		$this->flash('success', 'Prompt-Version geloescht (Soft-Delete).');
+		$this->redirect('/admin/prompts');
 	}
 
 	public function create(array $params): void

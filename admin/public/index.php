@@ -70,6 +70,7 @@ $routes = [
 	['POST', '#^/admin/prompts$#',             PromptController::class,    'store'],
 	['GET',  '#^/admin/prompts/(?P<id>[^/]+)$#', PromptController::class,  'show'],
 	['POST', '#^/admin/prompts/(?P<id>[^/]+)/activate$#', PromptController::class, 'activate'],
+	['POST', '#^/admin/prompts/(?P<id>[^/]+)/delete$#',   PromptController::class, 'delete'],
 
 	['GET',  '#^/admin/audit$#',               AuditController::class,     'list'],
 	['GET',  '#^/admin/sync-jobs$#',           SyncJobsController::class,  'list'],
@@ -79,19 +80,22 @@ $routes = [
 	['GET',  '#^/admin/usage$#',                          UsageController::class,  'index'],
 	['GET',  '#^/admin/settings/budgets$#',               BudgetController::class, 'show'],
 	['POST', '#^/admin/settings/budgets$#',               BudgetController::class, 'saveBudgets'],
-	['POST', '#^/admin/settings/budgets/pricing$#',       BudgetController::class, 'savePricing'],
-	['POST', '#^/admin/settings/budgets/prompt-tokens$#', BudgetController::class, 'savePromptTokens'],
+	['POST', '#^/admin/settings/budgets/pricing$#',        BudgetController::class, 'savePricing'],
+	['POST', '#^/admin/settings/budgets/pricing/delete$#', BudgetController::class, 'deletePricing'],
+	['POST', '#^/admin/settings/budgets/prompt-tokens$#',  BudgetController::class, 'savePromptTokens'],
 
 	['GET',  '#^/admin/settings/system$#',                SystemSettingsController::class, 'show'],
 	['POST', '#^/admin/settings/system/snippets$#',       SystemSettingsController::class, 'saveSnippets'],
 	['POST', '#^/admin/settings/system/tuning$#',         SystemSettingsController::class, 'saveTuning'],
-	['POST', '#^/admin/settings/system/folders$#',        SystemSettingsController::class, 'saveFolders'],
+	// Phase 9q B6: /admin/settings/system/folders entfernt — Folder-Mapping pro User im Add-in.
 
 	// Phase 9q-F (Marc 2026-05-23): LLM-Provider-Verwaltung
 	['GET',  '#^/admin/llm$#',                            LlmController::class, 'index'],
 	['GET',  '#^/admin/llm/usage$#',                      LlmController::class, 'showUsage'],
 	['GET',  '#^/admin/llm/golden$#',                     LlmController::class, 'showGolden'],
 	['POST', '#^/admin/llm/golden/run$#',                 LlmController::class, 'runGolden'],
+	['POST', '#^/admin/llm/golden/purge$#',               LlmController::class, 'purgeGoldenOld'],
+	['POST', '#^/admin/llm/golden/(?P<rid>[^/]+)/delete$#', LlmController::class, 'deleteGolden'],
 	['GET',  '#^/admin/llm/routing$#',                    LlmController::class, 'showRouting'],
 	['POST', '#^/admin/llm/routing$#',                    LlmController::class, 'saveRouting'],
 	['POST', '#^/admin/llm/models/(?P<mid>[^/]+)$#',      LlmController::class, 'saveModel'],

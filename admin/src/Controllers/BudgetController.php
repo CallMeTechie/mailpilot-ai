@@ -50,9 +50,12 @@ final class BudgetController extends BaseController
 			$budgets[$k] = $settings->getString($k, '');
 		}
 
+		// Phase 9q B8 (Marc 2026-05-23): Soft-Deleted Prompt-Versions ausblenden.
 		$prompts = $this->kernel->get(PDO::class)
 			->query('SELECT id, key_name, version, model, max_tokens, active
-				FROM prompt_versions ORDER BY key_name, version DESC')
+				FROM prompt_versions
+				WHERE deleted_at IS NULL
+				ORDER BY key_name, version DESC')
 			->fetchAll(PDO::FETCH_ASSOC);
 
 		$this->render('budget_settings', [
@@ -117,6 +120,31 @@ final class BudgetController extends BaseController
 			->execute([':m' => json_encode($applied, JSON_UNESCAPED_UNICODE)]);
 
 		$this->flash('success', "{$count} Modell-Preise aktualisiert");
+		$this->redirect('/admin/settings/budgets');
+	}
+
+	/**
+	 * Phase 9q B8 (Marc 2026-05-23): Hartes Delete einer Pricing-Row.
+	 * UI bestaetigt via JS-confirm vor Submit. Audit-Trail in audit_log.
+	 */
+	public function deletePricing(array $params): void
+	{
+		$this->verifyCsrf();
+		$model = trim((string)($_POST['model'] ?? ''));
+		if ($model === '') {
+			$this->flash('error', 'Kein Modell-Bezeichner uebergeben.');
+			$this->redirect('/admin/settings/budgets');
+			return;
+		}
+
+		$pricing = $this->kernel->get(PricingRepository::class);
+		$ok = $pricing->delete($model);
+
+		$this->kernel->get(PDO::class)
+			->prepare('INSERT INTO audit_log (event, entity, entity_id, meta_json) VALUES ("admin.pricing.delete", "model_pricing", :id, :m)')
+			->execute([':id' => $model, ':m' => json_encode(['deleted' => $ok], JSON_UNESCAPED_UNICODE)]);
+
+		$this->flash($ok ? 'success' : 'error', $ok ? "Pricing fuer '{$model}' geloescht." : "Pricing fuer '{$model}' nicht gefunden.");
 		$this->redirect('/admin/settings/budgets');
 	}
 

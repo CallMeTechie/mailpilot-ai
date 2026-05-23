@@ -323,6 +323,31 @@ final class LlmController extends BaseController
 		$this->redirect('/admin/llm/golden');
 	}
 
+	public function deleteGolden(array $params): void
+	{
+		$this->verifyCsrf();
+		$runId = (string)($params['rid'] ?? '');
+		if ($runId === '') {
+			$this->flash('error', 'Run-ID fehlt.');
+			$this->redirect('/admin/llm/golden');
+		}
+		$repo = $this->kernel->get(LlmGoldenRepository::class);
+		$ok = $repo->deleteRun($runId);
+		$this->flash($ok ? 'success' : 'error', $ok ? 'Run geloescht.' : 'Run nicht gefunden.');
+		$this->redirect('/admin/llm/golden');
+	}
+
+	public function purgeGoldenOld(array $params): void
+	{
+		$this->verifyCsrf();
+		$days = max(1, min(365, (int)($_POST['days'] ?? 30)));
+		$repo = $this->kernel->get(LlmGoldenRepository::class);
+		$n = $repo->deleteRunsOlderThan($days);
+		$suffix = $n === 1 ? '' : 's';
+		$this->flash('success', "{$n} Run{$suffix} aelter als {$days}d geloescht.");
+		$this->redirect('/admin/llm/golden');
+	}
+
 	public function showUsage(array $params): void
 	{
 		$days = max(1, min(365, (int)($_GET['days'] ?? 30)));

@@ -7,16 +7,19 @@ use MailPilot\Repositories\SettingsRepository;
 use PDO;
 
 /**
- * Editor für die 14 system_settings-Keys aus Migration 0014:
+ * Editor für die system_settings-Keys aus Migration 0014:
  *
  *   prompt.*           — Hilfsblöcke, die der Score-Prompt zusammensetzt
  *   worker.*           — Heartbeat-Schwelle
  *   autosort.*         — Retry-Cap fürs Move-Routing
  *   topics.*           — Fuzzy-Merge-Threshold für Topic-Discovery
- *   folder_default.*   — Default-Folder pro Primary-Label
  *
- * Jede der drei Sektionen hat einen eigenen POST-Endpoint — eine
- * teilweise befüllte Form überschreibt niemals die anderen Sektionen.
+ * Phase 9q B6 (Marc 2026-05-23): folder_default.*-UI entfernt — Folder
+ * werden pro User im Add-in (Settings → Auto-Sort) gesetzt. Hartkodierte
+ * Fallbacks 'MailPilot/<Primary>' im Read-Pfad bleiben bestehen.
+ *
+ * Jede Sektion hat einen eigenen POST-Endpoint — eine teilweise
+ * befüllte Form überschreibt niemals die anderen Sektionen.
  */
 final class SystemSettingsController extends BaseController
 {
@@ -36,20 +39,10 @@ final class SystemSettingsController extends BaseController
 		'topics.fuzzy_merge_levenshtein_max',
 	];
 
-	/** @var list<string> */
-	private const FOLDER_KEYS = [
-		'folder_default.direct',
-		'folder_default.action',
-		'folder_default.cc',
-		'folder_default.newsletter',
-		'folder_default.auto',
-		'folder_default.noise',
-	];
-
 	public function show(array $params): void
 	{
 		$pdo  = $this->kernel->get(PDO::class);
-		$keys = array_merge(self::SNIPPET_KEYS, self::TUNING_KEYS, self::FOLDER_KEYS);
+		$keys = array_merge(self::SNIPPET_KEYS, self::TUNING_KEYS);
 
 		$placeholders = implode(',', array_fill(0, count($keys), '?'));
 		$stmt = $pdo->prepare("SELECT `key`, `value`, `type`, description
@@ -64,7 +57,6 @@ final class SystemSettingsController extends BaseController
 		$this->render('system_settings', [
 			'snippets'  => array_map(static fn(string $k): array => $rows[$k] ?? ['key' => $k, 'value' => '', 'type' => 'string', 'description' => ''], self::SNIPPET_KEYS),
 			'tuning'    => array_map(static fn(string $k): array => $rows[$k] ?? ['key' => $k, 'value' => '', 'type' => 'int',    'description' => ''], self::TUNING_KEYS),
-			'folders'   => array_map(static fn(string $k): array => $rows[$k] ?? ['key' => $k, 'value' => '', 'type' => 'string', 'description' => ''], self::FOLDER_KEYS),
 			'csrfToken' => $this->csrfToken(),
 		]);
 	}
@@ -77,11 +69,6 @@ final class SystemSettingsController extends BaseController
 	public function saveTuning(array $params): void
 	{
 		$this->saveSection(self::TUNING_KEYS, 'int', 'admin.system_settings.tuning');
-	}
-
-	public function saveFolders(array $params): void
-	{
-		$this->saveSection(self::FOLDER_KEYS, 'string', 'admin.system_settings.folders');
 	}
 
 	/**
