@@ -15,6 +15,11 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 <header class="page-head">
 	<h1>LLM Usage &amp; Kosten</h1>
 	<p class="muted">Aus <code>llm_call_log</code>. Aggregation pro Provider/Model fuer den gewaehlten Zeitraum.</p>
+	<div class="form-actions">
+		<a class="btn btn-secondary btn-sm" href="/admin/llm">← LLM-Provider</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm/golden">Golden-Set Quality →</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm/routing">Routing &amp; Privacy-Mode →</a>
+	</div>
 	<form method="get" action="/admin/llm/usage" class="form-inline">
 		<label>Zeitraum (Tage):
 			<select name="days" onchange="this.form.submit()">

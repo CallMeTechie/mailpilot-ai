@@ -15,7 +15,9 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	<h1>Routing &amp; Privacy</h1>
 	<p class="muted">Globaler Routing-Modus + Privacy-Mode + Fallback-Chain pro Rolle (score/summary/draft/inference).</p>
 	<div class="form-actions">
-		<a class="btn btn-secondary btn-sm" href="/admin/llm">← Provider</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm">← LLM-Provider</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm/usage">Usage &amp; Kosten</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm/golden">Golden-Set Quality</a>
 	</div>
 </header>
 
