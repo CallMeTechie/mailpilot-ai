@@ -67,6 +67,15 @@ final class AnthropicProvider implements LlmProvider
 		}
 		$apiKey = $this->resolveApiKey($row);
 		$baseUrl = (string)($row['base_url'] ?? 'https://api.anthropic.com');
+		// Phase 9q-Hotfix (Marc 2026-05-23): AnthropicClient haengt nur
+		// '/messages' an base_url, erwartet daher dass '/v1' im base_url
+		// enthalten ist. Wenn nicht (z.B. neu angelegter Provider per
+		// Admin-UI), ergaenzen wir es defensiv. Damit ist die UI-Default-
+		// Erwartung 'https://api.anthropic.com' kompatibel zum legacy-
+		// config.php-Pattern '.../v1'.
+		if (!preg_match('#/v\d+/?$#', $baseUrl)) {
+			$baseUrl = rtrim($baseUrl, '/') . '/v1';
+		}
 
 		$client = new AnthropicClient(
 			$apiKey,
