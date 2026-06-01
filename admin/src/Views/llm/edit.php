@@ -132,7 +132,7 @@ $pid = (string)$provider['id'];
 							<?php endforeach; ?>
 						</select>
 						<?php if ((string)$m['role'] === 'score'): ?>
-							<span class="muted" title="Score nutzt im direct-Mode den gebatchten Pfad">⚠ nur bei routing_mode=router</span>
+							<span class="muted" title="Score-Modell steuert der aktive P-SCORE-Prompt; dieses Dropdown wirkt derzeit nicht aufs Scoring (siehe ROADMAP)">ℹ steuert das Scoring derzeit nicht</span>
 						<?php endif; ?>
 					</td>
 					<td><span class="badge"><?= $h((string)$m['role']) ?></span></td>
