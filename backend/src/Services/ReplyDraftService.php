@@ -5,6 +5,9 @@ namespace MailPilot\Services;
 
 use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
+use MailPilot\Llm\LlmAllProvidersDownException;
+use MailPilot\Llm\LlmRouter;
+use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PromptRepository;
@@ -20,7 +23,7 @@ final class ReplyDraftService
 	private const PROMPT_KEY = 'P-REPLY';
 
 	public function __construct(
-		private readonly ClaudeProvider $claude,
+		private readonly LlmRouter $router,
 		private readonly MailRepository $mails,
 		private readonly DraftRepository $drafts,
 		private readonly RedactionService $redactor,
@@ -28,6 +31,8 @@ final class ReplyDraftService
 		private readonly PromptRepository $prompts,
 		// Sprint 6f DA-R2 Finding 3: optional, für user-spezifische redaction_rules.
 		private readonly ?RedactionRepository $redactionRules = null,
+		// B7: Safety-Net wenn die Router-Chain leer/kaputt ist → Legacy-Direct-Anthropic.
+		private readonly ?ClaudeProvider $claudeFallback = null,
 	) {
 	}
 
@@ -100,12 +105,33 @@ final class ReplyDraftService
 
 		$start = microtime(true);
 		try {
-			$resp = $this->claude->messages([
-				'model'      => $model,
-				'max_tokens' => $maxTokens,
-				'system'     => $system,
-				'messages'   => [['role' => 'user', 'content' => $user]],
-			]);
+			try {
+				$req = new NormalizedRequest(
+					systemPrompt:   $system,
+					messages:       [['role' => 'user', 'content' => $user]],
+					maxTokens:      $maxTokens,
+					temperature:    0.3,
+					modelHint:      '',     // Router resolved Modell+Effort pro Rolle
+					responseFormat: null,
+					cacheSegments:  [],     // wie bisher: KEIN Caching
+				);
+				$resp      = $this->router->complete($req, 'draft');
+				$rawText   = $resp->content;
+				$usageRaw  = $resp->usage['raw'] ?? [];
+				$usedModel = $resp->modelId;
+			} catch (LlmAllProvidersDownException $e) {
+				// Safety-Net: leere/kaputte Chain → Legacy-Direct-Anthropic.
+				if ($this->claudeFallback === null) {
+					throw $e;
+				}
+				$legacy    = $this->claudeFallback->messages([
+					'model' => $model, 'max_tokens' => $maxTokens,
+					'system' => $system, 'messages' => [['role' => 'user', 'content' => $user]],
+				]);
+				$rawText   = ClaudeClient::extractText($legacy);
+				$usageRaw  = $legacy['usage'] ?? [];
+				$usedModel = $model;
+			}
 		} catch (\Throwable $e) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
@@ -118,11 +144,11 @@ final class ReplyDraftService
 			]);
 			throw $e;
 		}
-		$u = $resp['usage'] ?? [];
+		$u = $usageRaw;
 		$this->budget->recordUsage([
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
-			'prompt_version' => $promptVersionTag, 'model' => $model,
+			'prompt_version' => $promptVersionTag, 'model' => $usedModel,
 			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
 			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
 			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
@@ -131,15 +157,14 @@ final class ReplyDraftService
 			'status' => 'success', 'error_text' => null,
 		]);
 
-		$draft = ClaudeClient::extractText($resp);
 		// Sprint 6f DA-R1 Finding 3: Output-PII filtern. Opus halluziniert
 		// gelegentlich IBANs/CC im Antwort-Text („wie besprochen, meine
 		// IBAN ist DE89..."). Vor der DB-Persistierung redacten, sonst
 		// landet das in /me/export. Trade-off: legitime Self-IBANs werden
 		// auch verschluckt — User muss von Hand reinschreiben.
-		$draft = $scopedRedactor->redact($draft);
+		$draft = $scopedRedactor->redact($rawText);
 		$this->drafts->create(
-			$tenantId, $mailId, $draft, $instruction, $promptVersionTag, $model,
+			$tenantId, $mailId, $draft, $instruction, $promptVersionTag, $usedModel,
 			$userId,
 			$mail['conversation_id'] !== null ? (string)$mail['conversation_id'] : null,
 			$createdBy,

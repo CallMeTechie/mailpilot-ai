@@ -356,21 +356,23 @@ class Kernel
 				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
-				$this->get(ClaudeProvider::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(MailRepository::class),
 				$this->get(SummaryRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(ClaudeProvider::class), // Safety-Net-Fallback
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
-				$this->get(ClaudeProvider::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(MailRepository::class),
 				$this->get(DraftRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
 				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
+				$this->get(ClaudeProvider::class), // B7: Safety-Net-Fallback
 			),
 			JobRecoveryService::class => new JobRecoveryService(
 				$this->get(PDO::class),
