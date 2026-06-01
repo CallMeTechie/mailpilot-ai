@@ -276,6 +276,21 @@ class Kernel
 				$this->get(\MailPilot\Repositories\LlmModelRepository::class),
 				$this->get(\MailPilot\Llm\LlmCallLogger::class),
 			),
+			\MailPilot\Repositories\LlmModelCatalogRepository::class =>
+				new \MailPilot\Repositories\LlmModelCatalogRepository($this->get(PDO::class)),
+			\MailPilot\Llm\ModelCatalogService::class =>
+				new \MailPilot\Llm\ModelCatalogService(
+					[
+						'anthropic'         => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
+						'openai'            => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+						'openai_compatible' => $this->get(\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class),
+						'gemini'            => $this->get(\MailPilot\Llm\Providers\GeminiProvider::class),
+						'mistral'           => $this->get(\MailPilot\Llm\Providers\MistralProvider::class),
+					],
+					$this->get(\MailPilot\Repositories\LlmModelCatalogRepository::class),
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(Logger::class),
+				),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 				// Phase 9m (Marc 2026-05-21): mailpilot_root steuert die

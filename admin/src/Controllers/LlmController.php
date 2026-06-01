@@ -184,6 +184,27 @@ final class LlmController extends BaseController
 		$this->redirect('/admin/llm/' . urlencode($id));
 	}
 
+	public function refreshModels(array $params): void
+	{
+		$this->verifyCsrf();
+		$id = (string)($params['id'] ?? '');
+		$providerRepo = $this->kernel->get(\MailPilot\Repositories\LlmProviderRepository::class);
+		$row = $providerRepo->findById($id);
+		if ($row === null) {
+			$this->flash('error', 'Provider nicht gefunden.');
+			$this->redirect('/admin/llm');
+			return;
+		}
+		$svc = $this->kernel->get(\MailPilot\Llm\ModelCatalogService::class);
+		$res = $svc->refreshProvider($id, (string)$row['kind']);
+		if ($res['error'] !== null) {
+			$this->flash('error', sprintf('Discovery fehlgeschlagen: %s', $res['error']));
+		} else {
+			$this->flash('success', sprintf('%d Modelle entdeckt/aktualisiert.', $res['discovered']));
+		}
+		$this->redirect('/admin/llm/' . urlencode($id));
+	}
+
 	public function saveModel(array $params): void
 	{
 		$this->verifyCsrf();

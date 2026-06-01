@@ -87,6 +87,11 @@ $pid = (string)$provider['id'];
 <section class="panel">
 	<h2>Modelle</h2>
 	<p class="muted">Pro Rolle (score/summary/draft/inference) kann der Provider verschiedene Modelle anbieten. Pricing in USD pro Million Token.</p>
+	<form method="post" action="/admin/llm/<?= $h($pid) ?>/models/refresh" style="margin-bottom:1rem">
+		<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+		<button type="submit" class="btn btn-sm">Modelle aktualisieren</button>
+		<span class="muted">Fragt die Models-API dieses Providers live ab.</span>
+	</form>
 	<table class="data">
 		<thead>
 			<tr>
