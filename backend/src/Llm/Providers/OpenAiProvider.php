@@ -81,7 +81,7 @@ final class OpenAiProvider implements LlmProvider
 		$apiKey  = $this->resolveApiKey($row);
 		$baseUrl = (string)($row['base_url'] ?? 'https://api.openai.com');
 		$url     = rtrim($baseUrl, '/') . '/v1/chat/completions';
-		$payload = $this->buildPayload($request);
+		$payload = self::buildPayload($request);
 		$body    = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 
 		$attempt = 0;
@@ -217,7 +217,7 @@ final class OpenAiProvider implements LlmProvider
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function buildPayload(NormalizedRequest $request): array
+	public static function buildPayload(NormalizedRequest $request): array
 	{
 		// OpenAI braucht system inline als role=system (kein system-Top-Level
 		// wie Anthropic). Cache-Hints werden ignoriert (OpenAI hat implicit
@@ -235,6 +235,9 @@ final class OpenAiProvider implements LlmProvider
 		];
 		if ($request->responseFormat === 'json_object') {
 			$payload['response_format'] = ['type' => 'json_object'];
+		}
+		if ($request->effort !== null) {
+			$payload['reasoning_effort'] = $request->effort;
 		}
 		return $payload;
 	}

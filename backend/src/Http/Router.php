@@ -141,6 +141,18 @@ final class Router
 			Response::error(503, 'AI_OVERLOADED', $e->getMessage(), [
 				'retry_after' => $e->retryAfterSeconds,
 			]);
+		} catch (\MailPilot\Llm\LlmAllProvidersDownException $e) {
+			// Router hat alle Provider durch — war die Ursache ein Overload,
+			// signalisieren wir 503 + Retry-After (wie beim Anthropic-Overload),
+			// damit das Add-in den "KI-Anbieter ueberlastet"-Toast zeigt.
+			$prev = $e->getPrevious();
+			$retryAfter = $prev instanceof \MailPilot\Llm\LlmOverloadedException
+				? max(1, $prev->retryAfterSeconds) : 30;
+			$this->kernel->get(\Monolog\Logger::class)->warning('dispatch.router_all_down', [
+				'handler' => $handler, 'err' => $e->getMessage(),
+			]);
+			header('Retry-After: ' . $retryAfter);
+			Response::error(503, 'AI_OVERLOADED', $e->getMessage(), ['retry_after' => $retryAfter]);
 		} catch (\Throwable $e) {
 			$this->kernel->get(\Monolog\Logger::class)->error('dispatch.error', [
 				'handler' => $handler,

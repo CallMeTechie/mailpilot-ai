@@ -17,6 +17,8 @@ namespace MailPilot\Llm;
  * modelHint: model_id aus llm_models-Tabelle, z.B. "claude-haiku-4-5-
  * 20251001", "gpt-4o-mini", "qwen3:32b". Der Provider validiert den
  * Wert selbst (jeder kennt nur seine eigenen Modelle).
+ *
+ * effort: low|medium|high|xhigh|max oder null (provider-spezifisch gemappt: Anthropic output_config, OpenAI reasoning_effort).
  */
 final class NormalizedRequest
 {
@@ -32,6 +34,7 @@ final class NormalizedRequest
 		public readonly string $modelHint,
 		public readonly ?string $responseFormat = null,
 		public readonly array  $cacheSegments  = [],
+		public readonly ?string $effort         = null,
 	) {
 	}
 }

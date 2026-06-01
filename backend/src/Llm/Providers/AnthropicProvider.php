@@ -88,7 +88,7 @@ final class AnthropicProvider implements LlmProvider
 			$this->logger,
 		);
 
-		$payload = $this->buildPayload($request);
+		$payload = self::buildPayload($request);
 		try {
 			$response = $client->messages($payload);
 		} catch (AnthropicOverloadedException $e) {
@@ -225,7 +225,7 @@ final class AnthropicProvider implements LlmProvider
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function buildPayload(NormalizedRequest $request): array
+	public static function buildPayload(NormalizedRequest $request): array
 	{
 		$systemSegments = [[
 			'type' => 'text',
@@ -245,13 +245,17 @@ final class AnthropicProvider implements LlmProvider
 			$request->messages,
 		);
 
-		return [
+		$payload = [
 			'model'       => $request->modelHint,
 			'max_tokens'  => $request->maxTokens,
 			'temperature' => $request->temperature,
 			'system'      => $systemSegments,
 			'messages'    => $messages,
 		];
+		if ($request->effort !== null) {
+			$payload['output_config'] = ['effort' => $request->effort];
+		}
+		return $payload;
 	}
 
 	/**
