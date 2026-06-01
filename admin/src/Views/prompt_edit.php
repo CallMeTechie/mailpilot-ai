@@ -27,18 +27,11 @@
 		<small class="muted">Freitext, z. B. <code>v1.7</code> oder <code>v2.0-experimental</code>. UNIQUE pro (key_name, version) — Duplikat wird vom DB-Index abgewiesen.</small>
 	</label>
 
-	<label class="settings-field">
-		<span>Modell</span>
-		<input type="text" name="model" list="model-suggestions"
-			value="<?= htmlspecialchars($prompt['model'] ?? 'claude-haiku-4-5-20251001') ?>"
-			required <?= $prompt ? 'disabled' : '' ?>>
-		<datalist id="model-suggestions">
-			<option value="claude-haiku-4-5-20251001">Schnell + günstig — Scoring (P-SCORE)</option>
-			<option value="claude-sonnet-4-6">Mittlerer Tier — Allgemein</option>
-			<option value="claude-opus-4-7">Höchste Qualität — Summary / Reply</option>
-		</datalist>
-		<small class="muted">Modell-ID der LLM-API (Anthropic). Bei Router-Modus übernimmt die Provider-Chain aus <a href="/admin/llm/routing">/admin/llm/routing</a> — dieses Feld ist dann nur Fallback für direct-Modus.</small>
-	</label>
+	<p class="muted">
+		<strong>Modell &amp; Effort</strong> werden pro Rolle in der
+		<a href="/admin/llm">LLM-Provider-Ansicht</a> gesetzt (dynamisch aus dem
+		Provider-Katalog). Dieser Editor steuert nur Prompt-Text, max_tokens und temperature.
+	</p>
 
 	<div class="field-row">
 		<label class="settings-field">
