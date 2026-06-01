@@ -2,8 +2,8 @@
 
 **Project:** MailPilot AI — Outlook Add-in for AI-powered inbox triage
 **Owner:** CallMeTechie (CallMeTechie.de)
-**Stack:** Office.js Add-in + PHP 8.4 Backend + MariaDB + Redis + Claude API
-**Status:** MVP scaffolding
+**Stack:** Office.js Add-in + PHP 8.4 Backend + MariaDB + Redis + multi-provider LLM layer
+**Status:** Production — self-hosted v1.0 line (multi-tenant, multi-provider LLM, separate admin panel). v0.2 thread-analysis features in progress; 59 migrations; backend + admin + add-in deployed via Docker Compose on Synology.
 
 ---
 
@@ -19,18 +19,18 @@ Reduce email overload by classifying every incoming mail for relevance, generati
 │  Task Pane Add-in       │◄──────►│  /api/v1/*               │
 │  (Office.js, vanilla JS)│  HTTPS │  - Auth (JWT)            │
 └─────────────────────────┘        │  - Sync orchestrator     │
-                                   │  - Claude orchestrator   │
+                                   │  - LLM orchestrator      │
                                    │  - Graph API client      │
                                    └──────┬──────┬────────────┘
                                           │      │
                          ┌────────────────┘      └──────────────┐
                          ▼                                      ▼
                  ┌────────────────┐                    ┌─────────────────┐
-                 │  MS Graph API  │                    │  Claude API     │
-                 │  (OAuth2, mail │                    │  Haiku 4.5 →    │
-                 │   read, cat.)  │                    │  scoring        │
-                 └────────────────┘                    │  Opus 4.7 →     │
-                                                       │  summary/reply  │
+                 │  MS Graph API  │                    │  LLM Router     │
+                 │  (OAuth2, mail │                    │  score → Haiku  │
+                 │   read, cat.)  │                    │  summary→ Opus  │
+                 └────────────────┘                    │  +OpenAI/Gemini │
+                                                       │  /Mistral/local │
                                                        └─────────────────┘
                          ▲
                          │
@@ -66,50 +66,61 @@ mailpilot-ai/
 ├── CLAUDE.md                    # this file
 ├── README.md
 ├── docs/
-│   ├── PRD.md                   # full product spec
-│   ├── PROMPTS.md               # Claude prompt library (versioned)
+│   ├── PRD.md / PRD-PHASE-6.md  # product spec
+│   ├── PROMPTS.md               # LLM prompt library (versioned)
 │   ├── API.md                   # backend REST contract
+│   ├── BEDROCK.md               # EU-sovereign provider notes
+│   ├── SYNOLOGY-INSTALL.md      # NAS deployment guide
 │   └── DSGVO.md                 # compliance notes
 ├── addin/                       # Outlook Web Add-in
-│   ├── manifest.xml             # Office.js manifest
+│   ├── manifest.xml             # generated; source: manifest.template.xml
+│   ├── build-bundle.sh          # cat src/scripts/*.js > src/taskpane.js
+│   ├── build-manifest.sh
 │   ├── src/
-│   │   ├── taskpane.html
-│   │   ├── taskpane.js
-│   │   ├── taskpane.css
-│   │   ├── api.js               # backend client
-│   │   └── i18n.js
+│   │   ├── scripts/             # 01-state.js … 16-confirm-modal.js (SOURCE OF TRUTH)
+│   │   ├── styles/              # 01-tokens.css … 13-pin-list.css
+│   │   ├── taskpane.js          # GENERATED bundle — never edit directly
+│   │   ├── taskpane.html / taskpane.css
+│   │   └── api.js               # backend client
+│   ├── tests-js/ , tests-css/   # bundle-integrity (drift) tests
 │   └── assets/                  # icons (16/32/64/80/128)
 ├── backend/
-│   ├── public/
-│   │   ├── index.php            # front controller, only entry
-│   │   └── .htaccess
-│   ├── config/
-│   │   ├── config.php           # env-driven, no secrets in git
-│   │   └── config.example.php
-│   ├── migrations/              # numbered SQL migrations
+│   ├── public/index.php         # front controller, only entry
+│   ├── config/                  # config.php (env-driven) + config.example.php
+│   ├── migrations/              # 59 numbered SQL migrations
+│   ├── bin/                     # worker.php, migrate.php, smoke.php, …
 │   ├── src/
-│   │   ├── Controllers/         # thin HTTP layer
-│   │   ├── Services/            # business logic
-│   │   ├── Claude/              # Claude API client + prompt templates
+│   │   ├── Controllers/         # thin HTTP layer (+ Settings/)
+│   │   ├── Services/            # business logic (+ Sender/, Scoring/)
+│   │   ├── Llm/                 # multi-provider layer: LlmRouter + Providers/
+│   │   │                        #   (Anthropic, OpenAI, Gemini, Mistral, OpenAI-compat),
+│   │   │                        #   LlmCallLogger, GoldenSetRunner
+│   │   ├── Claude/              # Anthropic/Bedrock clients + ProviderFactory
 │   │   ├── Graph/               # MS Graph API client
-│   │   ├── Repositories/        # PDO data access
+│   │   ├── Repositories/        # PDO data access (tenant_id enforced)
+│   │   ├── Http/                # Kernel, routing, Exceptions
+│   │   ├── Security/ , Util/
 │   │   └── Models/              # plain DTOs
+│   ├── tests/                   # Unit/ + Integration/ (PHPUnit)
 │   └── composer.json
+├── admin/                       # separate admin panel (own public/, Kernel,
+│                                #   Controllers, server-rendered Views: tenants,
+│                                #   prompts, LLM, budget, usage, audit, cache)
 ├── sql/
 │   └── schema.sql               # full schema snapshot
-└── docker/
-    ├── Dockerfile
-    └── docker-compose.yml       # for Synology deployment
+└── docker/                      # Dockerfile(+.admin), nginx, supervisord,
+    ├── docker-compose.yml       #   compose for local dev …
+    └── docker-compose.synology.yml  # … and Synology deployment
 ```
 
-## 5. Claude API usage rules
+## 5. LLM usage rules (multi-provider)
 
-- **Scoring model:** `claude-haiku-4-5-20251001` — batches of up to 20 mails per call
-- **Summary/Reply model:** `claude-opus-4-7` — one mail at a time, only if score ≥ 60
+- **Never call a provider SDK directly.** All inference goes through `Llm\LlmRouter`, which resolves a model from the `llm_models` registry by **role** (`score` / `summary` / `draft` / `inference`) and walks a per-role **failover chain** across configured providers. Default provider: Anthropic; fallbacks: OpenAI, Gemini, Mistral, Qwen, and any OpenAI-compatible local endpoint (privacy mode). Every call is mirrored to `llm_call_log` for the cost dashboard.
+- **Default models per role:** `score` → `claude-haiku-4-5-20251001` (batches of up to 20 mails per call), `summary` / `draft` → `claude-opus-4-7` (one mail at a time, only if score ≥ 60), `inference` → Haiku-class. Per-role models are overridable in the admin panel — don't hard-code model IDs in services.
 - **Always** set `max_tokens` explicitly. Scoring: 2000. Summary: 400. Reply draft: 800.
 - **Caching:** Hash `(from, subject, body_first_2kb)` → SHA-256. If cached score exists in last 30 days, reuse.
-- **Pre-filter before Claude:** Discard mails where `List-Unsubscribe` header is set AND sender not in user's VIP list → auto-score `newsletter`.
-- **PII redaction:** Before sending to Claude, redact IBANs, credit card numbers, and strings matching user's configured redaction patterns.
+- **Pre-filter before the LLM:** Discard mails where `List-Unsubscribe` header is set AND sender not in user's VIP list → auto-score `newsletter`.
+- **PII redaction:** Before sending to any provider, redact IBANs, credit card numbers, and strings matching user's configured redaction patterns (`RedactionService`).
 
 ## 6. Multi-tenancy
 

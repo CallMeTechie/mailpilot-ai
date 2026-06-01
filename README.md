@@ -23,7 +23,7 @@ Backend (PHP 8.4 + MariaDB + Redis)  ← Synology NAS
     ↓
 Microsoft Graph API  (Mails, Kategorien)
     ↓
-Claude API (Haiku → Scoring, Opus → Summary/Reply)
+LLM-Router (Claude Haiku→Scoring, Opus→Summary/Reply · OpenAI/Gemini/Mistral/lokal als Fallback)
 ```
 
 ## Tech Stack
@@ -33,7 +33,7 @@ Claude API (Haiku → Scoring, Opus → Summary/Reply)
 | Add-in | Office.js, vanilla JS, ES2022 modules |
 | Backend | PHP 8.4, PSR-12 (tabs), PDO |
 | Storage | MariaDB 11.4, Redis 7 |
-| AI | Claude Haiku 4.5 + Opus 4.7 |
+| AI | Multi-Provider-LLM-Schicht — Claude Haiku/Opus (default), OpenAI, Gemini, Mistral, lokale Modelle; Failover via `LlmRouter` |
 | Integration | MS Graph API (OAuth2 + PKCE) |
 | Deploy | Docker Compose on Synology DSM 7.2 |
 
@@ -123,7 +123,7 @@ Office Add-ins erfordern HTTPS — für lokal entweder self-signed Cert oder
 
 ### MVP (v0.1) — abgeschlossen
 - [x] Projekt-Skelett
-- [x] DB-Schema (inkl. 29 Migrations)
+- [x] DB-Schema (inkl. 59 Migrations)
 - [x] Claude Client + Scoring Service
 - [x] Graph Client + OAuth
 - [x] Task Pane UI
