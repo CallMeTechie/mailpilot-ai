@@ -282,6 +282,26 @@ final class LlmController extends BaseController
 		]);
 	}
 
+	/**
+	 * Normalisiert die Chain-Eingabe (Array aus Select-Slots ODER komma-getrennter
+	 * String, backward-compat) zu einer geordneten, deduplizierten Provider-ID-Liste.
+	 *
+	 * @param  mixed $raw
+	 * @return list<string>
+	 */
+	public static function parseChainInput(mixed $raw): array
+	{
+		$candidates = is_array($raw) ? $raw : preg_split('/\s*,\s*/', (string)$raw);
+		$ids = [];
+		foreach ($candidates as $c) {
+			$c = trim((string)$c);
+			if ($c !== '' && !in_array($c, $ids, true)) {
+				$ids[] = $c;   // dedup, Reihenfolge erhalten
+			}
+		}
+		return $ids;
+	}
+
 	public function saveRouting(array $params): void
 	{
 		$this->verifyCsrf();
@@ -301,17 +321,8 @@ final class LlmController extends BaseController
 
 		$roles = ['score', 'summary', 'draft', 'inference'];
 		foreach ($roles as $role) {
-			$raw = $_POST["chain_{$role}"] ?? '';
-			$ids = [];
-			if (is_string($raw) && $raw !== '') {
-				foreach (preg_split('/\s*,\s*/', $raw) as $candidate) {
-					$candidate = trim((string)$candidate);
-					if ($candidate !== '') {
-						$ids[] = $candidate;
-					}
-				}
-			}
-			$settings->set("llm.{$role}.fallback_chain", json_encode(array_values($ids), JSON_UNESCAPED_UNICODE));
+			$ids = self::parseChainInput($_POST["chain_{$role}"] ?? []);
+			$settings->set("llm.{$role}.fallback_chain", json_encode($ids, JSON_UNESCAPED_UNICODE));
 		}
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');

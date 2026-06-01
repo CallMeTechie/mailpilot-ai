@@ -9,6 +9,11 @@
  * @var string $csrfToken
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+$routingModeLabels = ['direct' => 'Direkt (kein Failover)', 'router' => 'Router (Failover aktiv)'];
+$privacyLabels     = ['cloud_allowed' => 'Cloud erlaubt', 'local_preferred' => 'Lokal bevorzugt', 'local_only' => 'Nur lokal'];
+$pl = fn(string $k): string => $privacyLabels[$k] ?? $k;
+$rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 ?>
 
 <header class="page-head">
@@ -21,18 +26,13 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	</div>
 </header>
 
-<?php /* Phase 9q B4 (Marc 2026-05-23): aktueller Status prominent. */ ?>
 <?php if ($routingMode === 'direct'): ?>
 <div class="flash flash-warn" style="margin-bottom: var(--mp-sp-3)">
-	<strong>Aktueller Routing-Modus: <code>direct</code></strong> — Failover-Chain ist <strong>INAKTIV</strong>.
-	MailScoringService ruft AnthropicClient direkt; Usage-/Cost-Dashboard bleibt leer für Production-Calls
-	(es sei denn der MailScoringService loggt seine Calls separat — Marc-2026-05-23-Hotfix).
-	Aktivieren: unten „router" wählen und speichern.
+	<strong>Aktueller Routing-Modus: <?= $h($rl('direct')) ?></strong> — die Failover-Chain gilt nur für <code>score</code> (und <code>inference</code>) und ist im direct-Modus <strong>inaktiv</strong>: Scoring ruft den konfigurierten Claude-Provider (Anthropic oder Bedrock) direkt mit dem Modell aus dem P-SCORE-Prompt. <strong>Summary und Draft laufen unabhängig vom Modus immer über den Router.</strong> Für Failover beim Scoring unten „<?= $h($rl('router')) ?>" wählen.
 </div>
 <?php else: ?>
 <div class="flash flash-success" style="margin-bottom: var(--mp-sp-3)">
-	<strong>Aktueller Routing-Modus: <code>router</code></strong> — Failover-Chain ist <strong>AKTIV</strong>.
-	Privacy-Mode <code><?= $h($privacyMode) ?></code>.
+	<strong>Aktueller Routing-Modus: <?= $h($rl('router')) ?></strong> — Failover-Chain aktiv. Privacy-Mode: <strong><?= $h($pl($privacyMode)) ?></strong>.
 </div>
 <?php endif; ?>
 
@@ -42,46 +42,60 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 	<section class="panel">
 		<h2>Routing-Modus</h2>
 		<p class="muted">
-			<strong>direct</strong> = bestehender Code-Pfad (AnthropicClient direkt, kein Failover).
-			<strong>router</strong> = LlmRouter mit Fallback-Chain.
+			<strong><?= $h($rl('direct')) ?></strong> = Scoring ruft den konfigurierten Claude-Provider (Anthropic oder Bedrock) direkt, ohne Failover.
+			<strong><?= $h($rl('router')) ?></strong> = Scoring läuft über den LlmRouter mit Fallback-Chain.
+			Summary/Draft nutzen den Router ohnehin immer.
 		</p>
-		<label><input type="radio" name="routing_mode" value="direct"  <?= $routingMode === 'direct' ? 'checked' : '' ?>> direct (kein Failover)</label><br>
-		<label><input type="radio" name="routing_mode" value="router"  <?= $routingMode === 'router' ? 'checked' : '' ?>> router (Failover aktiv)</label>
+		<label><input type="radio" name="routing_mode" value="direct" <?= $routingMode === 'direct' ? 'checked' : '' ?>> <?= $h($rl('direct')) ?></label><br>
+		<label><input type="radio" name="routing_mode" value="router" <?= $routingMode === 'router' ? 'checked' : '' ?>> <?= $h($rl('router')) ?></label>
 	</section>
 
 	<section class="panel">
 		<h2>Privacy-Mode</h2>
 		<p class="muted">Steuert ob Cloud-Provider in der Fallback-Chain genutzt werden duerfen.</p>
-		<label><input type="radio" name="privacy_mode" value="cloud_allowed"   <?= $privacyMode === 'cloud_allowed'   ? 'checked' : '' ?>> <strong>cloud_allowed</strong> — alle Provider in Reihenfolge</label><br>
-		<label><input type="radio" name="privacy_mode" value="local_preferred" <?= $privacyMode === 'local_preferred' ? 'checked' : '' ?>> <strong>local_preferred</strong> — lokale Modelle zuerst, Cloud nur wenn lokal down</label><br>
-		<label><input type="radio" name="privacy_mode" value="local_only"      <?= $privacyMode === 'local_only'      ? 'checked' : '' ?>> <strong>local_only</strong> — nur lokale Modelle, Mails verlassen niemals das Netz</label>
+		<label><input type="radio" name="privacy_mode" value="cloud_allowed" <?= $privacyMode === 'cloud_allowed' ? 'checked' : '' ?>> <strong><?= $h($pl('cloud_allowed')) ?></strong> — alle Provider in Reihenfolge</label><br>
+		<label><input type="radio" name="privacy_mode" value="local_preferred" <?= $privacyMode === 'local_preferred' ? 'checked' : '' ?>> <strong><?= $h($pl('local_preferred')) ?></strong> — lokale Modelle zuerst, Cloud nur als Fallback</label><br>
+		<label><input type="radio" name="privacy_mode" value="local_only" <?= $privacyMode === 'local_only' ? 'checked' : '' ?>> <strong><?= $h($pl('local_only')) ?></strong> — nur lokale Modelle, Mails verlassen das Netz nie</label>
 	</section>
 
 	<section class="panel">
 		<h2>Fallback-Chain pro Rolle</h2>
-		<p class="muted">Kommagetrennte Provider-IDs in Reihenfolge. Primary zuerst, Fallback danach.</p>
+		<p class="muted">Reihenfolge = Priorität. Pro Slot einen Provider wählen; Primary zuerst, Fallbacks danach.</p>
 		<?php foreach ($roles as $role): ?>
+			<?php
+			// Provider deduplizieren (eine Rolle kann pro Provider mehrere Modell-Rows haben)
+			$provs = [];
+			foreach ($chains[$role]['available'] as $a) {
+				$pid = (string)$a['provider_id'];
+				if (!isset($provs[$pid])) {
+					$provs[$pid] = [
+						'name'     => (string)($a['provider_name'] ?? $pid),
+						'kind'     => (string)($a['provider_kind'] ?? ''),
+						'is_local' => (int)($a['is_local'] ?? 0),
+					];
+				}
+			}
+			$configured = $chains[$role]['configured'];                 // geordnete provider_ids
+			// konfigurierte-aber-nicht-verfügbare IDs erhalten (nicht still verlieren)
+			foreach ($configured as $cid) {
+				if (!isset($provs[$cid])) { $provs[$cid] = ['name' => $cid . ' (nicht verfügbar)', 'kind' => '', 'is_local' => 0]; }
+			}
+			$slotCount = max(count($provs), count($configured), 1);
+			?>
 			<details <?= $role === 'score' ? 'open' : '' ?>>
-				<summary><strong><?= $h($role) ?></strong> — <?= count($chains[$role]['configured']) ?> Provider in Chain</summary>
-				<div class="form-grid">
+				<summary><strong><?= $h($role) ?></strong> — <?= count($configured) ?> Provider in der Chain</summary>
+				<p class="muted">Reihenfolge = Priorität: Slot 1 = Primary, danach Fallbacks. „— (leer)" lässt den Slot weg.</p>
+				<?php for ($i = 0; $i < $slotCount; $i++): $sel = $configured[$i] ?? ''; ?>
 					<label class="settings-field">
-						<span class="settings-key">Chain (komma-getrennt, Provider-UUIDs)</span>
-						<input type="text" name="chain_<?= $h($role) ?>" value="<?= $h(implode(',', $chains[$role]['configured'])) ?>" style="width:100%; font-family:monospace; font-size:11px">
+						<span class="settings-key"><?= $i === 0 ? 'Primary' : 'Fallback ' . $i ?></span>
+						<select name="chain_<?= $h($role) ?>[]">
+							<option value="">— (leer)</option>
+							<?php foreach ($provs as $pid => $p): ?>
+								<option value="<?= $h($pid) ?>" <?= $pid === $sel ? 'selected' : '' ?>><?= $h($p['name']) ?><?= $p['kind'] !== '' ? ' (' . $h($p['kind']) . ')' : '' ?> <?= $p['is_local'] === 1 ? '🏠' : '☁' ?></option>
+							<?php endforeach; ?>
+						</select>
 					</label>
-					<div>
-						<small class="muted">Verfügbare Modelle für diese Rolle:</small>
-						<ul style="font-size:12px">
-						<?php foreach ($chains[$role]['available'] as $a): ?>
-							<li>
-								<code><?= $h((string)$a['provider_id']) ?></code>
-								— <?= $h((string)$a['provider_name']) ?>
-								(<?= $h((string)$a['model_id']) ?>)
-								<?= (int)$a['is_local'] === 1 ? '🏠' : '☁' ?>
-							</li>
-						<?php endforeach; ?>
-						</ul>
-					</div>
-				</div>
+				<?php endfor; ?>
 			</details>
 		<?php endforeach; ?>
 	</section>
