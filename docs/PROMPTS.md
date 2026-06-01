@@ -6,7 +6,7 @@ All prompts are versioned. When changing a prompt, bump the version, keep the ol
 
 ## P-SCORE v1.0 — Batch Mail Classification
 
-**Model:** `claude-haiku-4-5-20251001`
+**Model:** `claude-haiku-4-5-20251001` (Default der `score`-Rolle; final pro Rolle im LLM-Provider/Routing-Admin gesetzt)
 **Max tokens:** 2000
 **Temperature:** 0.1
 **Purpose:** Classify up to 20 mails in one call.
@@ -91,7 +91,7 @@ in derselben Reihenfolge.
 
 ## P-SCORE v1.1 — Batch Mail Classification + Sub-Labels
 
-**Model:** `claude-haiku-4-5-20251001`
+**Model:** `claude-haiku-4-5-20251001` (Default der `score`-Rolle; final pro Rolle im LLM-Provider/Routing-Admin gesetzt)
 **Max tokens:** scales with batch (≥ 2000, +160 per mail, +400 slack)
 **Purpose:** Same as v1.0, plus the per-user free-form sub-label axis.
 
@@ -146,7 +146,7 @@ Anzahl results = Anzahl mails, in derselben Reihenfolge.
 
 ## P-SUMMARY v1.0 — Single Mail Deep Summary
 
-**Model:** `claude-opus-4-7`
+**Model + Effort:** pro Rolle (`summary`) im LLM-Provider/Routing-Admin gesetzt (dynamischer Modell-Katalog) — nicht im Prompt. Default-Rolle: Opus-4.8-Klasse.
 **Max tokens:** 400
 **Temperature:** 0.2
 **Purpose:** Called only when score ≥ 60 (direct or action). Gives user a "I don't need to open this" summary.
@@ -170,7 +170,7 @@ Antworte auf {user_language}. Kein Markdown, klare Sätze. Max 120 Wörter total
 
 ## P-REPLY v1.0 — Draft Reply Generation
 
-**Model:** `claude-opus-4-7`
+**Model + Effort:** pro Rolle (`draft`) im LLM-Provider/Routing-Admin gesetzt (dynamischer Modell-Katalog) — nicht im Prompt. Default-Rolle: Opus-4.8-Klasse.
 **Max tokens:** 800
 **Temperature:** 0.4
 

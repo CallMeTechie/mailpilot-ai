@@ -64,9 +64,13 @@ final class LlmController extends BaseController
 			&& $provider['api_key_encrypted'] !== '';
 		unset($provider['api_key_encrypted']);
 
+		$catalog = $this->kernel->get(\MailPilot\Repositories\LlmModelCatalogRepository::class)
+			->listByProvider((string)$params['id'], availableOnly: true);
+
 		$this->render('llm/edit', [
 			'provider'  => $provider,
 			'models'    => $models,
+			'catalog'   => $catalog,
 			'csrfToken' => $this->csrfToken(),
 		]);
 	}
@@ -184,25 +188,65 @@ final class LlmController extends BaseController
 		$this->redirect('/admin/llm/' . urlencode($id));
 	}
 
+	public function refreshModels(array $params): void
+	{
+		$this->verifyCsrf();
+		$id = (string)($params['id'] ?? '');
+		$providerRepo = $this->kernel->get(\MailPilot\Repositories\LlmProviderRepository::class);
+		$row = $providerRepo->findById($id);
+		if ($row === null) {
+			$this->flash('error', 'Provider nicht gefunden.');
+			$this->redirect('/admin/llm');
+			return;
+		}
+		$svc = $this->kernel->get(\MailPilot\Llm\ModelCatalogService::class);
+		$res = $svc->refreshProvider($id, (string)$row['kind']);
+		if ($res['error'] !== null) {
+			$this->flash('error', sprintf('Discovery fehlgeschlagen: %s', $res['error']));
+		} else {
+			$this->flash('success', sprintf('%d Modelle entdeckt/aktualisiert.', $res['discovered']));
+		}
+		$this->redirect('/admin/llm/' . urlencode($id));
+	}
+
 	public function saveModel(array $params): void
 	{
 		$this->verifyCsrf();
-		$modelId = (string)($params['mid'] ?? '');
+		$modelRowId = (string)($params['mid'] ?? '');
 		$providerId = (string)($_POST['provider_id'] ?? '');
-
 		$pdo = $this->kernel->get(PDO::class);
-		$pdo->prepare(
-			'UPDATE llm_models
-			 SET enabled = :en, priority = :p,
-			     cost_per_mtok_in  = :ci, cost_per_mtok_out = :co
-			 WHERE id = :id'
-		)->execute([
+
+		$newModelId = trim((string)($_POST['model_id'] ?? ''));
+		$effort     = (string)($_POST['effort'] ?? '');
+		$effort     = $effort === '' ? null : $effort;
+
+		if ($effort !== null && $newModelId !== '') {
+			$cat = $this->kernel->get(\MailPilot\Repositories\LlmModelCatalogRepository::class)
+				->find($providerId, $newModelId);
+			$levels = $cat !== null && $cat['effort_levels'] !== null
+				? (array)json_decode((string)$cat['effort_levels'], true)
+				: \MailPilot\Llm\ModelCatalogService::EFFORT_LEVELS_ALL;
+			if (!in_array($effort, $levels, true)) {
+				$this->flash('error', sprintf('Effort „%s" wird von %s nicht unterstützt.', $effort, $newModelId));
+				$this->redirect('/admin/llm/' . urlencode($providerId));
+				return;
+			}
+		}
+
+		$sets = 'enabled = :en, priority = :p, cost_per_mtok_in = :ci, cost_per_mtok_out = :co, effort = :ef';
+		$args = [
 			':en' => isset($_POST['enabled']) ? 1 : 0,
 			':p'  => max(0, min(1000, (int)($_POST['priority'] ?? 100))),
 			':ci' => ($_POST['cost_in']  ?? '') !== '' ? (float)$_POST['cost_in']  : null,
 			':co' => ($_POST['cost_out'] ?? '') !== '' ? (float)$_POST['cost_out'] : null,
-			':id' => $modelId,
-		]);
+			':ef' => $effort,
+			':id' => $modelRowId,
+		];
+		if ($newModelId !== '') {
+			$sets .= ', model_id = :mid';
+			$args[':mid'] = $newModelId;
+		}
+		$pdo->prepare("UPDATE llm_models SET {$sets} WHERE id = :id")->execute($args);
 		$this->flash('success', 'Modell aktualisiert.');
 		$this->redirect('/admin/llm/' . urlencode($providerId));
 	}

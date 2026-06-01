@@ -127,6 +127,7 @@ final class LlmRouterFailoverTest extends TestCase
 					providerKind: $this->kind,
 				);
 			}
+			public function listModels(): array { return []; }
 		};
 	}
 
@@ -286,6 +287,7 @@ final class LlmRouterFailoverTest extends TestCase
 					finishReason: 'stop', modelId: $request->modelHint, providerKind: 'anthropic',
 				);
 			}
+			public function listModels(): array { return []; }
 		};
 		$openai = $this->fakeProvider('openai');
 

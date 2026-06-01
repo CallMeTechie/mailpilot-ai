@@ -69,13 +69,18 @@ final class PromptController extends BaseController
 		$stmt = $pdo->prepare('INSERT INTO prompt_versions
 			(id, key_name, version, system_prompt, user_template, model, max_tokens, temperature, active)
 			VALUES (:id, :kn, :v, :sp, :ut, :m, :mt, :t, 0)');
+		$keyName = (string)($_POST['key_name'] ?? '');
+		$roleByKey = ['P-SUMMARY' => 'summary', 'P-REPLY' => 'draft', 'P-SCORE' => 'score'];
+		$role = $roleByKey[$keyName] ?? 'summary';
+		$byRole = $this->kernel->get(\MailPilot\Repositories\LlmModelRepository::class)->listByRole($role);
+		$model = (string)($byRole[0]['model_id'] ?? 'claude-opus-4-8');
 		$stmt->execute([
 			':id' => $id,
-			':kn' => (string)($_POST['key_name'] ?? ''),
+			':kn' => $keyName,
 			':v'  => (string)($_POST['version'] ?? ''),
 			':sp' => (string)($_POST['system_prompt'] ?? ''),
 			':ut' => (string)($_POST['user_template'] ?? ''),
-			':m'  => (string)($_POST['model'] ?? ''),
+			':m'  => $model,
 			':mt' => (int)($_POST['max_tokens'] ?? 1000),
 			':t'  => (float)($_POST['temperature'] ?? 0.2),
 		]);

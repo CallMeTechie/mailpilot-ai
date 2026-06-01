@@ -104,6 +104,7 @@ $routes = [
 	['POST', '#^/admin/llm/(?P<id>[^/]+)/api-key$#',      LlmController::class, 'saveApiKey'],
 	['POST', '#^/admin/llm/(?P<id>[^/]+)/toggle$#',       LlmController::class, 'toggleEnabled'],
 	['POST', '#^/admin/llm/(?P<id>[^/]+)/test$#',         LlmController::class, 'testConnection'],
+	['POST', '#^/admin/llm/(?P<id>[^/]+)/models/refresh$#',  LlmController::class, 'refreshModels'],
 ];
 
 foreach ($routes as [$m, $pattern, $class, $action]) {

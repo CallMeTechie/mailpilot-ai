@@ -28,7 +28,7 @@ Kunden-Mails oder regulierten Branchen (Kanzlei, Medizin, Behörden) → Bedrock
 - [ ] Region oben rechts auf **Europe (Frankfurt) eu-central-1** stellen
 - [ ] Service "Amazon Bedrock" öffnen
 - [ ] Links → **Model access** → **Manage model access**
-- [ ] Claude-Modelle anhaken (Haiku 4.5, Opus 4.7 etc.) → Submit
+- [ ] Claude-Modelle anhaken (Haiku 4.5, Opus 4.7, Opus 4.8 etc.) → Submit
 - [ ] Auf Freischaltung warten (meist Sekunden bis Minuten)
 
 Hinweis: Nur das Haken von Modellen reicht — Bedrock ist pro-request-billed,
@@ -50,8 +50,10 @@ kein separater Vertrag nötig.
       "Resource": [
         "arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-haiku-4-5-v1:0",
         "arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-opus-4-7-v1:0",
+        "arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-opus-4-8",
         "arn:aws:bedrock:eu-central-1:*:inference-profile/eu.anthropic.claude-haiku-4-5-v1:0",
-        "arn:aws:bedrock:eu-central-1:*:inference-profile/eu.anthropic.claude-opus-4-7-v1:0"
+        "arn:aws:bedrock:eu-central-1:*:inference-profile/eu.anthropic.claude-opus-4-7-v1:0",
+        "arn:aws:bedrock:eu-central-1:*:inference-profile/eu.anthropic.claude-opus-4-8"
       ]
     }
   ]
@@ -74,7 +76,12 @@ Die in `config.example.php` hinterlegten IDs:
 ```
 eu.anthropic.claude-haiku-4-5-v1:0
 eu.anthropic.claude-opus-4-7-v1:0
+eu.anthropic.claude-opus-4-8
 ```
+
+Hinweis: Opus 4.8 nutzt die neue Bedrock-Namenskonvention **ohne** `-v1:0`-Suffix.
+Basis-Modell-ID `anthropic.claude-opus-4-8`, EU-Geo-Inferenz-ID
+`eu.anthropic.claude-opus-4-8`.
 
 Falls AWS die IDs ändert, hier und in `config.php` anpassen:
 `claude.bedrock.model_map`.

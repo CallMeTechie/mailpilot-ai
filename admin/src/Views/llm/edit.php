@@ -87,11 +87,25 @@ $pid = (string)$provider['id'];
 <section class="panel">
 	<h2>Modelle</h2>
 	<p class="muted">Pro Rolle (score/summary/draft/inference) kann der Provider verschiedene Modelle anbieten. Pricing in USD pro Million Token.</p>
+	<form method="post" action="/admin/llm/<?= $h($pid) ?>/models/refresh" style="margin-bottom:1rem">
+		<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+		<button type="submit" class="btn btn-sm">Modelle aktualisieren</button>
+		<span class="muted">Fragt die Models-API dieses Providers live ab.</span>
+	</form>
+	<?php
+	$catalogJs = [];
+	foreach (($catalog ?? []) as $c) {
+		$catalogJs[(string)$c['model_id']] = $c['effort_levels'] !== null
+			? (array)json_decode((string)$c['effort_levels'], true) : [];
+	}
+	?>
+	<script>window.MP_CATALOG = <?= json_encode($catalogJs, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?>;</script>
 	<table class="data">
 		<thead>
 			<tr>
 				<th>Model-ID</th>
 				<th>Rolle</th>
+				<th>Effort</th>
 				<th>Aktiv</th>
 				<th>Priority</th>
 				<th>$/Mtok in</th>
@@ -107,8 +121,29 @@ $pid = (string)$provider['id'];
 				<form method="post" action="/admin/llm/models/<?= $h((string)$m['id']) ?>">
 					<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
 					<input type="hidden" name="provider_id" value="<?= $h($pid) ?>">
-					<td><code><?= $h((string)$m['model_id']) ?></code></td>
+					<td>
+						<select name="model_id" class="mp-model">
+							<?php
+							$current = (string)$m['model_id'];
+							$ids = array_keys($catalogJs);
+							if (!in_array($current, $ids, true)) { array_unshift($ids, $current); }
+							foreach ($ids as $mid): ?>
+								<option value="<?= $h($mid) ?>" <?= $mid === $current ? 'selected' : '' ?>><?= $h($mid) ?></option>
+							<?php endforeach; ?>
+						</select>
+						<?php if ((string)$m['role'] === 'score'): ?>
+							<span class="muted" title="Score nutzt im direct-Mode den gebatchten Pfad">⚠ nur bei routing_mode=router</span>
+						<?php endif; ?>
+					</td>
 					<td><span class="badge"><?= $h((string)$m['role']) ?></span></td>
+					<td>
+						<select name="effort" class="mp-effort">
+							<option value="">— (Default)</option>
+							<?php foreach (['low', 'medium', 'high', 'xhigh', 'max'] as $lvl): ?>
+								<option value="<?= $lvl ?>" <?= (string)($m['effort'] ?? '') === $lvl ? 'selected' : '' ?>><?= $lvl ?></option>
+							<?php endforeach; ?>
+						</select>
+					</td>
 					<td><input type="checkbox" name="enabled" <?= (int)$m['enabled'] === 1 ? 'checked' : '' ?>></td>
 					<td><input type="number" name="priority" min="0" max="1000" value="<?= $h((string)$m['priority']) ?>" style="width:5em"></td>
 					<td><input type="number" step="0.0001" name="cost_in"  value="<?= $h($m['cost_per_mtok_in']  !== null ? (string)$m['cost_per_mtok_in']  : '') ?>" style="width:6em"></td>
@@ -122,3 +157,24 @@ $pid = (string)$provider['id'];
 		</tbody>
 	</table>
 </section>
+<script>
+document.querySelectorAll('.mp-model').forEach(function (sel) {
+	function sync() {
+		var levels = (window.MP_CATALOG[sel.value] || []);
+		var eff = sel.closest('tr').querySelector('.mp-effort');
+		var cur = eff.value;
+		eff.replaceChildren();
+		var def = document.createElement('option');
+		def.value = ''; def.textContent = '— (Default)';
+		eff.appendChild(def);
+		levels.forEach(function (l) {
+			var o = document.createElement('option');
+			o.value = l; o.textContent = l; if (l === cur) o.selected = true;
+			eff.appendChild(o);
+		});
+		eff.disabled = levels.length === 0;
+	}
+	sel.addEventListener('change', sync);
+	sync();
+});
+</script>

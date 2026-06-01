@@ -5,6 +5,9 @@ namespace MailPilot\Services;
 
 use MailPilot\Claude\ClaudeClient;
 use MailPilot\Claude\ClaudeProvider;
+use MailPilot\Llm\LlmAllProvidersDownException;
+use MailPilot\Llm\LlmRouter;
+use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SummaryRepository;
@@ -21,12 +24,13 @@ final class MailSummaryService
 	private const PROMPT_KEY = 'P-SUMMARY';
 
 	public function __construct(
-		private readonly ClaudeProvider $claude,
+		private readonly LlmRouter $router,
 		private readonly MailRepository $mails,
 		private readonly SummaryRepository $summaries,
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
 		private readonly PromptRepository $prompts,
+		private readonly ?ClaudeProvider $claudeFallback = null,
 	) {
 	}
 
@@ -82,12 +86,33 @@ final class MailSummaryService
 
 		$start = microtime(true);
 		try {
-			$resp = $this->claude->messages([
-				'model'      => $model,
-				'max_tokens' => $maxTokens,
-				'system'     => $system,
-				'messages'   => [['role' => 'user', 'content' => $user]],
-			]);
+			try {
+				$req = new NormalizedRequest(
+					systemPrompt:   $system,
+					messages:       [['role' => 'user', 'content' => $user]],
+					maxTokens:      $maxTokens,
+					temperature:    0.3,
+					modelHint:      '',     // Router resolved Modell+Effort pro Rolle
+					responseFormat: null,
+					cacheSegments:  [],     // wie bisher: KEIN Caching
+				);
+				$resp      = $this->router->complete($req, 'summary');
+				$text      = $resp->content;
+				$usageRaw  = $resp->usage['raw'] ?? [];
+				$usedModel = $resp->modelId;
+			} catch (LlmAllProvidersDownException $e) {
+				// Safety-Net: leere/kaputte Chain → Legacy-Direct-Anthropic.
+				if ($this->claudeFallback === null) {
+					throw $e;
+				}
+				$legacy    = $this->claudeFallback->messages([
+					'model' => $model, 'max_tokens' => $maxTokens,
+					'system' => $system, 'messages' => [['role' => 'user', 'content' => $user]],
+				]);
+				$text      = ClaudeClient::extractText($legacy);
+				$usageRaw  = $legacy['usage'] ?? [];
+				$usedModel = $model;
+			}
 		} catch (\Throwable $e) {
 			$this->budget->recordUsage([
 				'tenant_id' => $tenantId, 'user_id' => $userId,
@@ -100,11 +125,12 @@ final class MailSummaryService
 			]);
 			throw $e;
 		}
-		$u = $resp['usage'] ?? [];
+
+		$u = $usageRaw;
 		$this->budget->recordUsage([
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'mailbox_id' => $mailboxId, 'mail_id' => $mailId,
-			'prompt_version' => $promptVersionTag, 'model' => $model,
+			'prompt_version' => $promptVersionTag, 'model' => $usedModel,
 			'input_tokens'          => (int)($u['input_tokens']                ?? 0),
 			'output_tokens'         => (int)($u['output_tokens']               ?? 0),
 			'cache_read_tokens'     => (int)($u['cache_read_input_tokens']     ?? 0),
@@ -113,8 +139,7 @@ final class MailSummaryService
 			'status' => 'success', 'error_text' => null,
 		]);
 
-		$text = ClaudeClient::extractText($resp);
-		$this->summaries->create($tenantId, $mailId, $text, $promptVersionTag, $model);
+		$this->summaries->create($tenantId, $mailId, $text, $promptVersionTag, $usedModel);
 		return $text;
 	}
 }

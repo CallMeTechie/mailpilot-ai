@@ -23,7 +23,7 @@ Backend (PHP 8.4 + MariaDB + Redis)  ← Synology NAS
     ↓
 Microsoft Graph API  (Mails, Kategorien)
     ↓
-LLM-Router (Claude Haiku→Scoring, Opus→Summary/Reply · OpenAI/Gemini/Mistral/lokal als Fallback)
+LLM-Router (Claude Haiku→Scoring, Opus 4.8→Summary/Reply · OpenAI/Gemini/Mistral/lokal als Fallback)
 ```
 
 ## Tech Stack
@@ -33,7 +33,7 @@ LLM-Router (Claude Haiku→Scoring, Opus→Summary/Reply · OpenAI/Gemini/Mistra
 | Add-in | Office.js, vanilla JS, ES2022 modules |
 | Backend | PHP 8.4, PSR-12 (tabs), PDO |
 | Storage | MariaDB 11.4, Redis 7 |
-| AI | Multi-Provider-LLM-Schicht — Claude Haiku/Opus (default), OpenAI, Gemini, Mistral, lokale Modelle; Failover via `LlmRouter` |
+| AI | Multi-Provider-LLM-Schicht mit dynamischem Modell-Katalog (live pro Provider entdeckt) + Effort pro Rolle — Claude Haiku→Scoring, Opus 4.8→Summary/Reply (default), OpenAI, Gemini, Mistral, lokale Modelle; Failover via `LlmRouter` |
 | Integration | MS Graph API (OAuth2 + PKCE) |
 | Deploy | Docker Compose on Synology DSM 7.2 |
 

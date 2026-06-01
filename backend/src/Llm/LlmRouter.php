@@ -98,6 +98,8 @@ final class LlmRouter
 					modelHint:      (string)$modelRow['model_id'],
 					responseFormat: $request->responseFormat,
 					cacheSegments:  $request->cacheSegments,
+					effort:         isset($modelRow['effort']) && $modelRow['effort'] !== null
+						? (string)$modelRow['effort'] : $request->effort,
 				);
 			}
 

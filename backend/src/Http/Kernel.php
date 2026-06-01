@@ -276,6 +276,21 @@ class Kernel
 				$this->get(\MailPilot\Repositories\LlmModelRepository::class),
 				$this->get(\MailPilot\Llm\LlmCallLogger::class),
 			),
+			\MailPilot\Repositories\LlmModelCatalogRepository::class =>
+				new \MailPilot\Repositories\LlmModelCatalogRepository($this->get(PDO::class)),
+			\MailPilot\Llm\ModelCatalogService::class =>
+				new \MailPilot\Llm\ModelCatalogService(
+					[
+						'anthropic'         => $this->get(\MailPilot\Llm\Providers\AnthropicProvider::class),
+						'openai'            => $this->get(\MailPilot\Llm\Providers\OpenAiProvider::class),
+						'openai_compatible' => $this->get(\MailPilot\Llm\Providers\OpenAiCompatibleProvider::class),
+						'gemini'            => $this->get(\MailPilot\Llm\Providers\GeminiProvider::class),
+						'mistral'           => $this->get(\MailPilot\Llm\Providers\MistralProvider::class),
+					],
+					$this->get(\MailPilot\Repositories\LlmModelCatalogRepository::class),
+					$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
+					$this->get(Logger::class),
+				),
 			FolderPathBuilder::class  => new FolderPathBuilder(
 				fn(): string => $this->get(SettingsRepository::class)->getString('sort_root', ''),
 				// Phase 9m (Marc 2026-05-21): mailpilot_root steuert die
@@ -341,21 +356,23 @@ class Kernel
 				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
-				$this->get(ClaudeProvider::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(MailRepository::class),
 				$this->get(SummaryRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(ClaudeProvider::class), // Safety-Net-Fallback
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
-				$this->get(ClaudeProvider::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(MailRepository::class),
 				$this->get(DraftRepository::class),
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
 				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
+				$this->get(ClaudeProvider::class), // B7: Safety-Net-Fallback
 			),
 			JobRecoveryService::class => new JobRecoveryService(
 				$this->get(PDO::class),

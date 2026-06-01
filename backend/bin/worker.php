@@ -75,6 +75,15 @@ $backfillIntervalSec = 60;
 $lastRuleCleanupTick = 0;
 $ruleCleanupIntervalSec = 86400;
 
+// Phase 9q-Katalog: Bootstrap — Modell-Katalog beim Start einmal fuellen,
+// damit die Admin-Dropdowns sofort nach Deploy bestueckt sind.
+try {
+	$bootRes = $kernel->get(\MailPilot\Llm\ModelCatalogService::class)->refreshAll();
+	$log->info('worker.model_catalog_bootstrap', ['providers' => count($bootRes)]);
+} catch (\Throwable $e) {
+	$log->warning('worker.model_catalog_bootstrap_failed', ['err' => $e->getMessage()]);
+}
+
 while (true) {
 	try {
 		$heartbeat->execute([':v' => gmdate('Y-m-d\TH:i:s\Z')]);
@@ -205,17 +214,29 @@ while (true) {
 			$rescoreRecovered = $rescoreRepo->recoverStaleRunning(30);
 			$rescorePurged    = $rescoreRepo->purgeOlderThan(14);
 
+			// Phase 9q-Katalog: taeglicher Modell-Refresh — neue Modelle
+			// erscheinen automatisch ohne Code-Aenderung.
+			$catalogProviders = 0;
+			try {
+				$catalogProviders = count(
+					$kernel->get(\MailPilot\Llm\ModelCatalogService::class)->refreshAll()
+				);
+			} catch (\Throwable $e) {
+				$log->warning('worker.model_catalog_refresh_failed', ['err' => $e->getMessage()]);
+			}
+
 			$log->info('worker.housekeeping', [
-				'bodies'             => $purgedBodies,
-				'oauth_states'       => $purgedStates,
-				'jwt_blacklist'      => $purgedBlacklist,
-				'api_usage'          => $purgedUsage,
-				'pending_aged'       => $agedOutPending,
-				'corrections_stable' => $promoted,
-				'corrections_purged' => $purgedCorrs,
-				'reconciliation'     => $reconStats,
-				'rescore_recovered'  => $rescoreRecovered,
-				'rescore_purged'     => $rescorePurged,
+				'bodies'                    => $purgedBodies,
+				'oauth_states'              => $purgedStates,
+				'jwt_blacklist'             => $purgedBlacklist,
+				'api_usage'                 => $purgedUsage,
+				'pending_aged'              => $agedOutPending,
+				'corrections_stable'        => $promoted,
+				'corrections_purged'        => $purgedCorrs,
+				'reconciliation'            => $reconStats,
+				'rescore_recovered'         => $rescoreRecovered,
+				'rescore_purged'            => $rescorePurged,
+				'model_catalog_providers'   => $catalogProviders,
 			]);
 			$lastHousekeepingDay = $today;
 		}

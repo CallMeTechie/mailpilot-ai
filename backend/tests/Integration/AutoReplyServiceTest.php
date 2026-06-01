@@ -3,7 +3,10 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\DraftRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PricingRepository;
@@ -75,9 +78,23 @@ final class AutoReplyServiceTest extends TestCase
 			new PricingRepository($pdo),
 			new NullLogger(),
 		);
+		// B7: ReplyDraftService routet jetzt ueber den LlmRouter (Rolle 'draft').
+		// Dieser Test seedet KEINE LLM-Provider/Chain → resolveChain('draft') ist
+		// leer → LlmAllProvidersDownException → Safety-Net greift auf den als
+		// $claudeFallback uebergebenen FakeClaudeClient zurueck (bisheriges
+		// Verhalten: das gescriptete Draft-Response fliesst durch).
+		$router = new LlmRouter(
+			[],    // keine kind-gemappten LlmProvider — Chain bleibt leer
+			new LlmProviderRepository($pdo),
+			$settings,
+			new NullLogger(),
+			new LlmModelRepository($pdo),
+		);
 		$reply = new ReplyDraftService(
-			$claude, $mailRepo, $drafts, new RedactionService(),
+			$router, $mailRepo, $drafts, new RedactionService(),
 			$budget, $prompts,
+			null,    // redactionRules: kein per-user-scope in diesem Test
+			$claude, // B7: Safety-Net-Fallback
 		);
 		return new AutoReplyService(
 			$pdo, $graph, $tokens, $settings,

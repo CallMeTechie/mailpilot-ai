@@ -37,4 +37,12 @@ interface LlmProvider
 	 *   - RuntimeException bei anderen Fehlern (Auth/4xx/Bad-Request)
 	 */
 	public function complete(NormalizedRequest $request): NormalizedResponse;
+
+	/**
+	 * Entdeckt die beim Provider verfuegbaren (Chat-faehigen) Modelle live.
+	 * Wirft LlmUnavailableException bei Transport-/Auth-Fehlern.
+	 *
+	 * @return list<ModelDescriptor>
+	 */
+	public function listModels(): array;
 }
