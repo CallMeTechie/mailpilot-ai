@@ -66,12 +66,13 @@ return [
 				// for most Anthropic models in EU regions as of 2025.
 				'claude-haiku-4-5-20251001' => 'eu.anthropic.claude-haiku-4-5-v1:0',
 				'claude-opus-4-7'           => 'eu.anthropic.claude-opus-4-7-v1:0',
+				'claude-opus-4-8'           => 'eu.anthropic.claude-opus-4-8',
 			],
 		],
 
 		'model_scoring' => 'claude-haiku-4-5-20251001',
-		'model_summary' => 'claude-opus-4-7',
-		'model_reply'   => 'claude-opus-4-7',
+		'model_summary' => 'claude-opus-4-8',
+		'model_reply'   => 'claude-opus-4-8',
 		'timeout'       => 30,
 	],
 
