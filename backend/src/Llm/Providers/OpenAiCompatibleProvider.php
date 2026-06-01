@@ -6,6 +6,7 @@ namespace MailPilot\Llm\Providers;
 use MailPilot\Llm\LlmOverloadedException;
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\LlmUnavailableException;
+use MailPilot\Llm\ModelDescriptor;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Llm\NormalizedResponse;
 use MailPilot\Repositories\LlmProviderRepository;
@@ -34,10 +35,11 @@ use RuntimeException;
  */
 final class OpenAiCompatibleProvider implements LlmProvider
 {
-	private const TIMEOUT_DEFAULT      = 120;  // lokal-CPU braucht oft 10-30s
-	private const CONNECT_TIMEOUT      = 5;
-	private const MAX_RETRIES          = 2;    // weniger Retries als Cloud — lokal-down ist sofort permanent
-	private const UNHEALTHY_COOLDOWN_S = 30;
+	private const TIMEOUT_DEFAULT       = 120;  // lokal-CPU braucht oft 10-30s
+	private const CONNECT_TIMEOUT       = 5;
+	private const DISCOVERY_TIMEOUT_S   = 10;
+	private const MAX_RETRIES           = 2;    // weniger Retries als Cloud — lokal-down ist sofort permanent
+	private const UNHEALTHY_COOLDOWN_S  = 30;
 
 	private ?int $unhealthyUntil = null;
 
@@ -219,5 +221,63 @@ final class OpenAiCompatibleProvider implements LlmProvider
 			modelId:      (string)($raw['model'] ?? $modelHint),
 			providerKind: 'openai_compatible',
 		);
+	}
+
+	/**
+	 * @return list<ModelDescriptor>
+	 */
+	public function listModels(): array
+	{
+		$row = $this->repo->findByKind('openai_compatible');
+		if ($row === null) {
+			throw new LlmUnavailableException('Kein aktiver openai_compatible-Provider in llm_providers');
+		}
+		$apiKey  = $this->resolveApiKey($row);
+		$baseUrl = (string)($row['base_url'] ?? '');
+		if ($baseUrl === '') {
+			throw new LlmUnavailableException('openai_compatible-Provider hat keinen base_url');
+		}
+		$url = rtrim($baseUrl, '/') . '/v1/models';
+
+		$headers = ['Content-Type: application/json'];
+		if ($apiKey !== '') {
+			$headers[] = 'Authorization: Bearer ' . $apiKey;
+		}
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => self::DISCOVERY_TIMEOUT_S,
+			CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
+			CURLOPT_HTTPHEADER     => $headers,
+		]);
+		$resp   = curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		$err    = curl_error($ch);
+		curl_close($ch);
+
+		if ($err !== '' || $status < 200 || $status >= 300 || !is_string($resp)) {
+			throw new LlmUnavailableException(sprintf(
+				'openai_compatible listModels failed: status=%d curlErr=%s', $status, $err ?: 'none',
+			));
+		}
+		$decoded = json_decode($resp, true, 512, JSON_THROW_ON_ERROR);
+		return self::parseModelsResponse(is_array($decoded) ? $decoded : []);
+	}
+
+	/**
+	 * @param  array<string,mixed> $json
+	 * @return list<ModelDescriptor>
+	 */
+	public static function parseModelsResponse(array $json): array
+	{
+		$out = [];
+		foreach (($json['data'] ?? []) as $m) {
+			if (!is_array($m) || !isset($m['id'])) {
+				continue;
+			}
+			$id = (string)$m['id'];
+			$out[] = new ModelDescriptor(modelId: $id, displayName: $id, effortLevels: []);
+		}
+		return $out;
 	}
 }

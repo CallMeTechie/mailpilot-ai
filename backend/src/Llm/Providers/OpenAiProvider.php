@@ -6,6 +6,7 @@ namespace MailPilot\Llm\Providers;
 use MailPilot\Llm\LlmOverloadedException;
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\LlmUnavailableException;
+use MailPilot\Llm\ModelDescriptor;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Llm\NormalizedResponse;
 use MailPilot\Repositories\LlmProviderRepository;
@@ -38,6 +39,11 @@ final class OpenAiProvider implements LlmProvider
 	private const TIMEOUT_DEFAULT      = 60;
 	private const MAX_RETRIES          = 3;
 	private const UNHEALTHY_COOLDOWN_S = 60;
+	private const DISCOVERY_TIMEOUT_S  = 10;
+	// reasoning_effort-Vertrag von OpenAI. Wartbare API-Heuristik, keine
+	// versions-spezifische Modell-Hardcodierung.
+	private const CHAT_PREFIXES        = ['gpt-', 'o1', 'o3', 'o4', 'chatgpt-'];
+	private const NON_CHAT_SUBSTR      = ['embedding', 'whisper', 'tts', 'transcribe', 'realtime', 'search', 'dall-e', 'moderation', 'audio', 'image', 'davinci', 'babbage'];
 
 	private ?int $unhealthyUntil = null;
 
@@ -154,6 +160,40 @@ final class OpenAiProvider implements LlmProvider
 	}
 
 	/**
+	 * @return list<ModelDescriptor>
+	 */
+	public function listModels(): array
+	{
+		$row = $this->repo->findByKind('openai');
+		if ($row === null) {
+			throw new LlmUnavailableException('Kein aktiver OpenAI-Provider in llm_providers');
+		}
+		$apiKey  = $this->resolveApiKey($row);
+		$baseUrl = (string)($row['base_url'] ?? 'https://api.openai.com');
+		$url     = rtrim($baseUrl, '/') . '/v1/models';
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => self::DISCOVERY_TIMEOUT_S,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $apiKey],
+		]);
+		$resp   = curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		$err    = curl_error($ch);
+		curl_close($ch);
+
+		if ($err !== '' || $status < 200 || $status >= 300 || !is_string($resp)) {
+			throw new LlmUnavailableException(sprintf(
+				'OpenAI listModels failed: status=%d curlErr=%s', $status, $err ?: 'none',
+			));
+		}
+		$decoded = json_decode($resp, true, 512, JSON_THROW_ON_ERROR);
+		return self::parseModelsResponse(is_array($decoded) ? $decoded : []);
+	}
+
+	/**
 	 * @param array<string,mixed> $row
 	 */
 	private function resolveApiKey(array $row): string
@@ -230,5 +270,45 @@ final class OpenAiProvider implements LlmProvider
 			return (int)$m[1];
 		}
 		return null;
+	}
+
+	/**
+	 * @param  array<string,mixed> $json
+	 * @return list<ModelDescriptor>
+	 */
+	public static function parseModelsResponse(array $json): array
+	{
+		$out = [];
+		foreach (($json['data'] ?? []) as $m) {
+			if (!is_array($m) || !isset($m['id'])) {
+				continue;
+			}
+			$id = (string)$m['id'];
+			if (!self::isChatModel($id)) {
+				continue;
+			}
+			$out[] = new ModelDescriptor(
+				modelId:      $id,
+				displayName:  $id,
+				effortLevels: ['low', 'medium', 'high'],
+			);
+		}
+		return $out;
+	}
+
+	private static function isChatModel(string $id): bool
+	{
+		$lower = strtolower($id);
+		foreach (self::NON_CHAT_SUBSTR as $bad) {
+			if (str_contains($lower, $bad)) {
+				return false;
+			}
+		}
+		foreach (self::CHAT_PREFIXES as $p) {
+			if (str_starts_with($lower, $p)) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

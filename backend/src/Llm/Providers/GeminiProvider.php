@@ -6,6 +6,7 @@ namespace MailPilot\Llm\Providers;
 use MailPilot\Llm\LlmOverloadedException;
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\LlmUnavailableException;
+use MailPilot\Llm\ModelDescriptor;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Llm\NormalizedResponse;
 use MailPilot\Repositories\LlmProviderRepository;
@@ -39,6 +40,7 @@ final class GeminiProvider implements LlmProvider
 	private const TIMEOUT_DEFAULT      = 60;
 	private const MAX_RETRIES          = 3;
 	private const UNHEALTHY_COOLDOWN_S = 60;
+	private const DISCOVERY_TIMEOUT_S  = 10;
 
 	private ?int $unhealthyUntil = null;
 
@@ -53,6 +55,40 @@ final class GeminiProvider implements LlmProvider
 	public function kind(): string
 	{
 		return 'gemini';
+	}
+
+	/**
+	 * @return list<ModelDescriptor>
+	 */
+	public function listModels(): array
+	{
+		$row = $this->repo->findByKind('gemini');
+		if ($row === null) {
+			throw new LlmUnavailableException('Kein aktiver Gemini-Provider in llm_providers');
+		}
+		$apiKey  = $this->resolveApiKey($row);
+		$baseUrl = (string)($row['base_url'] ?? 'https://generativelanguage.googleapis.com');
+		$url     = sprintf('%s/v1beta/models?pageSize=1000&key=%s', rtrim($baseUrl, '/'), rawurlencode($apiKey));
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => self::DISCOVERY_TIMEOUT_S,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+		]);
+		$resp   = curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		$err    = curl_error($ch);
+		curl_close($ch);
+
+		if ($err !== '' || $status < 200 || $status >= 300 || !is_string($resp)) {
+			throw new LlmUnavailableException(sprintf(
+				'Gemini listModels failed: status=%d curlErr=%s', $status, $err ?: 'none',
+			));
+		}
+		$decoded = json_decode($resp, true, 512, JSON_THROW_ON_ERROR);
+		return self::parseModelsResponse(is_array($decoded) ? $decoded : []);
 	}
 
 	public function isHealthy(): bool
@@ -160,6 +196,35 @@ final class GeminiProvider implements LlmProvider
 		throw new RuntimeException(
 			'Gemini-Provider hat weder api_key_encrypted noch nutzbaren env-Fallback'
 		);
+	}
+
+	/**
+	 * @param  array<string,mixed> $json
+	 * @return list<ModelDescriptor>
+	 */
+	public static function parseModelsResponse(array $json): array
+	{
+		$out = [];
+		foreach (($json['models'] ?? []) as $m) {
+			if (!is_array($m) || !isset($m['name'])) {
+				continue;
+			}
+			$methods = $m['supportedGenerationMethods'] ?? [];
+			if (!is_array($methods) || !in_array('generateContent', $methods, true)) {
+				continue;
+			}
+			$id     = (string)preg_replace('#^models/#', '', (string)$m['name']);
+			$maxOut = (int)($m['outputTokenLimit'] ?? 0);
+			$maxCtx = (int)($m['inputTokenLimit'] ?? 0);
+			$out[] = new ModelDescriptor(
+				modelId:          $id,
+				displayName:      (string)($m['displayName'] ?? $id),
+				effortLevels:     [],
+				maxOutputTokens:  $maxOut > 0 ? $maxOut : null,
+				maxContextTokens: $maxCtx > 0 ? $maxCtx : null,
+			);
+		}
+		return $out;
 	}
 
 	/**

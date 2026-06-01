@@ -8,6 +8,7 @@ use MailPilot\Claude\AnthropicOverloadedException;
 use MailPilot\Llm\LlmOverloadedException;
 use MailPilot\Llm\LlmProvider;
 use MailPilot\Llm\LlmUnavailableException;
+use MailPilot\Llm\ModelDescriptor;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Llm\NormalizedResponse;
 use MailPilot\Repositories\LlmProviderRepository;
@@ -31,6 +32,8 @@ final class AnthropicProvider implements LlmProvider
 	private const ANTHROPIC_VERSION_DEFAULT = '2023-06-01';
 	private const TIMEOUT_DEFAULT = 60;
 	private const UNHEALTHY_COOLDOWN_S = 60;
+	private const DISCOVERY_TIMEOUT_S = 10;
+	private const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 	private ?int $unhealthyUntil = null;
 
@@ -121,6 +124,102 @@ final class AnthropicProvider implements LlmProvider
 		throw new RuntimeException(
 			'Anthropic-Provider hat weder api_key_encrypted noch nutzbaren env-Fallback'
 		);
+	}
+
+	/**
+	 * @return list<ModelDescriptor>
+	 */
+	public function listModels(): array
+	{
+		$row = $this->repo->findByKind('anthropic');
+		if ($row === null) {
+			throw new LlmUnavailableException('Kein aktiver Anthropic-Provider in llm_providers');
+		}
+		$apiKey  = $this->resolveApiKey($row);
+		$baseUrl = (string)($row['base_url'] ?? 'https://api.anthropic.com');
+		if (!preg_match('#/v\d+/?$#', $baseUrl)) {
+			$baseUrl = rtrim($baseUrl, '/') . '/v1';
+		}
+
+		$out     = [];
+		$afterId = null;
+		do {
+			$url = rtrim($baseUrl, '/') . '/models?limit=1000'
+				. ($afterId !== null ? '&after_id=' . rawurlencode($afterId) : '');
+			$json = $this->httpGetJson($url, [
+				'x-api-key: ' . $apiKey,
+				'anthropic-version: ' . self::ANTHROPIC_VERSION_DEFAULT,
+			]);
+			foreach (self::parseModelsResponse($json) as $d) {
+				$out[] = $d;
+			}
+			$afterId = ($json['has_more'] ?? false) === true ? ($json['last_id'] ?? null) : null;
+		} while (is_string($afterId) && $afterId !== '');
+
+		return $out;
+	}
+
+	/**
+	 * @param  array<string,mixed> $json
+	 * @return list<ModelDescriptor>
+	 */
+	public static function parseModelsResponse(array $json): array
+	{
+		$out = [];
+		foreach (($json['data'] ?? []) as $m) {
+			if (!is_array($m) || !isset($m['id'])) {
+				continue;
+			}
+			$effortCap = $m['capabilities']['effort'] ?? [];
+			$levels = [];
+			if (is_array($effortCap) && ($effortCap['supported'] ?? false) === true) {
+				foreach (self::EFFORT_LEVELS as $lvl) {
+					if (($effortCap[$lvl]['supported'] ?? false) === true) {
+						$levels[] = $lvl;
+					}
+				}
+			}
+			$maxOut = (int)($m['max_tokens'] ?? 0);
+			$maxCtx = (int)($m['max_input_tokens'] ?? 0);
+			$out[] = new ModelDescriptor(
+				modelId:          (string)$m['id'],
+				displayName:      (string)($m['display_name'] ?? $m['id']),
+				effortLevels:     $levels,
+				maxOutputTokens:  $maxOut > 0 ? $maxOut : null,
+				maxContextTokens: $maxCtx > 0 ? $maxCtx : null,
+				releasedAt:       isset($m['created_at']) ? (string)$m['created_at'] : null,
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * GET → decoded JSON. Wirft LlmUnavailableException bei Transport-/HTTP-Fehler.
+	 *
+	 * @param  list<string> $headers
+	 * @return array<string,mixed>
+	 */
+	private function httpGetJson(string $url, array $headers): array
+	{
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT        => self::DISCOVERY_TIMEOUT_S,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_HTTPHEADER     => array_merge(['Content-Type: application/json'], $headers),
+		]);
+		$resp   = curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+		$err    = curl_error($ch);
+		curl_close($ch);
+
+		if ($err !== '' || $status < 200 || $status >= 300 || !is_string($resp)) {
+			throw new LlmUnavailableException(sprintf(
+				'Anthropic listModels failed: status=%d curlErr=%s', $status, $err ?: 'none',
+			));
+		}
+		$decoded = json_decode($resp, true, 512, JSON_THROW_ON_ERROR);
+		return is_array($decoded) ? $decoded : [];
 	}
 
 	/**
