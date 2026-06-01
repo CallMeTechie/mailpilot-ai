@@ -19,6 +19,9 @@
 		"friendsofphp/php-cs-fixer": "^3.50",
 		"phpstan/phpstan": "^1.11"
 	},
+	"config": {
+		"process-timeout": 0
+	},
 	"autoload": {
 		"psr-4": {
 			"MailPilot\\": "src/",
@@ -31,8 +34,17 @@
 		}
 	},
 	"scripts": {
-		"test":     "phpunit",
+		"test":             "phpunit",
+		"test:unit":        "phpunit --testsuite Unit --no-coverage",
+		"test:integration": "bash bin/test-integration.sh",
+		"test:all":         "bash bin/test-integration.sh --testsuite Unit,Integration",
 		"cs-fix":   "php-cs-fixer fix --using-cache=no",
 		"cs-check": "php-cs-fixer fix --using-cache=no --dry-run --diff"
+	},
+	"scripts-descriptions": {
+		"test":             "Alle PHPUnit-Suites (Unit + Integration) — braucht eine laufende Test-DB.",
+		"test:unit":        "Nur Unit-Suite — keine DB noetig, schnell.",
+		"test:integration": "Faehrt die Test-MariaDB hoch (bin/test-db-up.sh), sourct Credentials, laeuft die Integration-Suite.",
+		"test:all":         "Wie test:integration, aber Unit + Integration gegen die live Test-DB."
 	}
 }

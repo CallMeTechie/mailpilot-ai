@@ -96,9 +96,30 @@ cd backend/
 composer install
 cp config/config.example.php config/config.php  # dann editieren
 php -S localhost:8080 -t public/
-composer test
 composer cs-fix
 ```
+
+#### Tests
+
+```bash
+composer test:unit          # Unit-Suite — keine DB nötig, schnell
+composer test:integration   # fährt die Test-MariaDB hoch + Integration-Suite
+composer test:all           # Unit + Integration gegen die live Test-DB
+```
+
+`test:integration` und `test:all` starten über
+[`bin/test-db-up.sh`](backend/bin/test-db-up.sh) automatisch einen
+abgesicherten MariaDB-11.4-Container (127.0.0.1-Binding, Zufallspasswort,
+Auto-Migrations) und sourcen dessen Credentials. Voraussetzung: Docker.
+Aufräumen danach:
+
+```bash
+bash backend/bin/test-db-up.sh --down
+```
+
+Einzelne Tests gezielt: `composer test:integration -- --filter SenderResolverTest`.
+Kein SQLite-Fallback — das Schema ist MariaDB-spezifisch (ENUM, utf8mb4, JSON,
+FK-CASCADE), daher laufen die Tests bewusst gegen die echte Engine.
 
 ### Add-in
 

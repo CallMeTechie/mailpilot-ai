@@ -132,6 +132,13 @@ mailpilot-ai/
 ## 7. Testing & deployment
 
 - PHPUnit for backend services (`tests/Unit`, `tests/Integration`).
+  - `composer test:unit` — no DB, fast. `composer test:integration` / `composer test:all`
+    spin up a secured MariaDB 11.4 via `bin/test-db-up.sh` (127.0.0.1, random pass,
+    auto-migrations), source its creds, then run the suite. Teardown:
+    `bash bin/test-db-up.sh --down`. Requires Docker.
+  - **No SQLite fallback by design.** The schema is MariaDB-specific (ENUM, utf8mb4,
+    JSON, FK CASCADE), so tests run against the real engine to stay faithful — a
+    translated SQLite schema would drift and give false confidence.
 - Add-in: manual smoke tests via Office Add-in sideloading.
 - Deployment: Docker Compose on Synology DS218+. nginx-proxy + Let's Encrypt via existing stack.
 
