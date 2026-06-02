@@ -703,10 +703,10 @@ ersetzen durch:
 
 - [ ] **Step 3b: Toten Code + ungenutzte Ctor-Params entfernen** — `mirrorDirectCallToLlmLog()`, `resolveAnthropicProviderId()` und Property `$anthropicProviderIdCached` löschen. **Außerdem** werden die Ctor-Parameter `$callLogger` (`?LlmCallLogger`) und `$llmProviders` (`?LlmProviderRepository`) ungenutzt (waren nur Leser des Mirror-Pfads) → aus dem `MailScoringService`-Konstruktor entfernen **und** die `MailScoringService`-Konstruktion in `backend/src/Http/Kernel.php` (~Z. 350) um diese zwei Argumente kürzen. Danach `vendor/bin/phpstan analyse` (Level 5); falls `phpstan-baseline.neon` die alten Properties referenziert, Baseline neu erzeugen.
 
-- [ ] **Step 3c: Bestehenden `MailScoringServiceTest` anpassen (sonst rot)** — `backend/tests/Integration/MailScoringServiceTest.php` konstruiert `MailScoringService` heute mit 14 Args OHNE `llmRouter` und scort über `FakeClaudeClient` auf dem (jetzt entfernten) Direct-Pfad → alle ~14 `scoreBatch`-Tests würden `RuntimeException('LlmRouter nicht verdrahtet …')` werfen. `makeService()` so umbauen, dass es — analog `ScoreRouterModelTest::makeServiceWithRouter` — einen echten `LlmRouter` mit einem aufzeichnenden anon `LlmProvider` injiziert, der das kanonische `{"results":[…]}`-JSON liefert, und im Setup `routing_mode` + `llm.score.fallback_chain` + einen Provider/`llm_models`-`score`-Row seedet. Lauf grün:
+- [ ] **Step 3c: ALLE bestehenden Tests anpassen, die `scoreBatch` über den Direct-Pfad treiben (sonst rot)** — Nach Entfernen des Direct-Pfads werfen **alle** Tests, die `MailScoringService` ohne `llmRouter` konstruieren, `RuntimeException('LlmRouter nicht verdrahtet …')`. Betroffen (alle unter `backend/tests/Integration/`): **`MailScoringServiceTest.php`** (~14 scoreBatch-Tests), **`TopicDiscoveryTest.php`**, **`ActionOwnerTest.php`**, **`Services/Sender/ScoringFolderSegmentsTest.php`**, **`Services/Sender/ScoringSenderEnrichmentTest.php`**. Je `makeService()` analog `ScoreRouterModelTest::makeServiceWithRouter` umbauen (echter `LlmRouter` + aufzeichnender anon `LlmProvider` mit kanonischem `{"results":[…]}`-JSON; im Setup `routing_mode='router'` + `llm.score.fallback_chain` + Provider/`llm_models`-`score`-Row seeden). **Hinweis `ActionOwnerTest`:** der ActionOwner-Mini-Call läuft über `ActionOwnerResolver($claude,…)` (NICHT über den Router) → `FakeClaudeClient` bleibt dort für DIESEN Pfad nötig; nur der `scoreBatch`-Transport wandert auf den Router. Lauf grün:
 
 ```bash
-cd backend && composer test:integration -- --filter MailScoringServiceTest
+cd backend && composer test:integration -- --filter "MailScoringServiceTest|TopicDiscoveryTest|ActionOwnerTest|ScoringFolderSegmentsTest|ScoringSenderEnrichmentTest"
 ```
 
 - [ ] **Step 4: Run — Unit + Integration grün**
@@ -787,6 +787,12 @@ cd backend && composer test:integration -- --filter SummaryFallbackModelTest
 ```
 
 - [ ] **Step 3c: Kernel-Wiring** — in `backend/src/Http/Kernel.php` die `MailSummaryService`- und `ReplyDraftService`-Konstruktion um `$this->get(\MailPilot\Repositories\LlmModelRepository::class)` an der **exakt** zum Konstruktor passenden Argument-Position erweitern (Summary: nach `PromptRepository`, vor `claudeFallback`; Draft: vor `RedactionRepository`).
+
+- [ ] **Step 3d: Bestehende positionale Konstruktionen anpassen (sonst rot)** — Der neue **required** `LlmModelRepository`-Ctor-Param verschiebt die positionalen Argumente bestehender Aufrufer: `backend/tests/Integration/Services/SummaryDraftRouterTest.php` (baut `MailSummaryService` positional mit `FakeClaudeClient` als letztem Arg) und `backend/tests/Integration/AutoReplyServiceTest.php` (baut `ReplyDraftService` positional). In beiden den `LlmModelRepository`-Arg an der neuen Position einfügen (Summary: vor `$claudeFallback`; Draft: vor `$redactionRules`). (`FakeClaudeClient` ist via `extends ClaudeClient implements ClaudeProvider` ein gültiger `ClaudeProvider` — reicht als `claudeFallback`.) Lauf grün:
+
+```bash
+cd backend && composer test:integration -- --filter "SummaryDraftRouterTest|AutoReplyServiceTest"
+```
 
 - [ ] **Step 4: Run — expect PASS + Unit grün**
 
@@ -916,7 +922,7 @@ cd backend && composer test:integration -- --filter InferenceViaRouterTest
 
 > `buildClaudePayload()` bleibt unverändert (liefert weiter `model`/`max_tokens`/`temperature`/`system`/`messages`); das `model` darin wird vom Router-Pfad ignoriert (`modelHint=''`). `ClaudeClient` bleibt injiziert (für `extractText` in `parseClaudeResponse`).
 
-- [ ] **Step 3e: Bestehende Inferenz-Tests anpassen (sonst rot)** — `backend/tests/Integration/.../RuleInferenceServiceTest.php` und `InferAllFromCorrectionTest.php` konstruieren `RuleInferenceService` **positional** mit `FakeClaudeClient` und treiben die Extraktion über `$claude->scriptJson(...)` → `$this->claude->messages()`. Das Einfügen des **required** `LlmRouter` an Ctor-Position 3 (direkt nach `ClaudeClient`) verschiebt die Argumente → beide Konstruktionen brechen, und das Routing geht nicht mehr über `$this->claude`. Beide `makeService()` umbauen: echten `LlmRouter` mit aufzeichnendem anon `LlmProvider` (Rolle `inference`) injizieren, der das bisher per `scriptJson` gelieferte Extraktions-JSON zurückgibt, und im Setup `routing_mode='router'` + `llm.inference.fallback_chain` + eine `llm_models`-`inference`-Row seeden. (Kernel-seitig wird der neue Arg in Task 8 ergänzt.) Lauf grün:
+- [ ] **Step 3e: Bestehende Inferenz-Tests anpassen (sonst rot)** — `backend/tests/Integration/RuleInferenceServiceTest.php` und `backend/tests/Integration/InferAllFromCorrectionTest.php` konstruieren `RuleInferenceService` **positional** mit `FakeClaudeClient` und treiben die Extraktion über `$claude->scriptJson(...)` → `$this->claude->messages()`. Das Einfügen des **required** `LlmRouter` an Ctor-Position 3 (direkt nach `ClaudeClient`) verschiebt die Argumente → beide Konstruktionen brechen, und das Routing geht nicht mehr über `$this->claude`. Beide `makeService()` umbauen: echten `LlmRouter` mit aufzeichnendem anon `LlmProvider` (Rolle `inference`) injizieren, der das bisher per `scriptJson` gelieferte Extraktions-JSON zurückgibt, und im Setup `routing_mode='router'` + `llm.inference.fallback_chain` + eine `llm_models`-`inference`-Row seeden. (Kernel-seitig wird der neue Arg in Task 8 ergänzt.) Lauf grün:
 
 ```bash
 cd backend && composer test:integration -- --filter "RuleInferenceServiceTest|InferAllFromCorrectionTest"
@@ -1056,6 +1062,8 @@ git commit -m "feat(migration): 0064 routing_mode=router für Bestand + inferenc
 - Modify: `admin/src/Controllers/LlmController.php` (`showRouting()`: Upgrade-Notice lesen + nach Anzeige auf `0` setzen)
 
 - [ ] **Step 1: Banner-Text korrigieren** — in `routing.php` die direct/router-Erklärtexte so anpassen, dass sie **alle Rollen** (score/summary/draft/inference) betreffen und `direct` als „nur Primary, kein Failover" / `router` als „ganze Failover-Chain" beschreiben (nicht mehr „score-only"). Den Abschnitt „Routing-Modus" + den oberen Status-Banner entsprechend umformulieren (die Texte erwähnen aktuell nur `score`/`inference`).
+
+- [ ] **Step 1b: Hartkodierte Rollen-Listen auf `LlmRouter::ROLES` umstellen (D7)** — `admin/src/Controllers/LlmController.php` hält die Liste `['score','summary','draft','inference']` an **drei** Stellen hart (in `showRouting()`, `saveRouting()` und der Rollen-Validierung). Durch `\MailPilot\Llm\LlmRouter::ROLES` ersetzen, damit Spec 2 die 5. Rolle `match` nur an EINER Stelle ergänzen muss. (Die separate `['score','inference']`-Liste in `showGolden()` ist Golden-Set-spezifisch und bleibt unangetastet.)
 
 - [ ] **Step 2: Upgrade-Hinweis** — in `LlmController::showRouting()` das Flag `llm.routing_mode_upgrade_notice` via `SettingsRepository::getString(...)` lesen; ist es `'1'`, eine Banner-Variable an die View geben („`routing_mode` wurde beim Upgrade auf `router` gesetzt — hier prüfen.") **und** das Flag via `set('llm.routing_mode_upgrade_notice', '0')` zurücksetzen (einmalig). In `routing.php` die Variable rendern, wenn gesetzt.
 
