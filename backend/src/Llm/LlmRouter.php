@@ -27,6 +27,9 @@ use Psr\Log\LoggerInterface;
  */
 final class LlmRouter
 {
+	/** Kanonische Rollen-Liste — Single Source für UI-Iteration (Routing-Chain + Modell-Dropdowns). */
+	public const ROLES = ['score', 'summary', 'draft', 'inference'];
+
 	/**
 	 * @param array<string, LlmProvider> $providersByKind  z.B. ['anthropic'=>...,'openai'=>...]
 	 */
@@ -184,8 +187,16 @@ final class LlmRouter
 		}
 
 		// Privacy-Mode-Filter (Phase 9q-C).
-		$mode = $this->settings->getString('llm.privacy_mode', 'cloud_allowed');
-		return $this->applyPrivacyMode($chain, $mode);
+		$mode  = $this->settings->getString('llm.privacy_mode', 'cloud_allowed');
+		$chain = $this->applyPrivacyMode($chain, $mode);
+
+		// routing_mode: „direct" = nur der Primary (kein Failover), „router"
+		// = ganze Chain. Default „router" (Migration 0064 setzt Bestand darauf;
+		// fehlt das Setting, ist die sichere Wahl die volle Chain).
+		if ($this->settings->getString('llm.routing_mode', 'router') !== 'router') {
+			return array_slice($chain, 0, 1);
+		}
+		return $chain;
 	}
 
 	/**
