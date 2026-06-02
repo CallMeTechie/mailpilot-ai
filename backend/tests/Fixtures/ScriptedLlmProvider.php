@@ -27,15 +27,28 @@ final class ScriptedLlmProvider implements LlmProvider
 	/** @var list<NormalizedRequest> Alle empfangenen Requests in Reihenfolge. */
 	public array $requests = [];
 
-	/** @var list<list<array<string,mixed>>> FIFO-Queue gescripteter results-Listen. */
+	/** @var list<string> FIFO-Queue gescripteter Response-Content-JSON-Strings. */
 	private array $scripted = [];
 
 	/**
 	 * @param list<array<string,mixed>> $results eine results-Liste fuer EINEN Call.
+	 * Wird als kanonische {"results":[...]}-Antwort (Score-Shape) ausgeliefert.
 	 */
 	public function scriptResults(array $results): void
 	{
-		$this->scripted[] = $results;
+		$this->scripted[] = json_encode(['results' => $results], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+	}
+
+	/**
+	 * Task 7 (2026-06-02) — scriptet ein rohes JSON-Objekt als Response-Content
+	 * (Inferenz-Shape: RuleInferenceService::parseClaudeResponse erwartet das
+	 * Extraktions-JSON direkt, NICHT in {"results":[...]} gewrappt).
+	 *
+	 * @param array<string,mixed> $data
+	 */
+	public function scriptRawJson(array $data): void
+	{
+		$this->scripted[] = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 	}
 
 	public function callCount(): int
@@ -63,8 +76,7 @@ final class ScriptedLlmProvider implements LlmProvider
 				'ScriptedLlmProvider: keine gescriptete Antwort fuer Call #' . count($this->requests)
 			);
 		}
-		$results = array_shift($this->scripted);
-		$json    = json_encode(['results' => $results], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+		$json = array_shift($this->scripted);
 
 		return new NormalizedResponse(
 			$json,

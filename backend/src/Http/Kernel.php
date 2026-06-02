@@ -391,7 +391,7 @@ class Kernel
 			),
 			RuleInferenceService::class => new RuleInferenceService(
 				$this->get(PDO::class),
-				$this->get(ClaudeClient::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(RedactionService::class),
 				$this->get(SettingsRepository::class),
 				$this->get(UsageCounterRepository::class),

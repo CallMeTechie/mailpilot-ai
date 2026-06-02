@@ -49,7 +49,7 @@ final class RuleInferenceService
 {
 	public function __construct(
 		private readonly PDO                     $db,
-		private readonly ClaudeClient            $claude,
+		private readonly \MailPilot\Llm\LlmRouter $router,
 		private readonly RedactionService        $redactor,
 		private readonly SettingsRepository      $settings,
 		private readonly UsageCounterRepository  $usage,
@@ -279,12 +279,45 @@ final class RuleInferenceService
 	{
 		$payload = $this->buildClaudePayload($vars, $promptKey);
 		try {
-			$response = $this->claude->messages($payload);
+			$response = $this->routeInferencePayload($payload);
 		} catch (\Throwable $e) {
-			$this->logger->warning('rule_inference.claude_failed', ['err' => $e->getMessage()]);
+			$this->logger->warning('rule_inference.llm_failed', ['err' => $e->getMessage()]);
 			return null;
 		}
 		return $this->parseClaudeResponse($response);
+	}
+
+	/**
+	 * Schickt eine buildClaudePayload()-Payload über den LlmRouter (Rolle
+	 * 'inference', modelHint='' → Modell/Effort aus llm_models). Liefert das
+	 * Anthropic-Response-Shape zurück, das parseClaudeResponse() erwartet.
+	 *
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	private function routeInferencePayload(array $payload): array
+	{
+		$resp = $this->router->complete($this->payloadToNormalizedRequest($payload), 'inference');
+		return ['content' => [['type' => 'text', 'text' => $resp->content]]];
+	}
+
+	/**
+	 * Baut aus einer buildClaudePayload()-Array einen NormalizedRequest
+	 * für die inference-Rolle (modelHint='' → Modell/Effort aus llm_models).
+	 *
+	 * @param array<string,mixed> $payload
+	 */
+	private function payloadToNormalizedRequest(array $payload): \MailPilot\Llm\NormalizedRequest
+	{
+		return new \MailPilot\Llm\NormalizedRequest(
+			systemPrompt:   (string)($payload['system'] ?? ''),
+			messages:       $payload['messages'] ?? [],
+			maxTokens:      (int)($payload['max_tokens'] ?? 1024),
+			temperature:    (float)($payload['temperature'] ?? 0.1),
+			modelHint:      '',
+			responseFormat: 'json_object',
+			cacheSegments:  [],
+		);
 	}
 
 	/**
@@ -332,9 +365,10 @@ final class RuleInferenceService
 	}
 
 	/**
-	 * Phase 9h.3 — Batch-Variante via ClaudeClient::messagesBatch.
-	 * Sendet alle Payloads parallel; returnt ein Array gleicher Reihenfolge
-	 * mit jeweils parsed Response oder null bei Fehler.
+	 * Phase 9h.3 — Batch-Variante via LlmRouter::completeBatch (Rolle
+	 * 'inference', modelHint='' → Modell/Effort aus llm_models). Sendet alle
+	 * Requests über die Inference-Chain; returnt ein Array gleicher
+	 * Reihenfolge mit jeweils parsed Response oder null bei Fehler.
 	 *
 	 * @param list<array{vars:array<string,mixed>, promptKey:string}> $specs
 	 * @return list<array<string,mixed>|null>
@@ -344,26 +378,17 @@ final class RuleInferenceService
 		if ($specs === []) {
 			return [];
 		}
-		$payloads = [];
+		$requests = [];
 		foreach ($specs as $spec) {
-			$payloads[] = $this->buildClaudePayload($spec['vars'], $spec['promptKey']);
+			$p = $this->buildClaudePayload($spec['vars'], $spec['promptKey']);
+			$requests[] = $this->payloadToNormalizedRequest($p);
 		}
-		try {
-			$responses = $this->claude->messagesBatch($payloads);
-		} catch (\Throwable $e) {
-			$this->logger->warning('rule_inference.claude_batch_failed', ['err' => $e->getMessage()]);
-			return array_fill(0, count($specs), null);
-		}
+		$responses = $this->router->completeBatch($requests, 'inference');
 		$results = [];
-		foreach ($responses as $i => $resp) {
-			if ($resp instanceof \RuntimeException) {
-				$this->logger->warning('rule_inference.claude_batch_slot_error', [
-					'slot' => $i, 'err' => $resp->getMessage(),
-				]);
-				$results[] = null;
-				continue;
-			}
-			$results[] = $this->parseClaudeResponse($resp);
+		foreach ($responses as $resp) {
+			$results[] = $resp === null
+				? null
+				: $this->parseClaudeResponse(['content' => [['type' => 'text', 'text' => $resp->content]]]);
 		}
 		return $results;
 	}
