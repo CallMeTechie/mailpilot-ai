@@ -6,6 +6,7 @@
  * @var string $routingMode
  * @var array<string, array{configured:list<string>, available:list<array<string,mixed>>}> $chains
  * @var list<string> $roles
+ * @var int $scoringBatchSize
  * @var string $csrfToken
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -56,6 +57,15 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 		<label><input type="radio" name="privacy_mode" value="cloud_allowed" <?= $privacyMode === 'cloud_allowed' ? 'checked' : '' ?>> <strong><?= $h($pl('cloud_allowed')) ?></strong> — alle Provider in Reihenfolge</label><br>
 		<label><input type="radio" name="privacy_mode" value="local_preferred" <?= $privacyMode === 'local_preferred' ? 'checked' : '' ?>> <strong><?= $h($pl('local_preferred')) ?></strong> — lokale Modelle zuerst, Cloud nur als Fallback</label><br>
 		<label><input type="radio" name="privacy_mode" value="local_only" <?= $privacyMode === 'local_only' ? 'checked' : '' ?>> <strong><?= $h($pl('local_only')) ?></strong> — nur lokale Modelle, Mails verlassen das Netz nie</label>
+	</section>
+
+	<section class="panel">
+		<h2>Scoring</h2>
+		<label class="settings-field">
+			<span class="settings-key">Batch-Größe (Mails pro Scoring-Call)</span>
+			<input type="number" name="scoring_batch_size" min="1" max="100" value="<?= $h((string)$scoringBatchSize) ?>" style="width:6em">
+			<small class="muted">1 = kein Batching. Größer = günstiger/schneller, aber an die P-SCORE-<code>max_tokens</code> gekoppelt — zu groß ⇒ JSON-Truncation ⇒ ganzer Chunk fällt aus. Empfehlung: 20.</small>
+		</label>
 	</section>
 
 	<section class="panel">
