@@ -148,6 +148,10 @@ final class LlmRouterRoutingModeTest extends TestCase
 	{
 		$this->truncateAll();
 		$pdo = $this->pdo();
+		// truncateAll() leert llm_providers/llm_models NICHT → fixe UUIDs vorher
+		// löschen, sonst Duplicate-Key beim zweiten Lauf gegen dieselbe DB.
+		$pdo->exec("DELETE FROM llm_models WHERE provider_id IN ('" . self::PID_A . "','" . self::PID_B . "')");
+		$pdo->exec("DELETE FROM llm_providers WHERE id IN ('" . self::PID_A . "','" . self::PID_B . "')");
 		foreach ([[self::PID_A, 'Anthropic', 'anthropic', 10], [self::PID_B, 'OpenAI', 'openai', 20]] as [$id, $name, $kind, $prio]) {
 			$pdo->prepare('INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
 				VALUES (:id, :n, :k, "https://x", 0, 1, :p)')->execute([':id' => $id, ':n' => $name, ':k' => $kind, ':p' => $prio]);
@@ -167,6 +171,7 @@ final class LlmRouterRoutingModeTest extends TestCase
 		return new class($kind, $overloaded, $calls) implements LlmProvider {
 			/** @param array<string,int> $calls */
 			public function __construct(private string $kind, private bool $overloaded, private array &$calls) {}
+			public function kind(): string { return $this->kind; }
 			public function complete(NormalizedRequest $r): NormalizedResponse
 			{
 				$this->calls[$this->kind] = ($this->calls[$this->kind] ?? 0) + 1;
@@ -258,10 +263,23 @@ ersetzen durch:
 cd backend && composer test:integration -- --filter LlmRouterRoutingModeTest
 ```
 
+- [ ] **Step 4b: Bestehende Failover-Tests selbst-pinnen** — Der Seed-Default ist `routing_mode='direct'` (Migration 0051), und `truncateAll()` leert `system_settings` **nicht**. Der neue Slice würde `LlmRouterFailoverTest` und `RouterEffortTest` rot machen (sie erwarten Failover über die volle Chain), solange Migration 0064 (Task 9) den Seed noch nicht auf `router` geflippt hat. Damit die Per-Task-Green-Bar hält: in **beiden** Tests im `setUp()` / vor dem Router-Aufruf explizit `routing_mode='router'` setzen:
+
+```php
+$pdo->prepare('INSERT INTO system_settings (`key`, `value`, `type`) VALUES ("llm.routing_mode", "router", "string")
+	ON DUPLICATE KEY UPDATE `value` = "router"')->execute();
+```
+
+Run beide Tests grün:
+
+```bash
+cd backend && composer test:integration -- --filter "LlmRouterFailoverTest|RouterEffortTest"
+```
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/Llm/LlmRouter.php backend/tests/Integration/Llm/LlmRouterRoutingModeTest.php
+git add backend/src/Llm/LlmRouter.php backend/tests/Integration/Llm/LlmRouterRoutingModeTest.php backend/tests/Integration/Llm/LlmRouterFailoverTest.php backend/tests/Integration/Llm/RouterEffortTest.php
 git commit -m "feat(llm): routing_mode wird reiner Failover-Schalter (direct=Primary-only) + ROLES-Konstante"
 ```
 
@@ -311,6 +329,7 @@ final class LlmRouterModelIdGuaranteeTest extends TestCase
 		$set->set('llm.privacy_mode', 'cloud_allowed');
 
 		$emptyModelProvider = new class implements LlmProvider {
+			public function kind(): string { return 'openai_compatible'; }
 			public function complete(NormalizedRequest $r): NormalizedResponse
 			{ return new NormalizedResponse('ok', ['inputTokens' => 1, 'outputTokens' => 1], 'stop', '', 'openai_compatible'); }
 			public function isHealthy(): bool { return true; }
@@ -416,6 +435,7 @@ final class LlmRouterCompleteBatchTest extends TestCase
 
 		// Provider wirft bei content "boom" eine generische Exception (kein Failover-Typ).
 		$provider = new class implements LlmProvider {
+			public function kind(): string { return 'anthropic'; }
 			public function complete(NormalizedRequest $r): NormalizedResponse
 			{
 				if ($r->messages[0]['content'] === 'boom') { throw new \RuntimeException('boom'); }
@@ -503,34 +523,111 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration\Services;
 
-use MailPilot\Tests\Integration\Services\Support\ScoringHarness;
+use MailPilot\Llm\LlmProvider;
+use MailPilot\Llm\LlmRouter;
+use MailPilot\Llm\NormalizedRequest;
+use MailPilot\Llm\NormalizedResponse;
+use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\CacheRepository;
+use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
+use MailPilot\Repositories\MailRepository;
+use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\PricingRepository;
+use MailPilot\Repositories\PromptRepository;
+use MailPilot\Repositories\ScoreRepository;
+use MailPilot\Repositories\SettingsRepository;
+use MailPilot\Repositories\SubLabelRepository;
+use MailPilot\Repositories\UsageRepository;
+use MailPilot\Services\BudgetService;
+use MailPilot\Services\MailScoringService;
+use MailPilot\Services\RedactionService;
+use MailPilot\Tests\Fixtures\FakeClaudeClient;
 use MailPilot\Tests\TestCase;
+use MailPilot\Util\Uuid;
+use Psr\Log\NullLogger;
 
+/**
+ * Spec 1: score läuft IMMER über den Router — auch im routing_mode='direct'.
+ * Im direct-Mode wird die Chain auf den Primary gekürzt, das Modell kommt aber
+ * weiterhin aus llm_models (Rolle 'score'), NICHT aus dem P-SCORE-Prompt.
+ * Muster 1:1 wie backend/tests/Integration/Llm/ScoreRouterModelTest.php.
+ */
 final class ScoreAlwaysRouterTest extends TestCase
 {
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000e1';
+
 	public function testDirectModeStillUsesLlmModelsModelViaRouter(): void
 	{
 		$this->truncateAll();
-		// Harness seedet Tenant/User/Mailbox/Mail, P-SCORE-Prompt (model="prompt-only-model"),
-		// Anthropic-Provider + llm_models score-Row model="claude-haiku-4-5-20251001",
-		// routing_mode=direct, und injiziert einen aufzeichnenden anon LlmProvider.
-		$h = ScoringHarness::boot($this);
-		$h->setRoutingMode('direct');
-		$h->setScoreModel('claude-haiku-4-5-20251001');
-		$h->setActivePromptModel('P-SCORE', 'prompt-only-model');
+		$pdo = $this->pdo();
+		$pdo->exec("DELETE FROM llm_models WHERE provider_id = '" . self::PROVIDER_ID . "'");
+		$pdo->exec("DELETE FROM llm_providers WHERE id = '" . self::PROVIDER_ID . "'");
+		$pdo->prepare("INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
+			VALUES (?, 'TestScoreDirect', 'anthropic', 'http://x', 0, 1, 10)")->execute([self::PROVIDER_ID]);
+		$pdo->prepare("INSERT INTO llm_models (id, provider_id, model_id, role, enabled, priority)
+			VALUES (?, ?, 'claude-haiku-4-5-20251001', 'score', 1, 10)")->execute([Uuid::v4(), self::PROVIDER_ID]);
+		foreach ([
+			['llm.routing_mode', 'direct'],   // direct! — trotzdem muss der Router genutzt werden
+			['llm.privacy_mode', 'cloud_allowed'],
+			['llm.score.fallback_chain', '["' . self::PROVIDER_ID . '"]'],
+		] as [$k, $v]) {
+			$pdo->prepare('INSERT INTO system_settings (`key`, `value`, `type`) VALUES (?, ?, "string")
+				ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)')->execute([$k, $v]);
+		}
 
-		$h->scoreOneMail();
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'a@example.com', 'subject' => 'Hi', 'body_text' => 'Test.']);
+		$mails = (new MailRepository($pdo))->findUnscoredForMailbox($tenantId, $mailboxId);
 
-		// Der Router-Provider wurde aufgerufen (kein Direct-Anthropic-Pfad);
-		// das genutzte Modell ist das aus llm_models, NICHT prompt-only-model.
-		self::assertSame(1, $h->recordedRouterCalls(), 'score lief über den Router');
-		self::assertSame('claude-haiku-4-5-20251001', $h->lastRequestedModel());
-		self::assertNotSame('prompt-only-model', $h->lastRequestedModel());
+		$capture = new class ($mails[0]['id']) implements LlmProvider {
+			public ?NormalizedRequest $seen = null;
+			public function __construct(private string $mailId) {}
+			public function kind(): string { return 'anthropic'; }
+			public function isHealthy(): bool { return true; }
+			public function complete(NormalizedRequest $r): NormalizedResponse
+			{
+				$this->seen = $r;
+				$json = json_encode(['results' => [[
+					'id' => $this->mailId, 'label' => 'direct', 'action_required' => false,
+					'priority' => 3, 'summary' => 's', 'reasoning' => 'r',
+				]]], JSON_THROW_ON_ERROR);
+				return new NormalizedResponse($json, ['inputTokens' => 10, 'outputTokens' => 5], 'end_turn', $r->modelHint, 'anthropic');
+			}
+			public function listModels(): array { return []; }
+		};
+
+		$router = new LlmRouter(
+			['anthropic' => $capture], new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo), new NullLogger(), new LlmModelRepository($pdo),
+		);
+		$service = $this->makeServiceWithRouter(new FakeClaudeClient(), $router);
+		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		self::assertCount(1, $scores);
+		self::assertNotNull($capture->seen, 'score MUSS auch im direct-Mode über den Router laufen');
+		self::assertSame('claude-haiku-4-5-20251001', $capture->seen->modelHint, 'Modell aus llm_models, nicht aus dem Prompt');
+	}
+
+	private function makeServiceWithRouter(FakeClaudeClient $claude, LlmRouter $router): MailScoringService
+	{
+		$pdo = $this->pdo();
+		$budget = new BudgetService(new SettingsRepository($pdo), new UsageRepository($pdo), new PricingRepository($pdo), $this->logger());
+		return new MailScoringService(
+			$claude, new MailRepository($pdo), new ScoreRepository($pdo), new CacheRepository($pdo, 30),
+			new RedactionService(), $budget, new CorrectionRepository($pdo), new SubLabelRepository($pdo),
+			new AutoSortRepository($pdo, new SettingsRepository($pdo)), new PromptRepository($pdo),
+			new SettingsRepository($pdo), 20, 2048, $this->logger(), new PendingActionRepository($pdo),
+			null, null, null, null, $router,
+		);
 	}
 }
 ```
 
-> **Hinweis für den Implementierer:** Falls kein passendes Harness existiert, das vorhandene Muster aus `backend/tests/Integration/Llm/ScoreRouterModelTest.php` (Prior-Work) übernehmen: realer `Kernel`/Container mit Test-PDO, anonyme `LlmProvider` im `providersByKind`, die den `modelHint` des `NormalizedRequest` aufzeichnen. Kein Mocking.
+> **Vorlage:** identisch zum bestehenden `backend/tests/Integration/Llm/ScoreRouterModelTest.php` (anon `LlmProvider` mit `$seen` + `kind()`, `makeServiceWithRouter`). `$llmRouter` ist der **letzte, optionale** Ctor-Param von `MailScoringService`; `FakeClaudeClient` bleibt nur als (ungenutzter) Direct-Fallback dabei.
 
 - [ ] **Step 2: Run — expect FAIL** (heute: direct-Mode nutzt den Direct-Anthropic-Pfad mit Prompt-Modell, kein Router-Call)
 
@@ -602,9 +699,15 @@ ersetzen durch:
 		$this->recordCall($tenantId, $userId, $mailboxId, $response['usage'] ?? [], $latency, 'success', null, $promptVersionTag, (string)($response['model'] ?? $model));
 ```
 
-> `mirrorDirectCallToLlmLog()`, `resolveAnthropicProviderId()` und `$anthropicProviderIdCached` werden damit ungenutzt → in **Step 3b** entfernen. Vorher per `grep -n "claude\|Claude" backend/src/Services/MailScoringService.php` prüfen: `ClaudeClient::extractText` wird weiter gebraucht, also den `ClaudeClient`-Import behalten; den `?ClaudeClient $claude`-Konstruktor-Parameter NICHT entfernen, solange `callViaRouter`/`extractText` ihn braucht (er nutzt nur `ClaudeClient::extractText`, eine statische Methode — der injizierte `$this->claude` wird nach Entfernen des Direct-Pfads ungenutzt; den Parameter dann optional lassen, um Konstruktor-Aufrufer nicht zu brechen).
+> **Hinweis (Review-Korrektur):** Der erste Ctor-Param `$claude` ist vom Typ **`ClaudeProvider`** (nicht `ClaudeClient`) und bleibt **required** — er wird im Konstruktor an `new ActionOwnerResolver($claude, …)` durchgereicht, ist also NICHT ungenutzt. `ClaudeClient::extractText` ist statisch und braucht den injizierten Wert nicht. Es ändert sich nur der `?LlmRouter`-Pfad; `$llmRouter` ist der **letzte, optionale** Ctor-Param (Produktion: vom Kernel verdrahtet). Ungenutzt werden NUR `mirrorDirectCallToLlmLog()`/`resolveAnthropicProviderId()`/`$anthropicProviderIdCached` **sowie** die Ctor-Params `$callLogger` + `$llmProviders` (s. Step 3b).
 
-- [ ] **Step 3b: Toten Code entfernen** — `mirrorDirectCallToLlmLog()` + `resolveAnthropicProviderId()` + Property `$anthropicProviderIdCached` löschen.
+- [ ] **Step 3b: Toten Code + ungenutzte Ctor-Params entfernen** — `mirrorDirectCallToLlmLog()`, `resolveAnthropicProviderId()` und Property `$anthropicProviderIdCached` löschen. **Außerdem** werden die Ctor-Parameter `$callLogger` (`?LlmCallLogger`) und `$llmProviders` (`?LlmProviderRepository`) ungenutzt (waren nur Leser des Mirror-Pfads) → aus dem `MailScoringService`-Konstruktor entfernen **und** die `MailScoringService`-Konstruktion in `backend/src/Http/Kernel.php` (~Z. 350) um diese zwei Argumente kürzen. Danach `vendor/bin/phpstan analyse` (Level 5); falls `phpstan-baseline.neon` die alten Properties referenziert, Baseline neu erzeugen.
+
+- [ ] **Step 3c: Bestehenden `MailScoringServiceTest` anpassen (sonst rot)** — `backend/tests/Integration/MailScoringServiceTest.php` konstruiert `MailScoringService` heute mit 14 Args OHNE `llmRouter` und scort über `FakeClaudeClient` auf dem (jetzt entfernten) Direct-Pfad → alle ~14 `scoreBatch`-Tests würden `RuntimeException('LlmRouter nicht verdrahtet …')` werfen. `makeService()` so umbauen, dass es — analog `ScoreRouterModelTest::makeServiceWithRouter` — einen echten `LlmRouter` mit einem aufzeichnenden anon `LlmProvider` injiziert, der das kanonische `{"results":[…]}`-JSON liefert, und im Setup `routing_mode` + `llm.score.fallback_chain` + einen Provider/`llm_models`-`score`-Row seedet. Lauf grün:
+
+```bash
+cd backend && composer test:integration -- --filter MailScoringServiceTest
+```
 
 - [ ] **Step 4: Run — Unit + Integration grün**
 
@@ -632,33 +735,14 @@ Der `LlmAllProvidersDownException`-Fallback nutzt nicht mehr `prompt.model`, son
 
 - [ ] **Step 1: Failing test** — Router-Chain leer → Legacy-Fallback feuert; das geloggte Modell stammt aus `llm_models` (`summary`-Primary), nicht aus `prompt.model`.
 
+**Test-Aufbau** — als `backend/tests/Integration/Services/SummaryFallbackModelTest.php`, **1:1 am Muster von `backend/tests/Integration/Services/SummaryDraftRouterTest.php`** (anon `LlmProvider` mit `$seen` + `MailSummaryService` direkt konstruiert; **kein** Mock). Deltas:
+- Seed: Provider + `llm_models`-`summary`-Row `model_id='sentinel-summary-model'`; `routing_mode='router'`; **leere** Summary-Chain `llm.summary.fallback_chain='[]'`, damit der Router `LlmAllProvidersDownException` wirft und der Legacy-Fallback feuert.
+- `MailSummaryService` mit dem **neuen** `LlmModelRepository`-Arg (Position vor `$claudeFallback`) + einem aufzeichnenden anon `ClaudeProvider` als `claudeFallback` konstruieren (genau wie der anon Provider in `SummaryDraftRouterTest`, nur über die `claudeFallback`-Position).
+- `summarize(...)` aufrufen; assert: der in `summaries` persistierte `model` (bzw. der vom Fallback geloggte `model`) ist **`sentinel-summary-model`** (aus `llm_models`), **nicht** das P-SUMMARY-Prompt-Modell.
+
 ```php
-<?php
-declare(strict_types=1);
-
-namespace MailPilot\Tests\Integration\Services;
-
-use MailPilot\Tests\Integration\Services\Support\SummaryHarness;
-use MailPilot\Tests\TestCase;
-
-final class SummaryFallbackModelTest extends TestCase
-{
-	public function testLegacyFallbackUsesLlmModelsPrimaryNotPromptModel(): void
-	{
-		$this->truncateAll();
-		// Harness: P-SUMMARY-Prompt model="prompt-only", llm_models summary-Primary
-		// model="claude-opus-4-8"; leere fallback_chain → LlmAllProvidersDownException;
-		// claudeFallback = aufzeichnender anon ClaudeProvider.
-		$h = SummaryHarness::boot($this);
-		$h->setSummaryModel('claude-opus-4-8');
-		$h->setActivePromptModel('P-SUMMARY', 'prompt-only');
-		$h->emptyChain();
-
-		$h->summarizeOneMail();
-
-		self::assertSame('claude-opus-4-8', $h->lastLoggedModel(), 'Fallback-Modell aus llm_models');
-	}
-}
+self::assertSame('sentinel-summary-model', $persistedSummaryModel,
+    'Fallback-Modell stammt aus llm_models (Rolle summary), nicht aus prompt.model');
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (heute loggt der Fallback `prompt-only`)
@@ -729,31 +813,15 @@ git commit -m "refactor(summary,draft): Fallback-Modell aus llm_models statt pro
 
 - [ ] **Step 1: Failing test** — Inferenz-Extraktion läuft über einen aufzeichnenden Router-Provider; das `inference`-Modell aus `llm_models` wird angefragt.
 
+**Test-Aufbau** — als `backend/tests/Integration/Services/InferenceViaRouterTest.php`, anon-`LlmProvider`-Muster wie in `ScoreRouterModelTest` (mit `kind()` + `$seen`), Service-Konstruktion wie im **aktualisierten** `RuleInferenceServiceTest` (s. Step 3e). Deltas:
+- Seed: Anthropic-Provider + `llm_models`-`inference`-Row `model_id='claude-haiku-4-5-20251001'`; `routing_mode='router'`; `llm.inference.fallback_chain='["<provider-id>"]'`.
+- `RuleInferenceService` mit echtem `LlmRouter` konstruieren; der anon `LlmProvider` (Rolle `inference`) fängt den `NormalizedRequest` in `$seen` und liefert valides Extraktions-JSON (z. B. `{"folder_segments":["Projekte","Foo"],"confidence":90}` passend zum `P-RULE-EXTRACT`-Schema).
+- Eine Korrektur inferieren (`infer(...)` bzw. `inferAllFromCorrection(...)`); assert:
+
 ```php
-<?php
-declare(strict_types=1);
-
-namespace MailPilot\Tests\Integration\Services;
-
-use MailPilot\Tests\Integration\Services\Support\InferenceHarness;
-use MailPilot\Tests\TestCase;
-
-final class InferenceViaRouterTest extends TestCase
-{
-	public function testRuleExtractionGoesThroughRouterWithInferenceModel(): void
-	{
-		$this->truncateAll();
-		// Harness: Anthropic-Provider + llm_models inference-Row model="claude-haiku-4-5-20251001",
-		// routing_mode=router, llm.inference.fallback_chain=[anthropic]; anon LlmProvider zeichnet auf
-		// und liefert valides Extraktions-JSON.
-		$h = InferenceHarness::boot($this);
-
-		$h->inferFromCorrection('Absender X gehört in Ordner Projekte/Foo');
-
-		self::assertGreaterThanOrEqual(1, $h->recordedRouterCalls(), 'Inferenz lief über den Router');
-		self::assertSame('claude-haiku-4-5-20251001', $h->lastRequestedModel());
-	}
-}
+self::assertNotNull($capture->seen, 'Inferenz MUSS über den Router laufen');
+self::assertSame('claude-haiku-4-5-20251001', $capture->seen->modelHint,
+    'inference-Modell aus llm_models (Rolle inference)');
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (heute geht Inferenz direkt über `ClaudeClient`, kein Router-Call)
@@ -847,6 +915,12 @@ cd backend && composer test:integration -- --filter InferenceViaRouterTest
 ```
 
 > `buildClaudePayload()` bleibt unverändert (liefert weiter `model`/`max_tokens`/`temperature`/`system`/`messages`); das `model` darin wird vom Router-Pfad ignoriert (`modelHint=''`). `ClaudeClient` bleibt injiziert (für `extractText` in `parseClaudeResponse`).
+
+- [ ] **Step 3e: Bestehende Inferenz-Tests anpassen (sonst rot)** — `backend/tests/Integration/.../RuleInferenceServiceTest.php` und `InferAllFromCorrectionTest.php` konstruieren `RuleInferenceService` **positional** mit `FakeClaudeClient` und treiben die Extraktion über `$claude->scriptJson(...)` → `$this->claude->messages()`. Das Einfügen des **required** `LlmRouter` an Ctor-Position 3 (direkt nach `ClaudeClient`) verschiebt die Argumente → beide Konstruktionen brechen, und das Routing geht nicht mehr über `$this->claude`. Beide `makeService()` umbauen: echten `LlmRouter` mit aufzeichnendem anon `LlmProvider` (Rolle `inference`) injizieren, der das bisher per `scriptJson` gelieferte Extraktions-JSON zurückgibt, und im Setup `routing_mode='router'` + `llm.inference.fallback_chain` + eine `llm_models`-`inference`-Row seeden. (Kernel-seitig wird der neue Arg in Task 8 ergänzt.) Lauf grün:
+
+```bash
+cd backend && composer test:integration -- --filter "RuleInferenceServiceTest|InferAllFromCorrectionTest"
+```
 
 - [ ] **Step 4: Run — expect PASS + Unit grün**
 
