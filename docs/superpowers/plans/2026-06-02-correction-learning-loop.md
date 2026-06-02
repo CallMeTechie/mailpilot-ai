@@ -61,6 +61,10 @@ final class MigrationLearningLoopTest extends TestCase
 		self::assertNotFalse($col, 'origin_correction_id fehlt');
 		$role = $pdo->query("SHOW COLUMNS FROM llm_models LIKE 'role'")->fetch();
 		self::assertStringContainsString("'match'", (string)$role['Type']);
+		$logRole = $pdo->query("SHOW COLUMNS FROM llm_call_log LIKE 'role'")->fetch();
+		self::assertStringContainsString("'match'", (string)$logRole['Type'], 'llm_call_log.role muss match kennen');
+		$kind = $pdo->query("SHOW COLUMNS FROM pending_actions LIKE 'kind'")->fetch();
+		self::assertStringContainsString("'score_suggestion'", (string)$kind['Type'], 'pending_actions.kind muss score_suggestion kennen');
 		$set = new SettingsRepository($pdo);
 		self::assertSame('deterministic', $set->getString('learning.match_mode', ''));
 		self::assertSame('80', $set->getString('learning.match_auto_threshold', ''));
@@ -90,6 +94,17 @@ ALTER TABLE score_override_rules
 ALTER TABLE llm_models
 	MODIFY COLUMN role ENUM('score','summary','draft','inference','match') NOT NULL;
 
+-- 2b) llm_call_log.role MUSS 'match' kennen, sonst wird das Audit-Logging der
+--     match-Calls STILL verworfen (CLAUDE.md §5 / Spec-D8). PFLICHT — role ist
+--     ein ENUM('score','summary','draft','inference') (Migration 0055).
+ALTER TABLE llm_call_log
+	MODIFY COLUMN role ENUM('score','summary','draft','inference','match') NOT NULL;
+
+-- 2c) pending_actions.kind MUSS 'score_suggestion' kennen, sonst bricht der
+--     Vorschlags-INSERT (data truncation). PFLICHT — kind ist ENUM (0018 + 0025).
+ALTER TABLE pending_actions
+	MODIFY COLUMN kind ENUM('move','create_topic','move_to_pending_topic','reply_draft','rule_suggestion','score_suggestion') NOT NULL;
+
 -- 3) match-Modell-Row (Anthropic Haiku — billig/schnell; läuft pro Mail).
 INSERT INTO llm_models
 	(id, provider_id, model_id, role, cost_per_mtok_in, cost_per_mtok_out, supports_caching, max_context, enabled, priority)
@@ -111,7 +126,7 @@ INSERT INTO system_settings (`key`, `value`, `type`, description) VALUES
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 ```
 
-> **Hinweis:** `system_settings.type` ist ein ENUM mit `'string'/'int'/'json'` (vgl. 0051/0052) — gültig. Falls `llm_call_log.role` ebenfalls ein ENUM ist, in derselben Migration um `'match'` erweitern — **vor der Umsetzung per `SHOW COLUMNS FROM llm_call_log LIKE 'role'` prüfen** und nur dann altern.
+> **Hinweis:** `system_settings.type` ist ein ENUM `('int','float','string','bool','json')` (Migration 0005) — `'int'/'string'/'json'` sind gültig. Die ENUM-ALTERs für `llm_call_log.role` (0055) und `pending_actions.kind` (0018+0025) sind **verifiziert nötig** (beide sind ENUMs ohne den neuen Wert) und daher oben **unbedingt** enthalten — nicht konditional.
 
 - [ ] **Step 4: Run — expect PASS**
 
@@ -730,14 +745,13 @@ cd backend && composer test:integration -- --filter ScoreOverrideBandsTest
 	}
 ```
 
-(b) In `apply()` die binäre `matches()`-Schleife durch Match-Score + Band ersetzen. Sind die optionalen Deps `null` (Alt-Aufrufer) → **heutiges binäres Verhalten** beibehalten (Rückwärtskompatibilität). Sonst pro enabled Regel: `score = matchScorer->score($rule, $mailFeatures)`; im `match_mode` ∈ {llm,hybrid} **und** `$wasCacheHit === false` **und** `band==suggest` **und** Batch-Budget übrig → `ruleMatch->scoreMatch()` als Verfeinerung (`null` → deterministischen Score behalten). Dann:
-- `auto` → bestehende `applySetFieldsOrthogonal()` (orthogonal, Sticky-Schutz unverändert).
-- `suggest` → `pending->create(kind:'score_suggestion', payload:{rule_id, mail_id, proposed:{label/priority/...}})`; **kein** Score-Write.
-- `ignore` → nichts.
+(b) In `apply()` einen NEUEN Zweig einbauen — **ohne** den alten Pfad zu refaktorieren:
+- `if ($this->matchScorer === null)` → **exakt** der heutige binäre `matches()`/`applySetFieldsOrthogonal()`-Code, **unverändert** (der bestehende `ScoreOverrideServiceTest` pinnt `match_label`/`match_priority_min`/first-match — diese müssen 1:1 erhalten bleiben).
+- sonst pro enabled Regel: **zuerst die harten Gates** prüfen (`match_label`/`match_priority_min`/`match_subject_regex` — eine Regel ist nur Kandidat, wenn diese Gates passen; der `MatchScorer` kennt sie NICHT, sie bleiben also Vorbedingung), dann `score = matchScorer->score($rule, $mailFeatures)`. Im `match_mode` ∈ {llm,hybrid} **und** `$wasCacheHit === false` **und** `band==suggest` **und** Batch-Budget übrig → `ruleMatch->scoreMatch()` als Verfeinerung (`null` → deterministischen Score behalten). Dann: `auto` → `applySetFieldsOrthogonal()` (orthogonal, Sticky-Schutz unverändert) · `suggest` → Vorschlag anlegen (s. (d)), **kein** Score-Write · `ignore` → nichts.
 
-(c) Signatur `apply(..., bool $wasCacheHit = false)` ergänzen; `MailScoringService::enrichScoresWithSender()` reicht pro Row durch, ob sie ein Cache-Hit war (aus `scoreBatch`-`$cacheHits`).
+(c) **Cache-Hit-Info durchreichen (heute NICHT vorhanden!):** `scoreBatch()` baut `$cacheHits` (Liste `['mail'=>…,'score_index'=>…]`), reicht sie aber NUR an `actionOwner->resolveForCacheHits()`. Daher: `enrichScoresWithSender(..., array $cacheHitMailIds)` um einen Parameter erweitern (Set der `mail_id`s, die Cache-Hits waren — aus `$cacheHits` abgeleitet) und pro Row `apply(..., $bucket, in_array($mid, $cacheHitMailIds, true))` aufrufen. `apply(...)` bekommt `bool $wasCacheHit = false` als letzten Parameter (Default deckt Alt-Aufrufer ab).
 
-(d) Kernel: `ScoreOverrideService` mit `MatchScorer`(aus `learning.match_*`-Settings), `RuleMatchService`, `SettingsRepository`, `PendingActionRepository` konstruieren. `pending_actions.kind`: falls ENUM → in Migration 0065 um `'score_suggestion'` erweitern (**vorher `SHOW COLUMNS FROM pending_actions LIKE 'kind'` prüfen**).
+(d) **Vorschlag anlegen — volle Signatur:** `PendingActionRepository::create()` ist `create(string $tenantId, string $userId, string $kind, array $payload, string $createdUnderMode, ?string $parentPendingId = null)` (erste 5 required). Also `create($tenantId, $userId, 'score_suggestion', ['rule_id'=>…,'mail_id'=>…,'proposed'=>[…]], $mode)`. **Pflicht:** `'score_suggestion'` in die Whitelist `PendingActionRepository::KINDS` aufnehmen (sonst `InvalidArgumentException` VOR dem INSERT) + `countByKind()`-Default-Array + `@return`-Shape entsprechend erweitern. Kernel: `ScoreOverrideService` mit `MatchScorer` (aus `learning.match_*`-Settings), `RuleMatchService`, `SettingsRepository`, `PendingActionRepository` konstruieren.
 
 - [ ] **Step 4: Run — expect PASS + bestehende `ScoreOverrideServiceTest` grün**
 
@@ -811,7 +825,7 @@ cd backend && composer test:integration -- --filter CorrectionInvalidatesCacheTe
 	}
 ```
 
-(b) `MailScoringService::contentHash()` von `private` auf `public static` heben (gleiche Formel; `maxBodyBytes` als Parameter mitgeben oder Default 2048). (c) `MailController::correctScore()` nach `CorrectionRepository::record(...)`: den `content_hash` der Mail über die gemeinsame Formel bilden und `CacheRepository::purgeByContentHash($tenantId, $hash)` aufrufen. **DRY:** beide nutzen exakt dieselbe Hash-Funktion.
+(b) `MailScoringService::contentHash()` von `private` auf `public static function contentHash(array $mail, int $maxBodyBytes): string` heben (gleiche Formel); den internen Aufruf in `scoreBatch()` (heute `$this->contentHash($mail)`) auf `self::contentHash($mail, $this->maxBodyBytes)` umstellen. (c) `MailController::correctScore()` nach `CorrectionRepository::record(...)`: `$hash = MailScoringService::contentHash($mail, $maxBodyBytes)` mit **demselben** `maxBodyBytes`, den das Scoring nutzt (`config['limits']['max_body_bytes']`, **nicht** Default 2048 — sonst weicht der Purge-Hash vom Cache-Hash ab und der Purge trifft nie), dann `CacheRepository::purgeByContentHash($tenantId, $hash)`.
 
 - [ ] **Step 4: Run — expect PASS + Unit grün**
 
@@ -861,7 +875,7 @@ final class InferenceUpdateInPlaceTest extends TestCase
 
 - [ ] **Step 3: Implement**
 
-(a) In den Regel-Erzeugungspfaden (`inferScoreRule`/`inferAllFromCorrection` → `scoreOverrides->create`): vor dem Anlegen `findUserDerivedSlot($tenant,$user,$senderKey,$field)`; existiert ein Slot → `updateFields()` statt `create()`. `create()` immer mit `origin_correction_id` (auslösende `mail_score_corrections.id`) + `source='ki_inferred'`. Confidence → Match-Breite: hoch → `match_sender_key` (Domain erlaubt); niedrig → zusätzlich `match_from_local` (enger).
+(a) **`origin_correction_id` durchreichen:** `inferScoreRule`/`inferTopicRule`/`inferAllFromCorrection` haben heute KEINEN `correctionId`-Parameter — einen ergänzen und vom Caller `MailController::correctScore()` (kennt die `mail_score_corrections.id`) durchreichen. **Achtung Re-Korrektur:** `CorrectionRepository::record()` macht `ON DUPLICATE KEY UPDATE` und liefert dann eine *frische* UUID, die NICHT der gespeicherten Row-id entspricht → als Marker unzuverlässig. Daher die bestehende Korrektur-id über den Idempotenz-Schlüssel (`mail_score_corrections`, z. B. `rule_inference_hash`/`(mail_id,…)`) auflösen und DIESE als `origin_correction_id` nutzen. In den Erzeugungspfaden vor dem Anlegen `findUserDerivedSlot($tenant,$user,$senderKey,$field)`; existiert ein Slot → `updateFields()` statt `create()`. `create()` immer mit `origin_correction_id` + `source='ki_inferred'`. Confidence → Match-Breite: hoch → `match_sender_key` (Domain erlaubt); niedrig → zusätzlich `match_from_local` (enger).
 (b) **Soft-Cap:** nach `create()` `countUserDerived()`; über `learning.score_rules_soft_cap` → `disableLeastRecentlyUsed()` + Log `score_override.lru_disabled` (Task 10).
 (c) **Feedback-Endpoint** (`MailController`): ein bestätigter/verworfener `score_suggestion` trägt `rule_id` im Payload → bestätigen: `recordApply` + `updateFields(enabled:1)`; verwerfen: `updateFields` verengen / `enabled:0`. **Keine** neue Regel. `pending_actions` via `setStatus` abschließen.
 
