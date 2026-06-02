@@ -89,6 +89,7 @@ final class SummaryDraftRouterTest extends TestCase
 			new RedactionService(),
 			$budget,
 			new PromptRepository($pdo),
+			new LlmModelRepository($pdo),
 			new FakeClaudeClient(),
 		);
 

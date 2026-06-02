@@ -8,6 +8,7 @@ use MailPilot\Claude\ClaudeProvider;
 use MailPilot\Llm\LlmAllProvidersDownException;
 use MailPilot\Llm\LlmRouter;
 use MailPilot\Llm\NormalizedRequest;
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SummaryRepository;
@@ -30,6 +31,7 @@ final class MailSummaryService
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
 		private readonly PromptRepository $prompts,
+		private readonly LlmModelRepository $models,
 		private readonly ?ClaudeProvider $claudeFallback = null,
 	) {
 	}
@@ -55,7 +57,11 @@ final class MailSummaryService
 			$activePrompt['key_name'],
 			$activePrompt['version'],
 		);
-		$model     = $activePrompt['model'];
+		// Spec 1: Modell kommt aus llm_models (Rolle 'summary'), nicht mehr aus
+		// dem Prompt. Wird nur noch für den Legacy-Direct-Fallback + Budget-/
+		// Error-Logging gebraucht (der Router-Pfad resolved es selbst).
+		$model     = $this->models->primaryModelIdForRole('summary')
+			?? (string)$activePrompt['model'];
 		$maxTokens = $activePrompt['max_tokens'];
 
 		$system = str_replace(

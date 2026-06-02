@@ -9,6 +9,7 @@ use MailPilot\Llm\LlmAllProvidersDownException;
 use MailPilot\Llm\LlmRouter;
 use MailPilot\Llm\NormalizedRequest;
 use MailPilot\Repositories\DraftRepository;
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\RedactionRepository;
@@ -29,6 +30,7 @@ final class ReplyDraftService
 		private readonly RedactionService $redactor,
 		private readonly BudgetService $budget,
 		private readonly PromptRepository $prompts,
+		private readonly LlmModelRepository $models,
 		// Sprint 6f DA-R2 Finding 3: optional, für user-spezifische redaction_rules.
 		private readonly ?RedactionRepository $redactionRules = null,
 		// B7: Safety-Net wenn die Router-Chain leer/kaputt ist → Legacy-Direct-Anthropic.
@@ -68,7 +70,10 @@ final class ReplyDraftService
 			$activePrompt['key_name'],
 			$activePrompt['version'],
 		);
-		$model     = $activePrompt['model'];
+		// Spec 1: Modell aus llm_models (Rolle 'draft'), Prompt nur als Fallback —
+		// wie MailSummaryService. Genutzt für Legacy-Direct-Fallback + Logging.
+		$model     = $this->models->primaryModelIdForRole('draft')
+			?? (string)$activePrompt['model'];
 		$maxTokens = $activePrompt['max_tokens'];
 
 		$instructionBlock = $instruction !== null && $instruction !== ''

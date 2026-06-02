@@ -93,6 +93,7 @@ final class AutoReplyServiceTest extends TestCase
 		$reply = new ReplyDraftService(
 			$router, $mailRepo, $drafts, new RedactionService(),
 			$budget, $prompts,
+			new LlmModelRepository($pdo),
 			null,    // redactionRules: kein per-user-scope in diesem Test
 			$claude, // B7: Safety-Net-Fallback
 		);

@@ -12,6 +12,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\PendingActionRepository;
@@ -359,6 +360,7 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(LlmModelRepository::class),
 				$this->get(ClaudeProvider::class), // Safety-Net-Fallback
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
@@ -368,6 +370,7 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(LlmModelRepository::class),
 				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
 				$this->get(ClaudeProvider::class), // B7: Safety-Net-Fallback
 			),
