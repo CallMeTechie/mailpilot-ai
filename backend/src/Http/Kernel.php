@@ -346,14 +346,11 @@ class Kernel
 				$this->get(LookalikeDetector::class),
 				// Phase 9a: Klassifikations-Overrides nach KI-Score.
 				$this->get(ScoreOverrideService::class),
-				// Phase 9q-B (Marc 2026-05-22): optionaler Failover-Router.
-				// Aktiv wenn Setting llm.routing_mode='router'. Default 'direct'
-				// → bestehender Pfad via ClaudeProvider.
+				// Spec 1 (2026-06-02): Scoring läuft IMMER über den LlmRouter
+				// (Modell + Effort aus llm_models, Rolle 'score'). routing_mode
+				// steuert nur noch Failover; der Router loggt selbst ins
+				// llm_call_log. Kein Direct-AnthropicClient-/Mirror-Pfad mehr.
 				$this->get(\MailPilot\Llm\LlmRouter::class),
-				// Phase 9q B-Fix (Marc 2026-05-23): direct-Mode-Calls in
-				// llm_call_log spiegeln, sonst zeigt /admin/llm/usage = 0.
-				$this->get(\MailPilot\Llm\LlmCallLogger::class),
-				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(\MailPilot\Llm\LlmRouter::class),

@@ -3,9 +3,12 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
@@ -18,29 +21,42 @@ use MailPilot\Services\BudgetService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Tests\Fixtures\FakeClaudeClient;
+use MailPilot\Tests\Fixtures\ScriptedLlmProvider;
+use MailPilot\Tests\Support\SeedsScoreRouting;
 use MailPilot\Tests\TestCase;
 use MailPilot\Util\Uuid;
-use PDO;
+use Psr\Log\NullLogger;
 
 /**
  * Sprint 6a — pinnt PRD-§5.1-Invarianten (action_owner NICHT im Cache),
- * Recipients-Payload-Format und Anthropic-Cache-Control. Diese Tests
- * fangen Regressionen, die das KI-Butler-Verhalten subtil brechen
- * würden (z.B. Cache vererbt action_owner über Mails hinweg).
+ * Recipients-Payload-Format und Prompt-Caching. Diese Tests fangen
+ * Regressionen, die das KI-Butler-Verhalten subtil brechen würden
+ * (z.B. Cache vererbt action_owner über Mails hinweg).
+ *
+ * Spec 1 (2026-06-02): Der Score-Call läuft IMMER über den LlmRouter; der
+ * action_owner-Mini-Call (nur bei Cache-Hits) läuft weiterhin über den
+ * FakeClaudeClient (ActionOwnerResolver). Diese Tests sind alle FRESH-Scores
+ * (kein Cache-Hit), die action_owner direkt im Score-Result mitliefern — der
+ * Mini-Call feuert hier also gar nicht.
  *
  * @group integration
  */
 final class ActionOwnerTest extends TestCase
 {
+	use SeedsScoreRouting;
+
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000c3';
+
 	protected function setUp(): void
 	{
 		$this->truncateAll();
 		// Sprint 6c: Test geht von Auto-Discovery aus (kein suggest-Pending).
 		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
 			WHERE `key`='autosort_create_topic_mode'")->execute();
+		$this->seedScoreRouting(self::PROVIDER_ID, 'TestScoreAO');
 	}
 
-	private function makeService(FakeClaudeClient $claude): MailScoringService
+	private function makeService(ScriptedLlmProvider $provider): MailScoringService
 	{
 		$pdo = $this->pdo();
 		$budget = new BudgetService(
@@ -49,8 +65,17 @@ final class ActionOwnerTest extends TestCase
 			new PricingRepository($pdo),
 			$this->logger(),
 		);
+		$router = new LlmRouter(
+			['anthropic' => $provider],
+			new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo),
+			new NullLogger(),
+			new LlmModelRepository($pdo),
+		);
 		return new MailScoringService(
-			$claude,
+			// FakeClaudeClient bleibt für den action_owner-Mini-Call
+			// (ActionOwnerResolver) verdrahtet — der läuft NICHT über den Router.
+			new FakeClaudeClient(),
 			new MailRepository($pdo),
 			new ScoreRepository($pdo),
 			new CacheRepository($pdo, 30),
@@ -65,6 +90,11 @@ final class ActionOwnerTest extends TestCase
 			2048,
 			$this->logger(),
 			new PendingActionRepository($pdo),
+			null,
+			null,
+			null,
+			null,
+			$router,
 		);
 	}
 
@@ -118,17 +148,17 @@ final class ActionOwnerTest extends TestCase
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
 
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hallo Marc, kannst du das prüfen?',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'action', 'sub_label' => null, 'sub_label_is_new' => false,
 			'action_required' => true, 'action_owner' => 'user', 'action_owner_confidence' => 90,
 			'priority' => 4, 'summary' => 'Prüfung gewünscht', 'reasoning' => 'Anrede + Frage',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
@@ -147,16 +177,16 @@ final class ActionOwnerTest extends TestCase
 	public function testFreshScoreStoresActionOwnerWithKiSource(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hi Marc!',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'direct', 'sub_label' => null, 'sub_label_is_new' => false,
 			'action_required' => false, 'action_owner' => 'user', 'action_owner_confidence' => 85,
 			'priority' => 3, 'summary' => 'Test', 'reasoning' => 'x',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
@@ -172,18 +202,18 @@ final class ActionOwnerTest extends TestCase
 	public function testInvalidActionOwnerFromClaudeIsCoercedToUnsure(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId, 'body',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
 		// Claude liefert garbage in action_owner — Service muss auf
 		// 'unsure' clampen statt den Enum-Constraint zu verletzen.
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'auto', 'sub_label_is_new' => false,
 			'action_required' => false, 'action_owner' => 'bogus_value', 'action_owner_confidence' => 999,
 			'priority' => 2, 'summary' => 'x', 'reasoning' => 'y',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
@@ -199,26 +229,28 @@ final class ActionOwnerTest extends TestCase
 	public function testRecipientsArrayInPromptPayload(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId, 'Hallo Marc',
 			[
 				['address' => 'marc@example.de',   'name' => 'Marc'],
 				['address' => 'klaus@kunde.de',    'name' => 'Klaus'],
 			]);
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'direct', 'sub_label_is_new' => false,
 			'action_required' => false, 'action_owner' => 'user', 'action_owner_confidence' => 70,
 			'priority' => 3, 'summary' => 'x', 'reasoning' => 'y',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
 		], [$this->fetchMail($mailId)]);
 
-		$lastCall = $claude->lastCall();
-		$userMessage = $lastCall['messages'][0]['content'] ?? '';
+		// Was der Router an den Provider gab — User-Message im NormalizedRequest.
+		$seen = $provider->seen;
+		$this->assertNotNull($seen, 'Score MUSS über den Router gelaufen sein');
+		$userMessage = (string)($seen->messages[0]['content'] ?? '');
 		$this->assertStringContainsString('"recipients"', $userMessage,
 			'recipients-Array muss im User-Prompt landen');
 		$this->assertStringContainsString('"is_user":true', $userMessage,
@@ -228,25 +260,31 @@ final class ActionOwnerTest extends TestCase
 	public function testSystemPromptHasExtendedCacheControl(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId, 'body',
 			[['address' => 'marc@example.de', 'name' => 'Marc']]);
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'auto', 'sub_label_is_new' => false,
 			'action_required' => false, 'action_owner' => 'unsure', 'action_owner_confidence' => 0,
 			'priority' => 2, 'summary' => 'x', 'reasoning' => 'y',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
 		], [$this->fetchMail($mailId)]);
 
-		$call = $claude->lastCall();
-		$this->assertIsArray($call['system'] ?? null, 'system muss segmentiert sein für Prompt-Caching');
-		$this->assertSame('ephemeral', $call['system'][0]['cache_control']['type'] ?? null);
-		$this->assertSame('1h', $call['system'][0]['cache_control']['ttl'] ?? null,
-			'Sprint 6a §5.2: 1h-Extended-TTL ist Pflicht');
+		// Spec 1: callViaRouter flacht die Anthropic-Segmente; das frühere
+		// $call['system'][0]['cache_control'] gibt es nicht mehr. Der
+		// Caching-Hint wird stattdessen als cacheSegments=[0] auf dem
+		// NormalizedRequest gesetzt — der Anthropic-Provider rendert daraus
+		// das 1h-ephemeral cache_control. Das pinnen wir hier.
+		$seen = $provider->seen;
+		$this->assertNotNull($seen, 'Score MUSS über den Router gelaufen sein');
+		$this->assertSame([0], $seen->cacheSegments,
+			'System-Prompt muss als cache-Segment markiert sein (Prompt-Caching)');
+		$this->assertNotSame('', $seen->systemPrompt,
+			'System-Prompt darf nicht leer sein');
 	}
 }

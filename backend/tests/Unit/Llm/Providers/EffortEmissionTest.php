@@ -19,6 +19,15 @@ final class EffortEmissionTest extends TestCase
 		);
 	}
 
+	private function reqWithCache(): NormalizedRequest
+	{
+		return new NormalizedRequest(
+			systemPrompt: 'sys', messages: [['role' => 'user', 'content' => 'hi']],
+			maxTokens: 400, temperature: 0.3, modelHint: 'claude-haiku-4-5-20251001',
+			responseFormat: null, cacheSegments: [0], effort: null,
+		);
+	}
+
 	public function testAnthropicEmitsOutputConfigWhenEffortSet(): void
 	{
 		$with = AnthropicProvider::buildPayload($this->req('medium'));
@@ -35,5 +44,15 @@ final class EffortEmissionTest extends TestCase
 
 		$without = OpenAiProvider::buildPayload($this->req(null));
 		self::assertArrayNotHasKey('reasoning_effort', $without);
+	}
+
+	public function testCacheSegmentsZeroAddsEphemeralCacheControl(): void
+	{
+		$payload = AnthropicProvider::buildPayload($this->reqWithCache());
+
+		self::assertSame(
+			['type' => 'ephemeral', 'ttl' => '1h'],
+			$payload['system'][0]['cache_control'],
+		);
 	}
 }
