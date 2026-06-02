@@ -159,6 +159,43 @@ final class LlmRouter
 	}
 
 	/**
+	 * Sequenzielle Batch-Variante (genutzt von RuleInferenceService für die
+	 * ≤3 Regel-Extraktions-Calls). Jedes Item läuft über complete() mit
+	 * vollem per-Item-Failover; ein gescheitertes Item → null-Slot (kein
+	 * Abbruch des Batches), analog zum bisherigen ClaudeClient::messagesBatch.
+	 *
+	 * Hinweis: Der Default-Wert für $taskType ist bewusst 'inference' und
+	 * weicht damit vom Default 'score' in complete() ab — wer zwischen beiden
+	 * Methoden wechselt, sollte die Rolle immer explizit übergeben.
+	 *
+	 * @param  list<NormalizedRequest> $requests
+	 * @return list<NormalizedResponse|null>
+	 */
+	public function completeBatch(array $requests, string $taskType = 'inference'): array
+	{
+		$out = [];
+		foreach ($requests as $i => $req) {
+			try {
+				$out[] = $this->complete($req, $taskType);
+			} catch (LlmAllProvidersDownException $e) {
+				// Systemischer Ausfall (alle Provider der Chain down) — höhere
+				// Severity als ein einzelnes Bad-Payload-Item, damit Monitoring
+				// einen Komplettausfall vom Einzel-Item-Fehler unterscheiden kann.
+				$this->logger->error('llm.router.batch_all_providers_down', [
+					'task' => $taskType, 'slot' => $i, 'err' => $e->getMessage(),
+				]);
+				$out[] = null;
+			} catch (\Throwable $e) {
+				$this->logger->warning('llm.router.batch_item_failed', [
+					'task' => $taskType, 'slot' => $i, 'err' => $e->getMessage(),
+				]);
+				$out[] = null;
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * Liest die Provider-Chain aus den Settings + DB und wendet Privacy-
 	 * Mode-Filter an.
 	 *
