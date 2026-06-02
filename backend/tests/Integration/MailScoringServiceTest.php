@@ -512,4 +512,92 @@ final class MailScoringServiceTest extends TestCase
 		$this->assertSame([], (new SubLabelRepository($this->pdo()))->listForUser($tenantId, $userId),
 			'Format-invalid name darf nichts in user_sublabels schreiben');
 	}
+
+	// --- Task 1: scoring.batch_size als Laufzeit-Setting -------------
+
+	/**
+	 * Helper: schreibt scoring.batch_size in system_settings (UPSERT). Das
+	 * SettingsRepository cached 30s — die hier frisch konstruierten Repos in
+	 * makeService() sind aber jeweils neu, lesen also den aktuellen Wert.
+	 */
+	private function setScoringBatchSize(int $n): void
+	{
+		$this->pdo()->prepare(
+			'INSERT INTO system_settings (`key`, `value`, `type`) VALUES ("scoring.batch_size", :v, "int")
+			 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)'
+		)->execute([':v' => (string)$n]);
+	}
+
+	/**
+	 * @return list<array<string,mixed>> drei unscored Mails (distinkte Inhalte)
+	 */
+	private function seedThreeUnscoredMails(string $tenantId, string $mailboxId): array
+	{
+		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'a@ex.de', 'subject' => 'Mail A', 'body_text' => 'Body A unique']);
+		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'b@ex.de', 'subject' => 'Mail B', 'body_text' => 'Body B unique']);
+		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'c@ex.de', 'subject' => 'Mail C', 'body_text' => 'Body C unique']);
+		return (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
+	}
+
+	/**
+	 * @param list<array<string,mixed>> $chunk
+	 */
+	private function scriptScoreResults(FakeClaudeClient $claude, array $chunk): void
+	{
+		$results = [];
+		foreach ($chunk as $mail) {
+			$results[] = [
+				'id'              => $mail['id'],
+				'label'           => 'direct',
+				'action_required' => false,
+				'priority'        => 3,
+				'summary'         => 's',
+				'reasoning'       => 'r',
+			];
+		}
+		$claude->scriptJson(['results' => $results]);
+	}
+
+	public function testBatchSizeTwoSplitsThreeMailsIntoTwoCalls(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$mails = $this->seedThreeUnscoredMails($tenantId, $mailboxId);
+		$this->assertCount(3, $mails);
+
+		$this->setScoringBatchSize(2);
+
+		$claude = new FakeClaudeClient();
+		// ceil(3/2) = 2 Chunks: erst 2 Mails, dann 1 Mail.
+		$this->scriptScoreResults($claude, array_slice($mails, 0, 2));
+		$this->scriptScoreResults($claude, array_slice($mails, 2, 1));
+
+		$service = $this->makeService($claude);
+		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertCount(3, $scores);
+		$this->assertSame(2, $claude->callCount(), 'batch_size=2 → ceil(3/2)=2 Chunks/Calls');
+	}
+
+	public function testBatchSizeFiveScoresThreeMailsInOneCall(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser();
+		$mailboxId = $this->insertMailbox($tenantId, $userId);
+		$mails = $this->seedThreeUnscoredMails($tenantId, $mailboxId);
+		$this->assertCount(3, $mails);
+
+		$this->setScoringBatchSize(5);
+
+		$claude = new FakeClaudeClient();
+		// batch_size=5 >= 3 → genau 1 Chunk mit allen 3 Mails.
+		$this->scriptScoreResults($claude, $mails);
+
+		$service = $this->makeService($claude);
+		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
+		$scores = $service->scoreBatch($tenantId, $profile, $mails);
+
+		$this->assertCount(3, $scores);
+		$this->assertSame(1, $claude->callCount(), 'batch_size=5 ≥ 3 Mails → ein einziger Call');
+	}
 }

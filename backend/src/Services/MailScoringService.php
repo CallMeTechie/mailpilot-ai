@@ -131,7 +131,8 @@ final class MailScoringService
 			$toClaude[] = ['mail' => $mail, 'hash' => $hash];
 		}
 
-		foreach (array_chunk($toClaude, $this->batchSize) as $chunk) {
+		$batchSize = max(1, min(100, $this->settings->getInt('scoring.batch_size', $this->batchSize)));
+		foreach (array_chunk($toClaude, $batchSize) as $chunk) {
 			$results = $this->callClaude($userProfile, array_column($chunk, 'mail'), $subLabelMap, $activePrompt);
 			foreach ($chunk as $i => $item) {
 				$claudeResult = $results[$i] ?? null;
@@ -403,7 +404,7 @@ final class MailScoringService
 			throw $e;
 		}
 		$latency = (int)((microtime(true) - $start) * 1000);
-		$this->recordCall($tenantId, $userId, $mailboxId, $response['usage'] ?? [], $latency, 'success', null, $promptVersionTag, $model);
+		$this->recordCall($tenantId, $userId, $mailboxId, $response['usage'] ?? [], $latency, 'success', null, $promptVersionTag, (string)($response['model'] ?? $model));
 
 		// Phase 9q B-Fix (Marc 2026-05-23): direct-Mode-Calls auch ins
 		// llm_call_log spiegeln, sonst zeigt /admin/llm/usage = 0 für
@@ -455,7 +456,8 @@ final class MailScoringService
 			messages:       [['role' => 'user', 'content' => $user]],
 			maxTokens:      $maxTokens,
 			temperature:    $temperature,
-			modelHint:      $model,
+			// leer → Router resolved Modell+Effort pro Rolle aus llm_models (direct-Mode nutzt weiter das Prompt-Modell)
+			modelHint:      '',
 			responseFormat: 'json_object',
 			cacheSegments:  [0],
 		);

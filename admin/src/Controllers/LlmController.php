@@ -278,6 +278,7 @@ final class LlmController extends BaseController
 			'routingMode' => $settings->getString('llm.routing_mode',   'direct'),
 			'chains'      => $chains,
 			'roles'       => $roles,
+			'scoringBatchSize' => $settings->getInt('scoring.batch_size', 20),
 			'csrfToken'   => $this->csrfToken(),
 		]);
 	}
@@ -324,6 +325,9 @@ final class LlmController extends BaseController
 			$ids = self::parseChainInput($_POST["chain_{$role}"] ?? []);
 			$settings->set("llm.{$role}.fallback_chain", json_encode($ids, JSON_UNESCAPED_UNICODE));
 		}
+
+		$batchSize = max(1, min(100, (int)($_POST['scoring_batch_size'] ?? 20)));
+		$settings->set('scoring.batch_size', (string)$batchSize);
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');
 		$this->redirect('/admin/llm/routing');
