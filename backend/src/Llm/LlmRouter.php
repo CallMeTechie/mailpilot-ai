@@ -109,6 +109,18 @@ final class LlmRouter
 			$start = microtime(true);
 			try {
 				$response = $provider->complete($effectiveRequest);
+				// modelId-Garantie: manche Provider (OpenAI-kompatibel/lokal)
+				// liefern leeren/abweichenden model — der Cost-Pfad keyt aber
+				// auf model. Leere modelId mit dem resolvten Modell füllen.
+				if ($response->modelId === '' && $effectiveRequest->modelHint !== '') {
+					$response = new NormalizedResponse(
+						content:      $response->content,
+						usage:        $response->usage,
+						finishReason: $response->finishReason,
+						modelId:      $effectiveRequest->modelHint,
+						providerKind: $response->providerKind,
+					);
+				}
 				$latencyMs = (int)((microtime(true) - $start) * 1000);
 				if ($idx > 0) {
 					$this->logger->info('llm.router.failover_succeeded', [
