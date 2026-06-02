@@ -72,4 +72,14 @@ final class LlmModelRepository
 		$stmt->execute([':r' => $role]);
 		return $stmt->fetchAll(PDO::FETCH_ASSOC);
 	}
+
+	/**
+	 * Modell-ID des höchstprioren aktiven Modells einer Rolle (cross-Provider).
+	 * Genutzt als Legacy-Fallback-Modell, wenn der Router-Pfad nicht greift.
+	 */
+	public function primaryModelIdForRole(string $role): ?string
+	{
+		$rows = $this->listByRole($role);
+		return $rows === [] ? null : (string)$rows[0]['model_id'];
+	}
 }
