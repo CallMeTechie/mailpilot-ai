@@ -21,7 +21,7 @@ ALTER TABLE pending_actions
 	MODIFY COLUMN kind ENUM('move','create_topic','move_to_pending_topic','reply_draft','rule_suggestion','score_suggestion') NOT NULL;
 
 -- 3) match-Modell-Row (Anthropic Haiku — billig/schnell; läuft pro Mail).
-INSERT INTO llm_models
+INSERT IGNORE INTO llm_models
 	(id, provider_id, model_id, role, cost_per_mtok_in, cost_per_mtok_out, supports_caching, max_context, enabled, priority)
 VALUES
 	('00000000-0000-4000-8001-000000000054',
