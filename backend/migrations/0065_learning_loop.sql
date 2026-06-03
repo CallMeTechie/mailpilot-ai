@@ -38,4 +38,4 @@ INSERT INTO system_settings (`key`, `value`, `type`, description) VALUES
 	('learning.score_rules_soft_cap', '200', 'int', 'Spec 2: max aktive user-derived Override-Regeln pro User; darüber LRU-Deaktivierung.'),
 	('llm.match.fallback_chain', '["00000000-0000-4000-8000-000000000050"]', 'json',
 	 'Spec 2: Failover-Chain für die match-Rolle. Initial nur Anthropic.')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
+ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `type` = VALUES(`type`), description = VALUES(description);
