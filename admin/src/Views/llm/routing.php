@@ -28,9 +28,9 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 	</div>
 </header>
 
-<?php if (($routingUpgradeNotice ?? false) === true): ?>
+<?php if ($routingUpgradeNotice === true): ?>
 <div class="flash flash-info" style="margin-bottom: var(--mp-sp-3)">
-	<strong>Hinweis nach Upgrade:</strong> <code>routing_mode</code> wurde beim Upgrade automatisch auf <strong><?= $h($rl('router')) ?></strong> gesetzt, damit die Failover-Chain für <strong>alle Rollen</strong> (<code>score</code>/<code>summary</code>/<code>draft</code>/<code>inference</code>) sofort greift. Bitte unten prüfen, ob das gewünscht ist — dieser Hinweis wird nur einmal angezeigt.
+	<strong>Hinweis nach Upgrade:</strong> <code>routing_mode</code> wurde beim Upgrade automatisch auf <strong><?= $h($rl('router')) ?></strong> gesetzt, damit die Failover-Chain für <strong>alle Rollen</strong> (<code><?= implode('</code>/<code>', array_map($h, $roles)) ?></code>) sofort greift. Bitte unten prüfen, ob das gewünscht ist — dieser Hinweis wird nur einmal angezeigt.
 </div>
 <?php endif; ?>
 
