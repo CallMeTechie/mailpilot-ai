@@ -41,29 +41,30 @@ final class ScoreOverrideRepository
 			(id, tenant_id, user_id,
 			 match_sender_key, match_subject_regex, match_from_local, match_label, match_priority_min,
 			 set_priority, set_action_required, set_label, set_folder_segments,
-			 enabled, source)
+			 enabled, source, origin_correction_id)
 			VALUES (:id, :t, :u,
 			 :msk, :msr, :mfl, :ml, :mpm,
 			 :sp, :sar, :sl, :sfs,
-			 :en, :src)');
+			 :en, :src, :ocid)');
 		$stmt->execute([
-			':id'  => $id,
-			':t'   => $tenantId,
-			':u'   => $userId,
-			':msk' => $this->normSenderKey($data['match_sender_key'] ?? null),
-			':msr' => $this->validRegex($data['match_subject_regex'] ?? null),
-			':mfl' => $this->lowerOrNull($data['match_from_local'] ?? null, 120),
-			':ml'  => $this->validLabelOrNull($data['match_label'] ?? null),
-			':mpm' => $this->intOrNull($data['match_priority_min'] ?? null, 1, 5),
-			':sp'  => $this->intOrNull($data['set_priority']        ?? null, 1, 5),
-			':sar' => isset($data['set_action_required']) ? (int)(bool)$data['set_action_required'] : null,
-			':sl'  => $this->validLabelOrNull($data['set_label'] ?? null),
-			':sfs' => $this->validFolderSegmentsOrNull($data['set_folder_segments'] ?? null),
-			':en'  => isset($data['enabled']) ? (int)(bool)$data['enabled'] : 1,
-			':src' => (function() use ($data): string {
+			':id'   => $id,
+			':t'    => $tenantId,
+			':u'    => $userId,
+			':msk'  => $this->normSenderKey($data['match_sender_key'] ?? null),
+			':msr'  => $this->validRegex($data['match_subject_regex'] ?? null),
+			':mfl'  => $this->lowerOrNull($data['match_from_local'] ?? null, 120),
+			':ml'   => $this->validLabelOrNull($data['match_label'] ?? null),
+			':mpm'  => $this->intOrNull($data['match_priority_min'] ?? null, 1, 5),
+			':sp'   => $this->intOrNull($data['set_priority']        ?? null, 1, 5),
+			':sar'  => isset($data['set_action_required']) ? (int)(bool)$data['set_action_required'] : null,
+			':sl'   => $this->validLabelOrNull($data['set_label'] ?? null),
+			':sfs'  => $this->validFolderSegmentsOrNull($data['set_folder_segments'] ?? null),
+			':en'   => isset($data['enabled']) ? (int)(bool)$data['enabled'] : 1,
+			':src'  => (function() use ($data): string {
 				$src = (string)($data['source'] ?? 'user_manual');
 				return in_array($src, self::SOURCES, true) ? $src : 'user_manual';
 			})(),
+			':ocid' => $data['origin_correction_id'] ?? null,
 		]);
 		return $id;
 	}
@@ -239,6 +240,81 @@ final class ScoreOverrideRepository
 			'source'              => (string)($row[$prefix . 'src'] ?? 'user_manual'),
 			'created_at'          => (string)($row[$prefix . 'ca'] ?? ''),
 		];
+	}
+
+	/**
+	 * Findet die EINE user-derived Regel für (sender_key, Set-Feld), falls vorhanden.
+	 * @return array<string,mixed>|null
+	 */
+	public function findUserDerivedSlot(string $tenantId, string $userId, string $senderKey, string $field): ?array
+	{
+		$col = match ($field) {
+			'priority'        => 'set_priority',
+			'action_required' => 'set_action_required',
+			'label'           => 'set_label',
+			'folder_segments' => 'set_folder_segments',
+			default           => throw new \InvalidArgumentException("unknown field $field"),
+		};
+		$stmt = $this->db->prepare(
+			"SELECT * FROM score_override_rules
+			 WHERE tenant_id = :t AND user_id = :u AND match_sender_key = :sk
+			   AND origin_correction_id IS NOT NULL AND $col IS NOT NULL AND deleted_at IS NULL
+			 ORDER BY created_at ASC LIMIT 1"
+		);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':sk' => $senderKey]);
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+		return $row === false ? null : $row;
+	}
+
+	/**
+	 * Aktualisiert Set-/Match-Felder einer bestehenden Regel in-place.
+	 * @param array<string,mixed> $fields
+	 */
+	public function updateFields(string $tenantId, string $ruleId, array $fields): void
+	{
+		$allowed = ['set_priority', 'set_action_required', 'set_label', 'set_folder_segments',
+			'match_subject_regex', 'match_from_local', 'enabled'];
+		$sets = [];
+		$params = [':id' => $ruleId, ':t' => $tenantId];
+		foreach ($fields as $k => $v) {
+			if (!in_array($k, $allowed, true)) { continue; }
+			$sets[] = "`$k` = :$k";
+			$params[":$k"] = is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : $v;
+		}
+		if ($sets === []) { return; }
+		$this->db->prepare(
+			'UPDATE score_override_rules SET ' . implode(', ', $sets)
+			. ', updated_at = UTC_TIMESTAMP(3) WHERE id = :id AND tenant_id = :t'
+		)->execute($params);
+	}
+
+	/** Anzahl aktiver user-derived Regeln (für Soft-Cap). */
+	public function countUserDerived(string $tenantId, string $userId): int
+	{
+		$stmt = $this->db->prepare(
+			'SELECT COUNT(*) FROM score_override_rules
+			 WHERE tenant_id = :t AND user_id = :u
+			   AND origin_correction_id IS NOT NULL AND enabled = 1 AND deleted_at IS NULL'
+		);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+		return (int)$stmt->fetchColumn();
+	}
+
+	/** Deaktiviert (nicht löscht) die am längsten nicht angewandte user-derived Regel. */
+	public function disableLeastRecentlyUsed(string $tenantId, string $userId): ?string
+	{
+		$stmt = $this->db->prepare(
+			'SELECT id FROM score_override_rules
+			 WHERE tenant_id = :t AND user_id = :u
+			   AND origin_correction_id IS NOT NULL AND enabled = 1 AND deleted_at IS NULL
+			 ORDER BY last_applied_at IS NULL DESC, last_applied_at ASC, created_at ASC LIMIT 1'
+		);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+		$id = $stmt->fetchColumn();
+		if ($id === false) { return null; }
+		$this->db->prepare('UPDATE score_override_rules SET enabled = 0, updated_at = UTC_TIMESTAMP(3) WHERE id = :id')
+			->execute([':id' => $id]);
+		return (string)$id;
 	}
 
 	public function softDelete(string $tenantId, string $userId, string $id): bool
