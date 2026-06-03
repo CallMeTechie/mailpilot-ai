@@ -196,8 +196,8 @@ class Kernel
 			),
 			// Phase 9q-A/B: Multi-Provider-LLM-Schicht. SecretBox laed beim
 			// Konstruktor den Master-Key — wirft wenn LLM_MASTER_KEY fehlt.
-			// Daher nur instantiieren wenn wirklich gebraucht (lazy via match):
-			// Solange routing_mode='direct' ist, wird LlmRouter nie gebaut.
+			// LlmRouter wird eager gebaut und für ALLE Rollen genutzt
+			// (Spec 1, 2026-06-02). routing_mode steuert nur noch Failover.
 			\MailPilot\Security\SecretBox::class => new \MailPilot\Security\SecretBox(),
 			\MailPilot\Repositories\LlmProviderRepository::class =>
 				new \MailPilot\Repositories\LlmProviderRepository($this->get(PDO::class)),
