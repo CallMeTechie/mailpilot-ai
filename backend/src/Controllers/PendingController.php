@@ -8,6 +8,7 @@ use MailPilot\Http\Response;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\ScoreOverrideRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Services\TokenService;
 use MailPilot\Graph\GraphClient;
@@ -91,14 +92,62 @@ final class PendingController extends BaseController
 
 	public function reject(array $params, array $body): void
 	{
-		$ctx = $this->requireAuth();
-		$id  = (string)($params['id'] ?? '');
-		$ok  = $this->kernel->get(PendingActionRepository::class)
-			->setStatus($ctx['tenant_id'], $ctx['user_id'], $id, 'rejected');
+		$ctx  = $this->requireAuth();
+		$id   = (string)($params['id'] ?? '');
+		$repo = $this->kernel->get(PendingActionRepository::class);
+
+		// Task 8 (Spec 2): ein verworfener score_suggestion deaktiviert die
+		// zugehörige Regel (enabled=0) — KEINE neue Regel, kein Löschen. So
+		// lernt das System „dieser Vorschlag war falsch". Andere Kinds bleiben
+		// reines Status-Update.
+		$action = $repo->findById($ctx['tenant_id'], $ctx['user_id'], $id);
+		if ($action !== null && (string)$action['kind'] === 'score_suggestion' && (string)$action['status'] === 'pending') {
+			$this->discardScoreSuggestion($ctx['tenant_id'], $action['payload']);
+		}
+
+		$ok = $repo->setStatus($ctx['tenant_id'], $ctx['user_id'], $id, 'rejected');
 		if (!$ok) {
 			throw HttpException::notFound('PENDING_NOT_FOUND', 'Action nicht gefunden oder bereits entschieden');
 		}
 		Response::json(['ok' => true]);
+	}
+
+	/**
+	 * Task 8 (Spec 2) — bestätigter score_suggestion: Apply-Hit zählen +
+	 * Regel aktivieren. Mutiert NUR die bestehende Regel (rule_id im Payload),
+	 * legt nie eine neue an.
+	 *
+	 * @param array<string,mixed> $payload
+	 * @return array{rule_id:?string, rule_updated:bool}
+	 */
+	private function confirmScoreSuggestion(string $tenantId, array $payload): array
+	{
+		$ruleId = isset($payload['rule_id']) && is_string($payload['rule_id']) && $payload['rule_id'] !== ''
+			? (string)$payload['rule_id'] : null;
+		if ($ruleId === null) {
+			return ['rule_id' => null, 'rule_updated' => false];
+		}
+		$repo = $this->kernel->get(ScoreOverrideRepository::class);
+		$repo->recordApply($tenantId, $ruleId);
+		$repo->updateFields($tenantId, $ruleId, ['enabled' => 1]);
+		return ['rule_id' => $ruleId, 'rule_updated' => true];
+	}
+
+	/**
+	 * Task 8 (Spec 2) — verworfener score_suggestion: Regel deaktivieren
+	 * (enabled=0). Keine neue Regel, kein Hard-Delete.
+	 *
+	 * @param array<string,mixed> $payload
+	 */
+	private function discardScoreSuggestion(string $tenantId, array $payload): void
+	{
+		$ruleId = isset($payload['rule_id']) && is_string($payload['rule_id']) && $payload['rule_id'] !== ''
+			? (string)$payload['rule_id'] : null;
+		if ($ruleId === null) {
+			return;
+		}
+		$this->kernel->get(ScoreOverrideRepository::class)
+			->updateFields($tenantId, $ruleId, ['enabled' => 0]);
 	}
 
 	/**
@@ -171,6 +220,15 @@ final class PendingController extends BaseController
 					$summary = $this->executeRuleSuggestion($tenantId, $userId, $pld);
 					$repo->setStatus($tenantId, $userId, $pid, 'approved');
 					return ['ok' => true, 'kind' => 'rule_suggestion'] + $summary;
+
+				case 'score_suggestion':
+					// Task 8 (Spec 2): bestätigter Score-Vorschlag. KEINE neue Regel —
+					// die Regel existiert schon (rule_id im Payload). Bestätigen =
+					// Apply-Hit zählen + Regel (re-)aktivieren. setStatus schließt
+					// die pending-Action ab.
+					$summary = $this->confirmScoreSuggestion($tenantId, $pld);
+					$repo->setStatus($tenantId, $userId, $pid, 'approved');
+					return ['ok' => true, 'kind' => 'score_suggestion'] + $summary;
 
 				default:
 					throw new \RuntimeException("Unknown action kind: {$kind}");

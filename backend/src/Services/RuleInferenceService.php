@@ -60,9 +60,10 @@ final class RuleInferenceService
 		// Phase 9b (Marc 2026-05-19): Score-Override-Inferenz. Optional,
 		// damit aeltere Tests die nur Folder-Inferenz testen weiter laufen.
 		private readonly ?ScoreOverrideRepository $scoreOverrides = null,
-		// Phase 9h.2 (Marc 2026-05-20): SenderResolver fuer Dedup-Check
-		// (sender_key-Lookup vor Claude-Call). Optional aus selbem Grund.
-		private readonly ?\MailPilot\Services\Sender\SenderResolver $senderResolver = null,
+		// Task 8 (Spec 2): der frühere SenderResolver-Konstruktor-Parameter
+		// (Phase 9h.2 Dedup-Check VOR dem Claude-Call) ist entfernt — der Skip
+		// wurde durch Update-in-place (findUserDerivedSlot in den applyParsed-
+		// Pfaden) ersetzt, der Resolver wird nicht mehr benötigt.
 	) {}
 
 	/**
@@ -244,6 +245,22 @@ final class RuleInferenceService
 		$stmt->execute([':m' => $mailId, ':t' => $tenantId]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return $row === false ? null : $row;
+	}
+
+	/**
+	 * Task 8 (Spec 2) — löst die bestehende mail_score_corrections.id über den
+	 * UNIQUE-Key uq_correction_per_mail (tenant_id, mail_id) auf. NICHT über
+	 * rule_inference_hash (NULLABLE, von CorrectionRepository::record() nie
+	 * befüllt) und NICHT über die von record() zurückgegebene UUID (bei
+	 * ON DUPLICATE KEY UPDATE eine frische, weggeworfene id ≠ Row-id).
+	 */
+	private function resolveCorrectionId(string $tenantId, string $mailId): ?string
+	{
+		$stmt = $this->db->prepare('SELECT id FROM mail_score_corrections
+			WHERE tenant_id = :t AND mail_id = :m LIMIT 1');
+		$stmt->execute([':t' => $tenantId, ':m' => $mailId]);
+		$id = $stmt->fetchColumn();
+		return $id === false ? null : (string)$id;
 	}
 
 	private function hashExists(string $tenantId, string $hash): bool
@@ -550,27 +567,10 @@ final class RuleInferenceService
 		$subject    = $this->redactor->redact((string)$ctx['subject']);
 		$reasoningR = $this->redactor->redactReasoning($reasoning, $this->getNameList());
 
-		// Phase 9h.2 (Marc 2026-05-20): Dedup-Check vor Claude-Call. Wenn
-		// bereits eine enabled Regel mit demselben sender_key + demselben
-		// set_priority existiert, brauchen wir keinen weiteren Claude-Call.
-		// Marc-Beispiel: 4 Duplikat-Regeln in 16 Sek nach mehrfachem CI-Failure-
-		// Korrektur — alle redundant.
-		if ($this->senderResolver !== null) {
-			try {
-				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
-				$senderKey = (string)($bucket['sender_key'] ?? '');
-				$correctedPrio = (int)($correctedScore['priority'] ?? 0);
-				if ($senderKey !== '' && $correctedPrio > 0
-					&& $this->scoreOverrides->hasSimilarPriorityRule($tenantId, $userId, $senderKey, $correctedPrio)) {
-					$this->logger->info('rule_inference.score_rule_dedup_skip', [
-						'sender_key'    => $senderKey,
-						'set_priority'  => $correctedPrio,
-						'mail_id'       => $mailId,
-					]);
-					return ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
-				}
-			} catch (\Throwable) { /* best-effort, faellt durch zu Claude */ }
-		}
+		// Task 8 (Spec 2): der frühere hasSimilarPriorityRule-Dedup-Skip ist
+		// ENTFERNT — applyScoreRuleParsed macht jetzt Slot-Lookup + Update-in-
+		// place, sodass eine wiederholte Korrektur die bestehende user-derived
+		// Regel aktualisiert (Confidence/Breite) statt geskippt zu werden.
 
 		// Quota wie bei infer() — gemeinsamer rule_inference-Counter.
 		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
@@ -617,11 +617,67 @@ final class RuleInferenceService
 		$autoThreshold = $this->settings->getInt('score_rule_auto_enable_threshold', 85);
 		$autoEnabled   = $confidence >= $autoThreshold;
 
+		// Task 8 (Spec 2): Confidence → Match-Breite. Hohe Confidence → breit
+		// (nur match_sender_key, Domain-weit). Niedrige Confidence → eng
+		// (zusätzlich match_from_local), damit eine unsichere Regel weniger
+		// Mails überschreibt. Wir nutzen score_rule_auto_enable_threshold als
+		// Trennlinie — dieselbe Schwelle, die auch über auto-enable entscheidet.
+		$matchFromLocal = ($confidence < $autoThreshold)
+			? ($parsed['match_from_local'] ?? null)
+			: null;
+
+		// Set-Feld bestimmen (für Slot-Lookup): priority hat Vorrang, dann
+		// label/action_required. Wir leiten EINE user-derived Regel pro
+		// (sender_key, Set-Feld) ab — Update-in-place statt Sibling-Anlage.
+		$senderKey = $this->normalizedSenderKey($parsed['match_sender_key'] ?? null);
+		$slotField = $this->scoreSetField($parsed);
+
+		// Bestehende mail_score_corrections.id als Herkunfts-Marker.
+		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
+
+		// Slot-Lookup: existiert schon eine user-derived Regel für
+		// (sender_key, Set-Feld)? Dann UPDATE statt CREATE.
+		$slot = ($senderKey !== null && $slotField !== null)
+			? $this->scoreOverrides->findUserDerivedSlot($tenantId, $userId, $senderKey, $slotField)
+			: null;
+
+		if ($slot !== null) {
+			$updateFields = [
+				'set_priority'        => $parsed['set_priority']        ?? null,
+				'set_action_required' => $parsed['set_action_required'] ?? null,
+				'set_label'           => $parsed['set_label']           ?? null,
+				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
+				'match_from_local'    => $matchFromLocal,
+				'enabled'             => $autoEnabled ? 1 : ($slot['enabled'] ?? 1),
+			];
+			// Nur tatsächlich vorhandene Set-/Match-Werte überschreiben — null
+			// in updateFields würde sonst ein gesetztes Feld leeren.
+			$updateFields = array_filter($updateFields, static fn($v) => $v !== null);
+			try {
+				$this->scoreOverrides->updateFields($tenantId, (string)$slot['id'], $updateFields);
+			} catch (\InvalidArgumentException $e) {
+				$this->logger->info('rule_inference.score_rule_invalid', [
+					'reason' => $e->getMessage(), 'parsed' => $parsed,
+				]);
+				return ['action' => 'error', 'reason' => $e->getMessage()];
+			}
+			$this->logger->info('rule_inference.score_rule_updated', [
+				'rule_id' => (string)$slot['id'], 'confidence' => $confidence, 'mail_id' => $mailId,
+			]);
+			return [
+				'action'            => 'updated',
+				'rule_id'           => (string)$slot['id'],
+				'confidence'        => $confidence,
+				'auto_enabled'      => $autoEnabled,
+				'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
+			];
+		}
+
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
 				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
 				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
-				'match_from_local'    => $parsed['match_from_local']    ?? null,
+				'match_from_local'    => $matchFromLocal,
 				'match_label'         => $parsed['match_label']         ?? null,
 				'match_priority_min'  => $parsed['match_priority_min']  ?? null,
 				'set_priority'        => $parsed['set_priority']        ?? null,
@@ -629,6 +685,7 @@ final class RuleInferenceService
 				'set_label'           => $parsed['set_label']           ?? null,
 				'enabled'             => $autoEnabled,
 				'source'              => 'ki_inferred',
+				'origin_correction_id' => $correctionId,
 			]);
 		} catch (\InvalidArgumentException $e) {
 			$this->logger->info('rule_inference.score_rule_invalid', [
@@ -637,6 +694,8 @@ final class RuleInferenceService
 			]);
 			return ['action' => 'error', 'reason' => $e->getMessage()];
 		}
+
+		$this->enforceSoftCap($tenantId, $userId);
 
 		$this->logger->info('rule_inference.score_rule_created', [
 			'rule_id'    => $ruleId,
@@ -651,6 +710,51 @@ final class RuleInferenceService
 			'auto_enabled'      => $autoEnabled,
 			'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
 		];
+	}
+
+	/**
+	 * Task 8 — bestimmt das primäre Set-Feld einer Score-Regel für den
+	 * Slot-Lookup (eine user-derived Regel pro sender_key + Set-Feld).
+	 *
+	 * @param array<string,mixed> $parsed
+	 */
+	private function scoreSetField(array $parsed): ?string
+	{
+		if (($parsed['set_priority'] ?? null) !== null)        { return 'priority'; }
+		if (($parsed['set_action_required'] ?? null) !== null) { return 'action_required'; }
+		if (($parsed['set_label'] ?? null) !== null)           { return 'label'; }
+		return null;
+	}
+
+	private function normalizedSenderKey(mixed $raw): ?string
+	{
+		if (!is_string($raw)) { return null; }
+		$s = strtolower(trim($raw));
+		return $s === '' ? null : substr($s, 0, 64);
+	}
+
+	/**
+	 * Task 8 (b) — Soft-Cap: über learning.score_rules_soft_cap aktive
+	 * user-derived Regeln → die am längsten nicht angewandte deaktivieren
+	 * (kein Löschen). Best-effort; Fehler dürfen den Inferenz-Pfad nicht killen.
+	 */
+	private function enforceSoftCap(string $tenantId, string $userId): void
+	{
+		if ($this->scoreOverrides === null) { return; }
+		try {
+			$cap = $this->settings->getInt('learning.score_rules_soft_cap', 200);
+			if ($cap < 1) { return; }
+			if ($this->scoreOverrides->countUserDerived($tenantId, $userId) > $cap) {
+				$disabledId = $this->scoreOverrides->disableLeastRecentlyUsed($tenantId, $userId);
+				if ($disabledId !== null) {
+					$this->logger->info('score_override.lru_disabled', [
+						'rule_id' => $disabledId, 'soft_cap' => $cap,
+					]);
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->logger->warning('score_override.soft_cap_failed', ['err' => $e->getMessage()]);
+		}
 	}
 
 	// ========================================================================
@@ -695,22 +799,8 @@ final class RuleInferenceService
 			: $this->redactor->redactReasoning($reasoningClean, $this->getNameList());
 		$topic          = (string)end($correctedSegments);
 
-		// Phase 9h.2 (Marc 2026-05-20): Dedup-Check fuer Topic-Regeln.
-		if ($this->senderResolver !== null) {
-			try {
-				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
-				$senderKey = (string)($bucket['sender_key'] ?? '');
-				if ($senderKey !== ''
-					&& $this->scoreOverrides->hasSimilarTopicRule($tenantId, $userId, $senderKey, $correctedSegments)) {
-					$this->logger->info('rule_inference.topic_rule_dedup_skip', [
-						'sender_key'  => $senderKey,
-						'segments'    => $correctedSegments,
-						'mail_id'     => $mailId,
-					]);
-					return ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
-				}
-			} catch (\Throwable) { /* best-effort */ }
-		}
+		// Task 8 (Spec 2): der frühere hasSimilarTopicRule-Dedup-Skip ist
+		// ENTFERNT — applyTopicRuleParsed macht Slot-Lookup + Update-in-place.
 
 		$dailyCap = $this->settings->getInt('rule_inference_max_per_user_per_day', 30);
 		$this->usage->incrementOrFail($tenantId, $userId, 'rule_inference', $dailyCap);
@@ -753,15 +843,59 @@ final class RuleInferenceService
 		$autoThreshold = $this->settings->getInt('score_rule_auto_enable_threshold', 85);
 		$autoEnabled   = $confidence >= $autoThreshold;
 
+		// Task 8: Confidence → Match-Breite (niedrig → match_from_local verengt).
+		$matchFromLocal = ($confidence < $autoThreshold)
+			? ($parsed['match_from_local'] ?? null)
+			: null;
+
+		$senderKey    = $this->normalizedSenderKey($parsed['match_sender_key'] ?? null);
+		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
+
+		// Task 8: Slot-Lookup für (sender_key, folder_segments) — Update-in-place
+		// statt Sibling. Ersetzt den früheren hasSimilarTopicRule-Skip.
+		$slot = ($senderKey !== null)
+			? $this->scoreOverrides->findUserDerivedSlot($tenantId, $userId, $senderKey, 'folder_segments')
+			: null;
+
+		if ($slot !== null) {
+			$updateFields = [
+				'set_folder_segments' => $correctedSegments,
+				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
+				'match_from_local'    => $matchFromLocal,
+				'enabled'             => $autoEnabled ? 1 : ($slot['enabled'] ?? 1),
+			];
+			$updateFields = array_filter($updateFields, static fn($v) => $v !== null);
+			try {
+				$this->scoreOverrides->updateFields($tenantId, (string)$slot['id'], $updateFields);
+			} catch (\InvalidArgumentException $e) {
+				$this->logger->info('rule_inference.topic_rule_invalid', [
+					'reason' => $e->getMessage(), 'parsed' => $parsed,
+				]);
+				return ['action' => 'error', 'reason' => $e->getMessage()];
+			}
+			$this->logger->info('rule_inference.topic_rule_updated', [
+				'rule_id' => (string)$slot['id'], 'confidence' => $confidence,
+				'mail_id' => $mailId, 'topic' => $topic,
+			]);
+			return [
+				'action'            => 'updated',
+				'rule_id'           => (string)$slot['id'],
+				'confidence'        => $confidence,
+				'auto_enabled'      => $autoEnabled,
+				'reasoning_summary' => (string)($parsed['reasoning_summary'] ?? ''),
+			];
+		}
+
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
 				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
 				'match_subject_regex' => $parsed['match_subject_regex'] ?? null,
-				'match_from_local'    => $parsed['match_from_local']    ?? null,
+				'match_from_local'    => $matchFromLocal,
 				'match_label'         => $parsed['match_label']         ?? null,
 				'set_folder_segments' => $correctedSegments,
 				'enabled'             => $autoEnabled,
 				'source'              => 'ki_inferred',
+				'origin_correction_id' => $correctionId,
 			]);
 		} catch (\InvalidArgumentException $e) {
 			$this->logger->info('rule_inference.topic_rule_invalid', [
@@ -770,6 +904,8 @@ final class RuleInferenceService
 			]);
 			return ['action' => 'error', 'reason' => $e->getMessage()];
 		}
+
+		$this->enforceSoftCap($tenantId, $userId);
 
 		$this->logger->info('rule_inference.topic_rule_created', [
 			'rule_id'      => $ruleId,
@@ -942,36 +1078,13 @@ final class RuleInferenceService
 			}
 		}
 
-		$scoreSkipReason = null;
-		if ($hasReasoning && $this->scoreOverrides !== null && $this->senderResolver !== null) {
-			try {
-				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
-				$senderKey = (string)($bucket['sender_key'] ?? '');
-				$correctedPrio = (int)($correctedScore['priority'] ?? 0);
-				if ($senderKey !== '' && $correctedPrio > 0
-					&& $this->scoreOverrides->hasSimilarPriorityRule($tenantId, $userId, $senderKey, $correctedPrio)) {
-					$this->logger->info('rule_inference.score_rule_dedup_skip', [
-						'sender_key' => $senderKey, 'set_priority' => $correctedPrio, 'mail_id' => $mailId,
-					]);
-					$scoreSkipReason = ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
-				}
-			} catch (\Throwable) { /* fall through to claude */ }
-		}
-
-		$topicSkipReason = null;
-		if ($hasTopic && $this->scoreOverrides !== null && $this->senderResolver !== null) {
-			try {
-				$bucket = $this->senderResolver->resolve($tenantId, (string)$ctx['from_email']);
-				$senderKey = (string)($bucket['sender_key'] ?? '');
-				if ($senderKey !== ''
-					&& $this->scoreOverrides->hasSimilarTopicRule($tenantId, $userId, $senderKey, $topicSegments)) {
-					$this->logger->info('rule_inference.topic_rule_dedup_skip', [
-						'sender_key' => $senderKey, 'segments' => $topicSegments, 'mail_id' => $mailId,
-					]);
-					$topicSkipReason = ['action' => 'skipped', 'reason' => 'duplicate_rule_exists', 'confidence' => 0];
-				}
-			} catch (\Throwable) { /* fall through */ }
-		}
+		// Task 8 (Spec 2): die früheren hasSimilarPriorityRule/hasSimilarTopicRule-
+		// Dedup-Skips (Phase 9h.2) sind ENTFERNT. Statt eine vorhandene Regel mit
+		// 'duplicate_rule_exists' zu überspringen, läuft die Inferenz jetzt durch
+		// und applyScoreRuleParsed/applyTopicRuleParsed machen einen Slot-Lookup
+		// (findUserDerivedSlot) + Update-in-place. So bekommt EINE user-derived
+		// Regel pro (sender_key, Set-Feld) einen Confidence-/Breite-Bump statt
+		// einer zweiten, redundanten Zeile.
 
 		// Payloads bauen — eine pro Slot der ausgefuehrt wird.
 		// $specs ist [{vars, promptKey, slot:'folder'|'score_rule'|'topic_rule'}, ...]
@@ -992,7 +1105,7 @@ final class RuleInferenceService
 			];
 		}
 
-		if ($hasReasoning && $scoreSkipReason === null && $this->scoreOverrides !== null) {
+		if ($hasReasoning && $this->scoreOverrides !== null) {
 			$reasoningR = $this->redactor->redactReasoning($reasoning, $nameList);
 			$specs[] = [
 				'slot'      => 'score_rule',
@@ -1011,7 +1124,7 @@ final class RuleInferenceService
 			];
 		}
 
-		if ($hasTopic && $topicSkipReason === null && $this->scoreOverrides !== null) {
+		if ($hasTopic && $this->scoreOverrides !== null) {
 			$reasoningClean = trim($reasoning);
 			$reasoningR = $reasoningClean === ''
 				? '(keine Begruendung)'
@@ -1030,10 +1143,9 @@ final class RuleInferenceService
 			];
 		}
 
-		// Pre-skip-Antworten direkt eintragen.
+		// Pre-skip-Antworten direkt eintragen (nur noch der folder-Idempotenz-Hash;
+		// die score/topic-Dedup-Skips wurden durch Update-in-place ersetzt).
 		if ($folderSkipReason !== null)  { $result['folder']     = $folderSkipReason; }
-		if ($scoreSkipReason !== null)   { $result['score_rule'] = $scoreSkipReason; }
-		if ($topicSkipReason !== null)   { $result['topic_rule'] = $topicSkipReason; }
 
 		// Wenn keine Specs uebrig sind (alles dedup-skipped), kein Claude-Call.
 		if ($specs === []) {

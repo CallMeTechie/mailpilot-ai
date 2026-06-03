@@ -415,8 +415,8 @@ class Kernel
 				$this->get(Logger::class),
 				// Phase 9b: inferScoreRule() braucht das Override-Repository.
 				$this->get(ScoreOverrideRepository::class),
-				// Phase 9h.2: SenderResolver fuer Dedup-Check (sender_key-Lookup).
-				$this->get(\MailPilot\Services\Sender\SenderResolver::class),
+				// Task 8 (Spec 2): SenderResolver-Argument entfernt — der
+				// Dedup-Skip wurde durch Update-in-place ersetzt.
 			),
 			// Phase 9l: Async Bulk-Rescore — Worker-Aufrufer + Controller nutzen
 			// dieselbe Run-Methode (Controller delegiert nur an Repository,
