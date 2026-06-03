@@ -382,7 +382,7 @@ final class MailScoringService
 			throw new \RuntimeException('LlmRouter nicht verdrahtet — Scoring nicht möglich.');
 		}
 		try {
-			$response = $this->callViaRouter($systemSegments, $user, $model, $maxTokens, (float)($activePrompt['temperature'] ?? 0.1));
+			$response = $this->callViaRouter($systemSegments, $user, $maxTokens, (float)($activePrompt['temperature'] ?? 0.1));
 		} catch (\Throwable $e) {
 			$latency = (int)((microtime(true) - $start) * 1000);
 			$this->recordCall($tenantId, $userId, $mailboxId, [], $latency, 'error', $e->getMessage(), $promptVersionTag, $model);
@@ -412,7 +412,7 @@ final class MailScoringService
 	 * @param list<array<string,mixed>> $systemSegments
 	 * @return array<string,mixed>
 	 */
-	private function callViaRouter(array $systemSegments, string $user, string $model, int $maxTokens, float $temperature): array
+	private function callViaRouter(array $systemSegments, string $user, int $maxTokens, float $temperature): array
 	{
 		// System-Segmente zu einem String konkatieren — Cache-Granularitaet
 		// geht bei Multi-Provider sowieso verloren (nur Anthropic kann pro
