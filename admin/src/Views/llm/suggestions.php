@@ -1,12 +1,13 @@
 <?php
 /**
- * Spec 2 (Task 9, Step 2) — Read-only-Review der offenen score_suggestion-
- * Vorschläge aus dem Lern-Loop (PendingAction kind=score_suggestion).
+ * Spec 2 (Task 9) — Review der offenen score_suggestion-Vorschläge aus dem
+ * Lern-Loop (PendingAction kind=score_suggestion), tenant-übergreifend.
  *
- * BEWUSST ohne Annehmen/Verwerfen-Buttons: die Bestätigung läuft user-scoped
- * über das Add-in (POST /api/v1/pending/{id}/approve|reject), weil sie
- * user-gebundene Regel-Mutationen mit Ownership-Guard auslöst. Der Admin
- * sieht hier nur den Überblick.
+ * Annehmen/Verwerfen (Marc-Entscheidung #1 + D4): der Admin handelt
+ * ADMINISTRATIV im Owner-Kontext der jeweiligen Zeile (tenant_id + user_id der
+ * pending-Action) — kein Cross-User-Eingriff. Der Ownership-Guard bleibt
+ * erhalten (die Regel muss dem User der Zeile gehören). User-seitig bleibt der
+ * Add-in-Pfad (POST /api/v1/pending/{id}/approve|reject) zusätzlich bestehen.
  *
  * @var list<array{
  *   id:string, tenant_name:string, user_email:string,
@@ -14,6 +15,7 @@
  *   match_score:?int, match_mode:?string,
  *   proposed:array<string,mixed>, created_at:string
  * }> $suggestions
+ * @var string $csrfToken
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
@@ -39,7 +41,7 @@ $fmtProposed = static function (array $p) use ($h): string {
 
 <header class="page-head">
 	<h1>Score-Vorschläge (Lern-Loop)</h1>
-	<p class="muted">Offene <code>score_suggestion</code>-Vorschläge aus <code>pending_actions</code> — tenant-übergreifender Überblick (read-only).</p>
+	<p class="muted">Offene <code>score_suggestion</code>-Vorschläge aus <code>pending_actions</code> — tenant-übergreifend. Annehmen/Verwerfen wirkt im Owner-Kontext der Zeile.</p>
 	<div class="form-actions">
 		<a class="btn btn-secondary btn-sm" href="/admin/llm">← LLM-Provider</a>
 		<a class="btn btn-secondary btn-sm" href="/admin/llm/routing">Routing &amp; Privacy-Mode →</a>
@@ -49,9 +51,10 @@ $fmtProposed = static function (array $p) use ($h): string {
 
 <section class="panel">
 	<p class="muted">
-		Annehmen/Verwerfen erfolgt user-seitig im Add-in (Pending-Tab) — die Bestätigung
-		(re-)aktiviert bzw. deaktiviert die zugehörige Score-Override-Regel des jeweiligen Users
-		mit Ownership-Guard. Diese Sicht dient nur der Beobachtung.
+		Annehmen (re-)aktiviert die zugehörige Score-Override-Regel des jeweiligen Users
+		und zählt einen Apply-Hit; Verwerfen deaktiviert sie (kein Löschen). Beides läuft
+		mit Ownership-Guard im Owner-Kontext der Zeile — gehört die Regel nicht (mehr) zum
+		User, wird der Vorschlag nur geschlossen, ohne fremde Regeln zu verändern.
 	</p>
 	<?php if ($suggestions === []): ?>
 		<p class="muted">Keine offenen Score-Vorschläge.</p>
@@ -65,6 +68,7 @@ $fmtProposed = static function (array $p) use ($h): string {
 				<th>Match</th>
 				<th>Vorgeschlagene Änderung</th>
 				<th>Erstellt</th>
+				<th>Aktionen</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -92,6 +96,16 @@ $fmtProposed = static function (array $p) use ($h): string {
 				</td>
 				<td><?= $fmtProposed($s['proposed']) ?></td>
 				<td><small class="muted"><?= $h($s['created_at']) ?></small></td>
+				<td class="actions">
+					<form method="post" action="/admin/llm/suggestions/<?= $h($s['id']) ?>/approve" style="display:inline">
+						<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+						<button class="btn btn-sm" type="submit" title="Annehmen — Regel aktivieren" aria-label="Vorschlag annehmen">✓</button>
+					</form>
+					<form method="post" action="/admin/llm/suggestions/<?= $h($s['id']) ?>/reject" style="display:inline">
+						<input type="hidden" name="_csrf" value="<?= $h($csrfToken) ?>">
+						<button class="btn btn-sm" type="submit" title="Verwerfen — Regel deaktivieren" aria-label="Vorschlag verwerfen">✗</button>
+					</form>
+				</td>
 			</tr>
 		<?php endforeach; ?>
 		</tbody>
