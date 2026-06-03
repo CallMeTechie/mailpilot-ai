@@ -32,13 +32,18 @@ final class RuleMatchService
 	 */
 	public function scoreMatch(array $rule, array $mail): ?int
 	{
-		$domain  = strstr((string)($mail['from_email'] ?? ''), '@') ?: '(unknown)';
-		$subject = $this->redactor->redact((string)($mail['subject'] ?? ''));
+		$domain  = ltrim((string)(strstr((string)($mail['from_email'] ?? ''), '@') ?: ''), '@');
+		if ($domain === '') {
+			$domain = '(unknown)';
+		}
+		$subject  = $this->redactor->redact((string)($mail['subject'] ?? ''));
 		$ruleDesc = $this->describeRule($rule);
 
 		$system = 'Du bewertest, wie gut eine E-Mail zu einer gelernten Sortier-Regel passt. '
 			. 'Antworte NUR mit JSON {"score": <0-100>}. 0 = passt nicht, 100 = passt perfekt.';
-		$user = "REGEL:\n$ruleDesc\n\nMAIL:\nAbsender-Domain: $domain\nBetreff: $subject";
+		$user = $this->redactor->redact(
+			"REGEL:\n$ruleDesc\n\nMAIL:\nAbsender-Domain: $domain\nBetreff: $subject"
+		);
 
 		$req = new NormalizedRequest(
 			systemPrompt: $system,

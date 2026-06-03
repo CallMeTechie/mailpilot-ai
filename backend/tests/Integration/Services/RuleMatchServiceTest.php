@@ -51,7 +51,8 @@ final class RuleMatchServiceTest extends TestCase
 			new SettingsRepository($pdo), new NullLogger(), new LlmModelRepository($pdo));
 
 		$svc = new RuleMatchService($router, new RedactionService(), new SettingsRepository($pdo), new NullLogger());
-		$rule = ['id' => 'r1', 'match_sender_key' => 'sk:acme', 'set_priority' => 4];
+		// match_sender_key enthält eine IBAN — muss via D7-Redaction aus dem Payload verschwinden.
+		$rule = ['id' => 'r1', 'match_sender_key' => 'sk:DE89370400440532013000', 'set_priority' => 4];
 		$mail = ['sender_key' => 'sk:acme', 'from_email' => 'a@acme.de', 'subject' => 'IBAN DE89370400440532013000', 'body_text' => 'x'];
 
 		$score = $svc->scoreMatch($rule, $mail);
@@ -60,6 +61,15 @@ final class RuleMatchServiceTest extends TestCase
 		self::assertNotNull($capture->seen);
 		self::assertSame('claude-haiku-4-5-20251001', $capture->seen->modelHint);
 		$payload = $capture->seen->systemPrompt . ' ' . json_encode($capture->seen->messages);
-		self::assertStringNotContainsString('DE89370400440532013000', $payload, 'IBAN muss redacted sein');
+		// IBAN aus dem Subject muss redacted sein.
+		self::assertStringNotContainsString('DE89370400440532013000', $payload, 'IBAN muss redacted sein (Subject + Rule)');
+		// Domain darf kein führendes '@' enthalten.
+		self::assertStringNotContainsString('@acme.de', $payload, 'Domain darf kein führendes @ haben');
+		self::assertStringContainsString('acme.de', $payload, 'Domain muss ohne @ im Payload erscheinen');
+	}
+
+	public function testLlmRouterRolesContainsMatch(): void
+	{
+		self::assertContains('match', LlmRouter::ROLES);
 	}
 }
