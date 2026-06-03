@@ -7,6 +7,7 @@
  * @var array<string, array{configured:list<string>, available:list<array<string,mixed>>}> $chains
  * @var list<string> $roles
  * @var int $scoringBatchSize
+ * @var bool $routingUpgradeNotice
  * @var string $csrfToken
  */
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -27,13 +28,19 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 	</div>
 </header>
 
+<?php if ($routingUpgradeNotice === true): ?>
+<div class="flash flash-info" style="margin-bottom: var(--mp-sp-3)">
+	<strong>Hinweis nach Upgrade:</strong> <code>routing_mode</code> wurde beim Upgrade automatisch auf <strong><?= $h($rl('router')) ?></strong> gesetzt, damit die Failover-Chain für <strong>alle Rollen</strong> (<code><?= implode('</code>/<code>', array_map($h, $roles)) ?></code>) sofort greift. Bitte unten prüfen, ob das gewünscht ist — dieser Hinweis wird nur einmal angezeigt.
+</div>
+<?php endif; ?>
+
 <?php if ($routingMode === 'direct'): ?>
 <div class="flash flash-warn" style="margin-bottom: var(--mp-sp-3)">
-	<strong>Aktueller Routing-Modus: <?= $h($rl('direct')) ?></strong> — die Failover-Chain gilt nur für <code>score</code> (und <code>inference</code>) und ist im direct-Modus <strong>inaktiv</strong>: Scoring ruft den konfigurierten Claude-Provider (Anthropic oder Bedrock) direkt mit dem Modell aus dem P-SCORE-Prompt. <strong>Summary und Draft laufen unabhängig vom Modus immer über den Router.</strong> Für Failover beim Scoring unten „<?= $h($rl('router')) ?>" wählen.
+	<strong>Aktueller Routing-Modus: <?= $h($rl('direct')) ?></strong> — für <strong>alle Rollen</strong> (<code>score</code>/<code>summary</code>/<code>draft</code>/<code>inference</code>) wird nur der <strong>Primary</strong> der Chain genutzt; bei dessen Ausfall gibt es <strong>kein Failover</strong> auf die nachfolgenden Provider. Für die volle Failover-Chain unten „<?= $h($rl('router')) ?>" wählen.
 </div>
 <?php else: ?>
 <div class="flash flash-success" style="margin-bottom: var(--mp-sp-3)">
-	<strong>Aktueller Routing-Modus: <?= $h($rl('router')) ?></strong> — Failover-Chain aktiv. Privacy-Mode: <strong><?= $h($pl($privacyMode)) ?></strong>.
+	<strong>Aktueller Routing-Modus: <?= $h($rl('router')) ?></strong> — die <strong>ganze Failover-Chain</strong> ist für <strong>alle Rollen</strong> (<code>score</code>/<code>summary</code>/<code>draft</code>/<code>inference</code>) aktiv: fällt ein Provider aus, wird der nächste in der Chain probiert. Privacy-Mode: <strong><?= $h($pl($privacyMode)) ?></strong>.
 </div>
 <?php endif; ?>
 
@@ -43,9 +50,9 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 	<section class="panel">
 		<h2>Routing-Modus</h2>
 		<p class="muted">
-			<strong><?= $h($rl('direct')) ?></strong> = Scoring ruft den konfigurierten Claude-Provider (Anthropic oder Bedrock) direkt, ohne Failover.
-			<strong><?= $h($rl('router')) ?></strong> = Scoring läuft über den LlmRouter mit Fallback-Chain.
-			Summary/Draft nutzen den Router ohnehin immer.
+			Globaler Failover-Schalter für <strong>alle Rollen</strong> (<code>score</code>/<code>summary</code>/<code>draft</code>/<code>inference</code>).
+			<strong><?= $h($rl('direct')) ?></strong> = nur der Primary der jeweiligen Chain wird genutzt, <strong>kein Failover</strong> bei Ausfall.
+			<strong><?= $h($rl('router')) ?></strong> = die <strong>ganze Failover-Chain</strong> wird durchlaufen, bis ein Provider antwortet.
 		</p>
 		<label><input type="radio" name="routing_mode" value="direct" <?= $routingMode === 'direct' ? 'checked' : '' ?>> <?= $h($rl('direct')) ?></label><br>
 		<label><input type="radio" name="routing_mode" value="router" <?= $routingMode === 'router' ? 'checked' : '' ?>> <?= $h($rl('router')) ?></label>

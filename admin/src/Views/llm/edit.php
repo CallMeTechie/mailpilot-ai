@@ -131,9 +131,6 @@ $pid = (string)$provider['id'];
 								<option value="<?= $h($mid) ?>" <?= $mid === $current ? 'selected' : '' ?>><?= $h($mid) ?></option>
 							<?php endforeach; ?>
 						</select>
-						<?php if ((string)$m['role'] === 'score'): ?>
-							<span class="muted" title="Modell &amp; Effort greifen beim Scoring nur bei routing_mode=router; im direct-Modus nutzt Scoring das Modell des aktiven P-SCORE-Prompts">ℹ wirkt bei routing_mode=router</span>
-						<?php endif; ?>
 					</td>
 					<td><span class="badge"><?= $h((string)$m['role']) ?></span></td>
 					<td>

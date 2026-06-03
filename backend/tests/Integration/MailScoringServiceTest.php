@@ -3,9 +3,12 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
@@ -18,13 +21,21 @@ use MailPilot\Services\BudgetService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Tests\Fixtures\FakeClaudeClient;
+use MailPilot\Tests\Fixtures\ScriptedLlmProvider;
+use MailPilot\Tests\Support\SeedsScoreRouting;
 use MailPilot\Tests\TestCase;
+use MailPilot\Util\Uuid;
+use Psr\Log\NullLogger;
 
 /**
  * @group integration
  */
 final class MailScoringServiceTest extends TestCase
 {
+	use SeedsScoreRouting;
+
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000c1';
+
 	protected function setUp(): void
 	{
 		$this->truncateAll();
@@ -33,9 +44,10 @@ final class MailScoringServiceTest extends TestCase
 		// Default — auf 'auto' setzen damit Tests durchgehen.
 		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
 			WHERE `key`='autosort_create_topic_mode'")->execute();
+		$this->seedScoreRouting(self::PROVIDER_ID, 'TestScore');
 	}
 
-	private function makeService(FakeClaudeClient $claude): MailScoringService
+	private function makeService(ScriptedLlmProvider $provider, FakeClaudeClient $claude): MailScoringService
 	{
 		$pdo = $this->pdo();
 		$budget = new BudgetService(
@@ -43,6 +55,13 @@ final class MailScoringServiceTest extends TestCase
 			new UsageRepository($pdo),
 			new PricingRepository($pdo),
 			$this->logger(),
+		);
+		$router = new LlmRouter(
+			['anthropic' => $provider],
+			new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo),
+			new NullLogger(),
+			new LlmModelRepository($pdo),
 		);
 		return new MailScoringService(
 			$claude,
@@ -60,6 +79,11 @@ final class MailScoringServiceTest extends TestCase
 			2048,
 			$this->logger(),
 			new PendingActionRepository($pdo),
+			null,
+			null,
+			null,
+			null,
+			$router,
 		);
 	}
 
@@ -69,10 +93,10 @@ final class MailScoringServiceTest extends TestCase
 	 * calling Claude. That heuristic was removed (List-Unsubscribe is
 	 * mandatory for nearly every transactional sender under DSGVO, so
 	 * it consistently mislabelled important mail). This test pins the
-	 * new behaviour: such mails do reach Claude and can be classified
-	 * to any label Claude returns.
+	 * new behaviour: such mails do reach the scoring LLM and can be
+	 * classified to any label it returns.
 	 */
-	public function testListUnsubscribeMailReachesClaude(): void
+	public function testListUnsubscribeMailReachesScoringLlm(): void
 	{
 		[$tenantId, $userId] = $this->insertTenantAndUser();
 		$mailboxId = $this->insertMailbox($tenantId, $userId);
@@ -83,24 +107,22 @@ final class MailScoringServiceTest extends TestCase
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson([
-			'results' => [[
-				'id' => $mails[0]['id'],
-				'label' => 'direct',
-				'action_required' => true,
-				'priority' => 5,
-				'summary' => 'Anwalt schickt Mandatsinformation',
-				'reasoning' => 'transactional sender',
-			]],
-		]);
-		$service = $this->makeService($claude);
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
+			'id' => $mails[0]['id'],
+			'label' => 'direct',
+			'action_required' => true,
+			'priority' => 5,
+			'summary' => 'Anwalt schickt Mandatsinformation',
+			'reasoning' => 'transactional sender',
+		]]);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
 		$this->assertCount(1, $scores);
-		$this->assertSame(1, $claude->callCount(), 'List-Unsubscribe must NOT bypass Claude any more');
+		$this->assertSame(1, $provider->callCount(), 'List-Unsubscribe must NOT bypass the scoring LLM any more');
 		$this->assertSame('direct', $scores[0]['label']);
 	}
 
@@ -115,26 +137,24 @@ final class MailScoringServiceTest extends TestCase
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson([
-			'results' => [[
-				'id' => $mails[0]['id'],
-				'label' => 'direct',
-				'action_required' => false,
-				'priority' => 4,
-				'summary' => 'Chef schickt wichtige Kampagneninfo',
-				'reasoning' => 'vip sender',
-			]],
-		]);
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
+			'id' => $mails[0]['id'],
+			'label' => 'direct',
+			'action_required' => false,
+			'priority' => 4,
+			'summary' => 'Chef schickt wichtige Kampagneninfo',
+			'reasoning' => 'vip sender',
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => ['boss@example.com'], 'project_keywords' => [],
 		];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
-		$this->assertSame(1, $claude->callCount());
+		$this->assertSame(1, $provider->callCount());
 		$this->assertSame('direct', $scores[0]['label']);
 	}
 
@@ -147,26 +167,28 @@ final class MailScoringServiceTest extends TestCase
 		$repo = new MailRepository($this->pdo());
 		$first = $repo->findUnscoredForMailbox($tenantId, $mailboxId);
 
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
+			'id' => $first[0]['id'],
+			'label' => 'direct',
+			'action_required' => false,
+			'priority' => 3,
+			'summary' => 'Test',
+			'reasoning' => 'r',
+		]]);
+		// Mini-Call (action_owner) bei Cache-Hit läuft NICHT über den Router,
+		// sondern via ActionOwnerResolver → FakeClaudeClient. Daher hier ein
+		// echter FakeClaudeClient mit gescripteter Mini-Call-Antwort.
 		$claude = new FakeClaudeClient();
-		$claude->scriptJson([
-			'results' => [[
-				'id' => $first[0]['id'],
-				'label' => 'direct',
-				'action_required' => false,
-				'priority' => 3,
-				'summary' => 'Test',
-				'reasoning' => 'r',
-			]],
-		]);
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, $claude);
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$service->scoreBatch($tenantId, $profile, $first);
-		$this->assertSame(1, $claude->callCount());
+		$this->assertSame(1, $provider->callCount(), 'Erste Mail → genau ein Router-Score-Call');
 
 		// Second batch: another mail with identical content — must hit cache
 		// for the SCORE, but Sprint 6a fires a separate Mini-Call for
 		// action_owner (post-cache). Score-Klassifizierung kommt aus dem
-		// Cache (cached=1), und exakt EIN zusätzlicher Mini-Call läuft.
+		// Cache (cached=1); der Mini-Call läuft über FakeClaudeClient.
 		$this->insertMail($tenantId, $mailboxId, ['from_email' => 'x@a.de', 'subject' => 'Same', 'body_text' => 'Same body']);
 		$second = $repo->findUnscoredForMailbox($tenantId, $mailboxId);
 		$this->assertCount(1, $second, 'Only the new unscored mail should remain');
@@ -181,8 +203,10 @@ final class MailScoringServiceTest extends TestCase
 		]]]);
 
 		$scores = $service->scoreBatch($tenantId, $profile, $second);
-		$this->assertSame(2, $claude->callCount(),
-			'Score kommt aus dem Cache; Mini-Call für action_owner zählt als zweiter Call (Sprint 6a)');
+		$this->assertSame(1, $provider->callCount(),
+			'Score kommt aus dem Cache → KEIN zweiter Router-Score-Call');
+		$this->assertSame(1, $claude->callCount(),
+			'action_owner-Mini-Call läuft über FakeClaudeClient (Sprint 6a)');
 		$this->assertCount(1, $scores);
 		$this->assertSame(1, (int)$scores[0]['cached']);
 	}
@@ -194,19 +218,17 @@ final class MailScoringServiceTest extends TestCase
 		$this->insertMail($tenantId, $mailboxId);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson([
-			'results' => [[
-				'id' => $mails[0]['id'],
-				'label' => 'INVENTED_LABEL',
-				'action_required' => true,
-				'priority' => 99,  // out of range, must clamp
-				'summary' => str_repeat('x', 300),  // oversized, must truncate
-				'reasoning' => 'r',
-			]],
-		]);
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
+			'id' => $mails[0]['id'],
+			'label' => 'INVENTED_LABEL',
+			'action_required' => true,
+			'priority' => 99,  // out of range, must clamp
+			'summary' => str_repeat('x', 300),  // oversized, must truncate
+			'reasoning' => 'r',
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
@@ -224,20 +246,22 @@ final class MailScoringServiceTest extends TestCase
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'], 'label' => 'direct',
 			'action_required' => false, 'priority' => 3,
 			'summary' => 's', 'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$service->scoreBatch($tenantId, $profile, $mails);
 
-		$payload = $claude->lastCall();
-		$sent = json_encode($payload, JSON_UNESCAPED_UNICODE);
-		$this->assertStringNotContainsString('DE89', $sent, 'IBAN must not reach Claude');
+		// Was der Provider tatsächlich gesehen hat (System + User-Message).
+		$seen = $provider->seen;
+		$this->assertNotNull($seen);
+		$sent = json_encode([$seen->systemPrompt, $seen->messages], JSON_UNESCAPED_UNICODE);
+		$this->assertStringNotContainsString('DE89', $sent, 'IBAN must not reach the scoring LLM');
 		$this->assertStringContainsString('[IBAN-REDACTED]', $sent);
 	}
 
@@ -255,8 +279,8 @@ final class MailScoringServiceTest extends TestCase
 		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', 'CI pipeline mails', null);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'auto',
 			'sub_label' => 'GitHub CI',
@@ -264,9 +288,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 2,
 			'summary' => 'CI passed',
 			'reasoning' => 'github notification',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -277,10 +301,11 @@ final class MailScoringServiceTest extends TestCase
 		$this->assertSame('auto', $scores[0]['label']);
 		$this->assertSame('GitHub CI', $scores[0]['sub_label']);
 
-		// Prompt actually contained the USER_SUBLABELS block
-		$prompt = (string)$claude->lastCall()['messages'][0]['content'];
-		$this->assertStringContainsString('USER_SUBLABELS', $prompt);
-		$this->assertStringContainsString('GitHub CI', $prompt);
+		// Prompt actually contained the USER_SUBLABELS block (System-Segment 3,
+		// das callViaRouter in systemPrompt flacht) + den Sub-Label-Namen.
+		$sentToLlm = $this->sentPrompt($provider);
+		$this->assertStringContainsString('USER_SUBLABELS', $sentToLlm);
+		$this->assertStringContainsString('GitHub CI', $sentToLlm);
 	}
 
 	public function testHallucinatedSubLabelCollapsesToNull(): void
@@ -292,8 +317,8 @@ final class MailScoringServiceTest extends TestCase
 		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'auto',
 			'sub_label' => 'Made Up Bucket',   // not in user's pool
@@ -301,9 +326,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 2,
 			'summary' => 's',
 			'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -326,8 +351,8 @@ final class MailScoringServiceTest extends TestCase
 		(new SubLabelRepository($this->pdo()))->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'direct',
 			'sub_label' => 'GitHub CI',   // valid name, wrong parent
@@ -335,9 +360,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 4,
 			'summary' => 's',
 			'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -356,8 +381,8 @@ final class MailScoringServiceTest extends TestCase
 		$this->insertMail($tenantId, $mailboxId);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'direct',
 			'sub_label' => 'anything',
@@ -365,9 +390,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 3,
 			'summary' => 's',
 			'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -376,14 +401,29 @@ final class MailScoringServiceTest extends TestCase
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
 		$this->assertNull($scores[0]['sub_label']);
-		$prompt = (string)$claude->lastCall()['messages'][0]['content'];
+		$sentToLlm = $this->sentPrompt($provider);
 		// Pool-Header (mit Bucket-Liste) darf NICHT im Prompt sein — kein User-Pool.
 		// Das Wort USER_SUBLABELS taucht aber in der TOPIC_DISCOVERY-Anweisung
 		// als Referenz auf — das ist gewollt.
-		$this->assertStringNotContainsString('USER_SUBLABELS (existing buckets', $prompt,
+		$this->assertStringNotContainsString('USER_SUBLABELS (existing buckets', $sentToLlm,
 			'Empty pool ⇒ no existing-bucket header');
-		$this->assertStringContainsString('TOPIC_DISCOVERY', $prompt,
+		$this->assertStringContainsString('TOPIC_DISCOVERY', $sentToLlm,
 			'Discovery block must always be present (Phase 6b)');
+	}
+
+	/**
+	 * Alles was der Score-LLM gesehen hat: System-Prompt (callViaRouter flacht
+	 * die Anthropic-Segmente in NormalizedRequest->systemPrompt) + User-Message.
+	 */
+	private function sentPrompt(ScriptedLlmProvider $provider): string
+	{
+		$seen = $provider->seen;
+		$this->assertNotNull($seen, 'Score MUSS über den Router gelaufen sein');
+		$parts = [$seen->systemPrompt];
+		foreach ($seen->messages as $m) {
+			$parts[] = (string)($m['content'] ?? '');
+		}
+		return implode("\n", $parts);
 	}
 
 	// --- Phase 6b: Topic-Discovery ---------------------------------
@@ -398,8 +438,8 @@ final class MailScoringServiceTest extends TestCase
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'auto',
 			'sub_label' => 'Stripe Payments',
@@ -408,9 +448,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 2,
 			'summary' => 'Zahlung erhalten',
 			'reasoning' => 'stripe notification',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -451,8 +491,8 @@ final class MailScoringServiceTest extends TestCase
 			->create($tenantId, $userId, 'auto', 'GitHub CI', null, null);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'auto',
 			'sub_label' => 'Github CI',   // Tippfehler: kleines 'h', Distanz 1
@@ -461,9 +501,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 2,
 			'summary' => 's',
 			'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -488,8 +528,8 @@ final class MailScoringServiceTest extends TestCase
 		$this->insertMail($tenantId, $mailboxId);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mails[0]['id'],
 			'label' => 'auto',
 			'sub_label' => str_repeat('A', 50),   // > 30 chars → rejected
@@ -498,9 +538,9 @@ final class MailScoringServiceTest extends TestCase
 			'priority' => 2,
 			'summary' => 's',
 			'reasoning' => 'r',
-		]]]);
+		]]);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = [
 			'email' => 'marc@test.de', 'language' => 'de',
 			'vip_senders' => [], 'project_keywords' => [],
@@ -542,7 +582,7 @@ final class MailScoringServiceTest extends TestCase
 	/**
 	 * @param list<array<string,mixed>> $chunk
 	 */
-	private function scriptScoreResults(FakeClaudeClient $claude, array $chunk): void
+	private function scriptScoreResults(ScriptedLlmProvider $provider, array $chunk): void
 	{
 		$results = [];
 		foreach ($chunk as $mail) {
@@ -555,7 +595,7 @@ final class MailScoringServiceTest extends TestCase
 				'reasoning'       => 'r',
 			];
 		}
-		$claude->scriptJson(['results' => $results]);
+		$provider->scriptResults($results);
 	}
 
 	public function testBatchSizeTwoSplitsThreeMailsIntoTwoCalls(): void
@@ -567,17 +607,17 @@ final class MailScoringServiceTest extends TestCase
 
 		$this->setScoringBatchSize(2);
 
-		$claude = new FakeClaudeClient();
+		$provider = new ScriptedLlmProvider();
 		// ceil(3/2) = 2 Chunks: erst 2 Mails, dann 1 Mail.
-		$this->scriptScoreResults($claude, array_slice($mails, 0, 2));
-		$this->scriptScoreResults($claude, array_slice($mails, 2, 1));
+		$this->scriptScoreResults($provider, array_slice($mails, 0, 2));
+		$this->scriptScoreResults($provider, array_slice($mails, 2, 1));
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
 		$this->assertCount(3, $scores);
-		$this->assertSame(2, $claude->callCount(), 'batch_size=2 → ceil(3/2)=2 Chunks/Calls');
+		$this->assertSame(2, $provider->callCount(), 'batch_size=2 → ceil(3/2)=2 Chunks/Calls');
 	}
 
 	public function testBatchSizeFiveScoresThreeMailsInOneCall(): void
@@ -589,15 +629,15 @@ final class MailScoringServiceTest extends TestCase
 
 		$this->setScoringBatchSize(5);
 
-		$claude = new FakeClaudeClient();
+		$provider = new ScriptedLlmProvider();
 		// batch_size=5 >= 3 → genau 1 Chunk mit allen 3 Mails.
-		$this->scriptScoreResults($claude, $mails);
+		$this->scriptScoreResults($provider, $mails);
 
-		$service = $this->makeService($claude);
+		$service = $this->makeService($provider, new FakeClaudeClient());
 		$profile = ['email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []];
 		$scores = $service->scoreBatch($tenantId, $profile, $mails);
 
 		$this->assertCount(3, $scores);
-		$this->assertSame(1, $claude->callCount(), 'batch_size=5 ≥ 3 Mails → ein einziger Call');
+		$this->assertSame(1, $provider->callCount(), 'batch_size=5 ≥ 3 Mails → ein einziger Call');
 	}
 }

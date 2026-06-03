@@ -256,7 +256,7 @@ final class LlmController extends BaseController
 		$settings = $this->kernel->get(SettingsRepository::class);
 		$models   = $this->kernel->get(LlmModelRepository::class);
 
-		$roles = ['score', 'summary', 'draft', 'inference'];
+		$roles = \MailPilot\Llm\LlmRouter::ROLES;
 		$chains = [];
 		foreach ($roles as $role) {
 			$json = $settings->getString("llm.{$role}.fallback_chain", '');
@@ -273,12 +273,21 @@ final class LlmController extends BaseController
 			];
 		}
 
+		// Phase „Per-Role Model Selection" (Marc 2026-06): einmaliger Hinweis,
+		// falls beim Upgrade routing_mode auf „router" gesetzt wurde. Flag wird
+		// nach dem ersten Anzeigen verbraucht (auf '0' zurückgesetzt).
+		$routingUpgradeNotice = $settings->getString('llm.routing_mode_upgrade_notice', '') === '1';
+		if ($routingUpgradeNotice) {
+			$settings->set('llm.routing_mode_upgrade_notice', '0');
+		}
+
 		$this->render('llm/routing', [
 			'privacyMode' => $settings->getString('llm.privacy_mode',   'cloud_allowed'),
 			'routingMode' => $settings->getString('llm.routing_mode',   'direct'),
 			'chains'      => $chains,
 			'roles'       => $roles,
 			'scoringBatchSize' => $settings->getInt('scoring.batch_size', 20),
+			'routingUpgradeNotice' => $routingUpgradeNotice,
 			'csrfToken'   => $this->csrfToken(),
 		]);
 	}
@@ -320,7 +329,7 @@ final class LlmController extends BaseController
 		}
 		$settings->set('llm.routing_mode', $routing);
 
-		$roles = ['score', 'summary', 'draft', 'inference'];
+		$roles = \MailPilot\Llm\LlmRouter::ROLES;
 		foreach ($roles as $role) {
 			$ids = self::parseChainInput($_POST["chain_{$role}"] ?? []);
 			$settings->set("llm.{$role}.fallback_chain", json_encode($ids, JSON_UNESCAPED_UNICODE));
@@ -368,7 +377,7 @@ final class LlmController extends BaseController
 		$this->verifyCsrf();
 		$providerId = (string)($_POST['provider_id'] ?? '');
 		$role       = (string)($_POST['role'] ?? 'score');
-		if (!in_array($role, ['score', 'summary', 'draft', 'inference'], true)) {
+		if (!in_array($role, \MailPilot\Llm\LlmRouter::ROLES, true)) {
 			$role = 'score';
 		}
 

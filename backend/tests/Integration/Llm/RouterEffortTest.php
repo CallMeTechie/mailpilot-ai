@@ -42,6 +42,9 @@ final class RouterEffortTest extends TestCase
 			// llm.summary.fallback_chain zeigt sonst auf den echten
 			// Anthropic-Provider und resolved dessen Model statt TestEffort.
 			['llm.summary.fallback_chain', '["' . self::PROVIDER_ID . '"]'],
+			// Task 2 (routing_mode): volle Chain sicherstellen bis Migration 0064
+			// den Bestand auf 'router' setzt.
+			['llm.routing_mode', 'router'],
 		] as [$k, $v]) {
 			$pdo->prepare('INSERT INTO system_settings (`key`, `value`, `type`) VALUES (?, ?, "string")
 				ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)')->execute([$k, $v]);

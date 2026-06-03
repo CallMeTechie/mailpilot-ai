@@ -3,10 +3,13 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration\Services\Sender;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\AutoSortCorrectionRepository;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
@@ -22,20 +25,31 @@ use MailPilot\Services\RedactionService;
 use MailPilot\Services\Sender\LookalikeDetector;
 use MailPilot\Services\Sender\SenderResolver;
 use MailPilot\Tests\Fixtures\FakeClaudeClient;
+use MailPilot\Tests\Fixtures\ScriptedLlmProvider;
+use MailPilot\Tests\Support\SeedsScoreRouting;
 use MailPilot\Tests\TestCase;
+use MailPilot\Util\Uuid;
+use Psr\Log\NullLogger;
 
 /**
  * Phase 3a — pinnt das neue Verhalten:
  *   nach jedem scoreBatch werden Sender registriert + Spoofs geflaggt.
+ *
+ * Spec 1 (2026-06-02): Score läuft IMMER über den LlmRouter; der gescriptete
+ * Provider liefert das Score-Ergebnis.
  */
 final class ScoringSenderEnrichmentTest extends TestCase
 {
+	use SeedsScoreRouting;
+
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000c5';
+
 	private function pslPath(): string
 	{
 		return dirname(__DIR__, 4) . '/var/psl/public_suffix_list.dat';
 	}
 
-	private function makeService(FakeClaudeClient $claude, SenderResolver $resolver, LookalikeDetector $detector): MailScoringService
+	private function makeService(ScriptedLlmProvider $provider, SenderResolver $resolver, LookalikeDetector $detector): MailScoringService
 	{
 		$pdo = $this->pdo();
 		$budget = new BudgetService(
@@ -44,8 +58,15 @@ final class ScoringSenderEnrichmentTest extends TestCase
 			new PricingRepository($pdo),
 			$this->logger(),
 		);
+		$router = new LlmRouter(
+			['anthropic' => $provider],
+			new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo),
+			new NullLogger(),
+			new LlmModelRepository($pdo),
+		);
 		return new MailScoringService(
-			$claude,
+			new FakeClaudeClient(),
 			new MailRepository($pdo),
 			new ScoreRepository($pdo),
 			new CacheRepository($pdo, 30),
@@ -63,26 +84,27 @@ final class ScoringSenderEnrichmentTest extends TestCase
 			new AutoSortCorrectionRepository($pdo),
 			$resolver,
 			$detector,
+			null,
+			$router,
 		);
 	}
 
-	private function scriptOneClaudeResult(FakeClaudeClient $claude, string $mailId, string $label = 'auto'): void
+	private function scriptOneResult(ScriptedLlmProvider $provider, string $mailId, string $label = 'auto'): void
 	{
-		$claude->scriptJson([
-			'results' => [[
-				'id'              => $mailId,
-				'label'           => $label,
-				'action_required' => false,
-				'priority'        => 2,
-				'summary'         => 'fixture',
-				'reasoning'       => 'fixture',
-			]],
-		]);
+		$provider->scriptResults([[
+			'id'              => $mailId,
+			'label'           => $label,
+			'action_required' => false,
+			'priority'        => 2,
+			'summary'         => 'fixture',
+			'reasoning'       => 'fixture',
+		]]);
 	}
 
 	protected function setUp(): void
 	{
 		$this->truncateAll();
+		$this->seedScoreRouting(self::PROVIDER_ID, 'TestScoreEnrich');
 	}
 
 	public function testNewSenderGetsRegistered(): void
@@ -95,11 +117,11 @@ final class ScoringSenderEnrichmentTest extends TestCase
 		$resolver = new SenderResolver($this->pslPath(), $repo, $this->logger());
 		$detector = new LookalikeDetector($repo, $this->logger());
 
-		$claude = new FakeClaudeClient();
-		$this->scriptOneClaudeResult($claude, $mailId);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptOneResult($provider, $mailId);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$this->makeService($claude, $resolver, $detector)->scoreBatch(
+		$this->makeService($provider, $resolver, $detector)->scoreBatch(
 			$tenantId,
 			['user_id' => $userId, 'email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []],
 			$mails,
@@ -129,11 +151,11 @@ final class ScoringSenderEnrichmentTest extends TestCase
 		$resolver = new SenderResolver($this->pslPath(), $repo, $this->logger());
 		$detector = new LookalikeDetector($repo, $this->logger());
 
-		$claude = new FakeClaudeClient();
-		$this->scriptOneClaudeResult($claude, $mailId, 'newsletter');
+		$provider = new ScriptedLlmProvider();
+		$this->scriptOneResult($provider, $mailId, 'newsletter');
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$this->makeService($claude, $resolver, $detector)->scoreBatch(
+		$this->makeService($provider, $resolver, $detector)->scoreBatch(
 			$tenantId,
 			['user_id' => $userId, 'email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []],
 			$mails,
@@ -159,16 +181,15 @@ final class ScoringSenderEnrichmentTest extends TestCase
 		$resolver = new SenderResolver($this->pslPath(), $repo, $this->logger());
 		$detector = new LookalikeDetector($repo, $this->logger());
 
-		$claude = new FakeClaudeClient();
-		$claude->scriptJson([
-			'results' => [
-				['id' => $id1, 'label' => 'auto', 'action_required' => false, 'priority' => 2, 'summary' => 'x', 'reasoning' => 'x'],
-				['id' => $id2, 'label' => 'auto', 'action_required' => false, 'priority' => 2, 'summary' => 'x', 'reasoning' => 'x'],
-			],
+		$provider = new ScriptedLlmProvider();
+		// Beide Mails in EINEM Score-Call (batch_size=20 >= 2).
+		$provider->scriptResults([
+			['id' => $id1, 'label' => 'auto', 'action_required' => false, 'priority' => 2, 'summary' => 'x', 'reasoning' => 'x'],
+			['id' => $id2, 'label' => 'auto', 'action_required' => false, 'priority' => 2, 'summary' => 'x', 'reasoning' => 'x'],
 		]);
 
 		$mails = (new MailRepository($this->pdo()))->findUnscoredForMailbox($tenantId, $mailboxId);
-		$this->makeService($claude, $resolver, $detector)->scoreBatch(
+		$this->makeService($provider, $resolver, $detector)->scoreBatch(
 			$tenantId,
 			['user_id' => $userId, 'email' => 'marc@test.de', 'language' => 'de', 'vip_senders' => [], 'project_keywords' => []],
 			$mails,

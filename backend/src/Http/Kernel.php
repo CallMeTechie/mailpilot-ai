@@ -12,6 +12,7 @@ use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
+use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\MailboxRepository;
 use MailPilot\Repositories\PendingActionRepository;
@@ -195,8 +196,8 @@ class Kernel
 			),
 			// Phase 9q-A/B: Multi-Provider-LLM-Schicht. SecretBox laed beim
 			// Konstruktor den Master-Key — wirft wenn LLM_MASTER_KEY fehlt.
-			// Daher nur instantiieren wenn wirklich gebraucht (lazy via match):
-			// Solange routing_mode='direct' ist, wird LlmRouter nie gebaut.
+			// LlmRouter wird eager gebaut und für ALLE Rollen genutzt
+			// (Spec 1, 2026-06-02). routing_mode steuert nur noch Failover.
 			\MailPilot\Security\SecretBox::class => new \MailPilot\Security\SecretBox(),
 			\MailPilot\Repositories\LlmProviderRepository::class =>
 				new \MailPilot\Repositories\LlmProviderRepository($this->get(PDO::class)),
@@ -346,14 +347,11 @@ class Kernel
 				$this->get(LookalikeDetector::class),
 				// Phase 9a: Klassifikations-Overrides nach KI-Score.
 				$this->get(ScoreOverrideService::class),
-				// Phase 9q-B (Marc 2026-05-22): optionaler Failover-Router.
-				// Aktiv wenn Setting llm.routing_mode='router'. Default 'direct'
-				// → bestehender Pfad via ClaudeProvider.
+				// Spec 1 (2026-06-02): Scoring läuft IMMER über den LlmRouter
+				// (Modell + Effort aus llm_models, Rolle 'score'). routing_mode
+				// steuert nur noch Failover; der Router loggt selbst ins
+				// llm_call_log. Kein Direct-AnthropicClient-/Mirror-Pfad mehr.
 				$this->get(\MailPilot\Llm\LlmRouter::class),
-				// Phase 9q B-Fix (Marc 2026-05-23): direct-Mode-Calls in
-				// llm_call_log spiegeln, sonst zeigt /admin/llm/usage = 0.
-				$this->get(\MailPilot\Llm\LlmCallLogger::class),
-				$this->get(\MailPilot\Repositories\LlmProviderRepository::class),
 			),
 			MailSummaryService::class => new MailSummaryService(
 				$this->get(\MailPilot\Llm\LlmRouter::class),
@@ -362,6 +360,7 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(LlmModelRepository::class),
 				$this->get(ClaudeProvider::class), // Safety-Net-Fallback
 			),
 			ReplyDraftService::class  => new ReplyDraftService(
@@ -371,6 +370,7 @@ class Kernel
 				$this->get(RedactionService::class),
 				$this->get(BudgetService::class),
 				$this->get(PromptRepository::class),
+				$this->get(LlmModelRepository::class),
 				$this->get(RedactionRepository::class), // Sprint 6f DA-R2 #3: per-user-scope
 				$this->get(ClaudeProvider::class), // B7: Safety-Net-Fallback
 			),
@@ -391,7 +391,7 @@ class Kernel
 			),
 			RuleInferenceService::class => new RuleInferenceService(
 				$this->get(PDO::class),
-				$this->get(ClaudeClient::class),
+				$this->get(\MailPilot\Llm\LlmRouter::class),
 				$this->get(RedactionService::class),
 				$this->get(SettingsRepository::class),
 				$this->get(UsageCounterRepository::class),

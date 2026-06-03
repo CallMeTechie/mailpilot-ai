@@ -3,7 +3,10 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\AutoSortRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PromptRepository;
 use MailPilot\Repositories\SettingsRepository;
@@ -11,7 +14,8 @@ use MailPilot\Repositories\UsageCounterRepository;
 use MailPilot\Services\QuotaExceededException;
 use MailPilot\Services\RedactionService;
 use MailPilot\Services\RuleInferenceService;
-use MailPilot\Tests\Fixtures\FakeClaudeClient;
+use MailPilot\Tests\Fixtures\ScriptedLlmProvider;
+use MailPilot\Tests\Support\SeedsInferenceRouting;
 use MailPilot\Tests\TestCase;
 use MailPilot\Util\Uuid;
 use Psr\Log\NullLogger;
@@ -26,10 +30,18 @@ use Psr\Log\NullLogger;
  * Plus Quota-Cap (DA-R2 High 2). Redaction wird im RedactionServiceTest
  * separat gepinnt.
  *
+ * Task 7 (2026-06-02): Regel-Extraktion laeuft jetzt ueber den LlmRouter
+ * (Rolle 'inference'). Der gescriptete ScriptedLlmProvider ersetzt die
+ * frueheren FakeClaudeClient::scriptJson-Calls.
+ *
  * @group integration
  */
 final class RuleInferenceServiceTest extends TestCase
 {
+	use SeedsInferenceRouting;
+
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000c8';
+
 	protected function setUp(): void
 	{
 		$this->truncateAll();
@@ -38,15 +50,23 @@ final class RuleInferenceServiceTest extends TestCase
 		// nicht. Wir setzen den Default hier hart wieder zurueck, damit der
 		// Test-Order keinen Einfluss hat. (Phase 9q-A, Marc 2026-05-22.)
 		$this->setSetting('rule_inference_enabled', '1');
+		$this->seedInferenceRouting(self::PROVIDER_ID, 'RuleInferenceTestProv');
 	}
 
-	private function makeService(FakeClaudeClient $claude): RuleInferenceService
+	private function makeService(ScriptedLlmProvider $provider): RuleInferenceService
 	{
 		$pdo = $this->pdo();
 		$settings = new SettingsRepository($pdo);
+		$router = new LlmRouter(
+			['anthropic' => $provider],
+			new LlmProviderRepository($pdo),
+			$settings,
+			new NullLogger(),
+			new LlmModelRepository($pdo),
+		);
 		return new RuleInferenceService(
 			$pdo,
-			$claude,
+			$router,
 			new RedactionService(),
 			$settings,
 			new UsageCounterRepository($pdo),
@@ -57,9 +77,9 @@ final class RuleInferenceServiceTest extends TestCase
 		);
 	}
 
-	private function scriptDefaultRule(FakeClaudeClient $claude, int $confidence = 90, ?string $subLabel = 'Zertifikate'): void
+	private function scriptDefaultRule(ScriptedLlmProvider $provider, int $confidence = 90, ?string $subLabel = 'Zertifikate'): void
 	{
-		$claude->scriptJson([
+		$provider->scriptRawJson([
 			'create_rule'       => true,
 			'label'             => 'noise',
 			'sub_label'         => $subLabel,
@@ -80,10 +100,10 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'all');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95);
 
-		$result = $this->makeService($claude)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
+		$result = $this->makeService($provider)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
 
 		$this->assertSame('pending', $result['action'], 'range=all muss Pending erzwingen — DA-R1 Critical 2');
 		$pendings = $this->pdo()->query("SELECT COUNT(*) FROM pending_actions WHERE kind='rule_suggestion'")->fetchColumn();
@@ -99,10 +119,10 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'future_only');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95);
 
-		$result = $this->makeService($claude)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
+		$result = $this->makeService($provider)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
 
 		$this->assertSame('applied', $result['action']);
 		$rules = $this->pdo()->query("SELECT label, sub_label, enabled FROM auto_sort_rules WHERE tenant_id=" . $this->pdo()->quote($tenantId))->fetchAll();
@@ -126,10 +146,10 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'last_30_days');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95);
 
-		$result = $this->makeService($claude)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
+		$result = $this->makeService($provider)->infer($tenantId, $userId, $mailId, 'SSL-Mails von mbnet-it.com können in Noise/Zertifikate');
 
 		$this->assertSame('applied', $result['action'],
 			'last_30_days + auto + confidence>=floor + matches<=cap MUSS direkt anwenden — User-Wunsch „Sofort verschieben"');
@@ -150,10 +170,10 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'future_only');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95, 'ci');
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95, 'ci');
 
-		$result = $this->makeService($claude)->infer($tenantId, $userId, $mailId, 'GitHub CI-Mails sind Noise');
+		$result = $this->makeService($provider)->infer($tenantId, $userId, $mailId, 'GitHub CI-Mails sind Noise');
 
 		$this->assertSame('applied', $result['action']);
 		$this->assertSame('CI', $result['sub_label'], 'Fuzzy-Merge muss existierendes „CI" wiederverwenden, kein zweites „ci" anlegen');
@@ -176,18 +196,18 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'future_only');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95);
 
 		$reasoning = 'SSL-Mails von mbnet-it.com sind Noise';
-		$svc = $this->makeService($claude);
+		$svc = $this->makeService($provider);
 		$first  = $svc->infer($tenantId, $userId, $mailId, $reasoning);
 		$second = $svc->infer($tenantId, $userId, $mailId, $reasoning);
 
 		$this->assertSame('applied',  $first['action']);
 		$this->assertSame('skipped',  $second['action'], 'Zweiter Submit derselben (mail, reasoning) muss durch Idempotenz-Hash blockiert werden');
 		$this->assertSame('duplicate_submit', $second['reason']);
-		$this->assertSame(1, $claude->callCount(), 'Claude darf nur einmal angerufen werden — sonst leakt Hash-Idempotenz');
+		$this->assertSame(1, $provider->callCount(), 'Der Router-Provider darf nur einmal angerufen werden — sonst leakt Hash-Idempotenz');
 	}
 
 	public function testQuotaExceededThrows(): void
@@ -200,11 +220,11 @@ final class RuleInferenceServiceTest extends TestCase
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('rule_inference_backfill_range', 'future_only');
 
-		$claude = new FakeClaudeClient();
-		$this->scriptDefaultRule($claude, 95);
-		$this->scriptDefaultRule($claude, 95);
+		$provider = new ScriptedLlmProvider();
+		$this->scriptDefaultRule($provider, 95);
+		$this->scriptDefaultRule($provider, 95);
 
-		$svc = $this->makeService($claude);
+		$svc = $this->makeService($provider);
 		// Erster Call inkrementiert auf 1 — OK.
 		$svc->infer($tenantId, $userId, $mailId, 'Erste Begründung');
 

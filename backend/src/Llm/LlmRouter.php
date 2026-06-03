@@ -27,6 +27,9 @@ use Psr\Log\LoggerInterface;
  */
 final class LlmRouter
 {
+	/** Kanonische Rollen-Liste — Single Source für UI-Iteration (Routing-Chain + Modell-Dropdowns). */
+	public const ROLES = ['score', 'summary', 'draft', 'inference'];
+
 	/**
 	 * @param array<string, LlmProvider> $providersByKind  z.B. ['anthropic'=>...,'openai'=>...]
 	 */
@@ -106,6 +109,18 @@ final class LlmRouter
 			$start = microtime(true);
 			try {
 				$response = $provider->complete($effectiveRequest);
+				// modelId-Garantie: manche Provider (OpenAI-kompatibel/lokal)
+				// liefern leeren/abweichenden model — der Cost-Pfad keyt aber
+				// auf model. Leere modelId mit dem resolvten Modell füllen.
+				if ($response->modelId === '' && $effectiveRequest->modelHint !== '') {
+					$response = new NormalizedResponse(
+						content:      $response->content,
+						usage:        $response->usage,
+						finishReason: $response->finishReason,
+						modelId:      $effectiveRequest->modelHint,
+						providerKind: $response->providerKind,
+					);
+				}
 				$latencyMs = (int)((microtime(true) - $start) * 1000);
 				if ($idx > 0) {
 					$this->logger->info('llm.router.failover_succeeded', [
@@ -141,6 +156,43 @@ final class LlmRouter
 			sprintf('Alle %d Provider in der Chain fuer „%s" haben gefailed', count($chain), $taskType),
 			$lastException,
 		);
+	}
+
+	/**
+	 * Sequenzielle Batch-Variante (genutzt von RuleInferenceService für die
+	 * ≤3 Regel-Extraktions-Calls). Jedes Item läuft über complete() mit
+	 * vollem per-Item-Failover; ein gescheitertes Item → null-Slot (kein
+	 * Abbruch des Batches), analog zum bisherigen ClaudeClient::messagesBatch.
+	 *
+	 * Hinweis: Der Default-Wert für $taskType ist bewusst 'inference' und
+	 * weicht damit vom Default 'score' in complete() ab — wer zwischen beiden
+	 * Methoden wechselt, sollte die Rolle immer explizit übergeben.
+	 *
+	 * @param  list<NormalizedRequest> $requests
+	 * @return list<NormalizedResponse|null>
+	 */
+	public function completeBatch(array $requests, string $taskType = 'inference'): array
+	{
+		$out = [];
+		foreach ($requests as $i => $req) {
+			try {
+				$out[] = $this->complete($req, $taskType);
+			} catch (LlmAllProvidersDownException $e) {
+				// Systemischer Ausfall (alle Provider der Chain down) — höhere
+				// Severity als ein einzelnes Bad-Payload-Item, damit Monitoring
+				// einen Komplettausfall vom Einzel-Item-Fehler unterscheiden kann.
+				$this->logger->error('llm.router.batch_all_providers_down', [
+					'task' => $taskType, 'slot' => $i, 'err' => $e->getMessage(),
+				]);
+				$out[] = null;
+			} catch (\Throwable $e) {
+				$this->logger->warning('llm.router.batch_item_failed', [
+					'task' => $taskType, 'slot' => $i, 'err' => $e->getMessage(),
+				]);
+				$out[] = null;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -184,8 +236,16 @@ final class LlmRouter
 		}
 
 		// Privacy-Mode-Filter (Phase 9q-C).
-		$mode = $this->settings->getString('llm.privacy_mode', 'cloud_allowed');
-		return $this->applyPrivacyMode($chain, $mode);
+		$mode  = $this->settings->getString('llm.privacy_mode', 'cloud_allowed');
+		$chain = $this->applyPrivacyMode($chain, $mode);
+
+		// routing_mode: „direct" = nur der Primary (kein Failover), „router"
+		// = ganze Chain. Default „router" (Migration 0064 setzt Bestand darauf;
+		// fehlt das Setting, ist die sichere Wahl die volle Chain).
+		if ($this->settings->getString('llm.routing_mode', 'router') !== 'router') {
+			return array_slice($chain, 0, 1);
+		}
+		return $chain;
 	}
 
 	/**

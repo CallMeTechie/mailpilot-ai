@@ -47,6 +47,10 @@ final class LlmRouterFailoverTest extends TestCase
 		// testLocalOnly*-Tests setzen 'local_only', das leakt sonst in
 		// nachfolgende Tests und filtert alle Cloud-Provider weg.
 		$this->setSetting('llm.privacy_mode', 'cloud_allowed');
+		// Task 2 (routing_mode): sicherstellen dass die gesamte Chain genutzt
+		// wird — Migration 0064 setzt den Bestand auf 'router', aber bis dahin
+		// pinnen wir explizit, damit Failover-Tests grün bleiben.
+		$this->setSetting('llm.routing_mode', 'router');
 	}
 
 	private function setSetting(string $key, string $value): void

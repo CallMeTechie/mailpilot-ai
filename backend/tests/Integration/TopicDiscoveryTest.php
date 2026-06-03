@@ -3,9 +3,12 @@ declare(strict_types=1);
 
 namespace MailPilot\Tests\Integration;
 
+use MailPilot\Llm\LlmRouter;
 use MailPilot\Repositories\AutoSortRepository;
 use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
+use MailPilot\Repositories\LlmModelRepository;
+use MailPilot\Repositories\LlmProviderRepository;
 use MailPilot\Repositories\MailRepository;
 use MailPilot\Repositories\PendingActionRepository;
 use MailPilot\Repositories\PricingRepository;
@@ -18,20 +21,32 @@ use MailPilot\Services\BudgetService;
 use MailPilot\Services\MailScoringService;
 use MailPilot\Services\RedactionService;
 use MailPilot\Tests\Fixtures\FakeClaudeClient;
+use MailPilot\Tests\Fixtures\ScriptedLlmProvider;
+use MailPilot\Tests\Support\SeedsScoreRouting;
 use MailPilot\Tests\TestCase;
 use MailPilot\Util\Uuid;
-use PDO;
+use Psr\Log\NullLogger;
 
 /**
  * Sprint 6b — pinnt Autonome Topic-Discovery:
- *   - KI discovered Sub-Label → AutoSortRule disabled + created_by='ki'
- *   - USER_TOPICS landet als drittes cache_control-Segment im System
- *   - Empty Pool: kein USER_TOPICS-Segment (kein wasted cache_creation)
+ *   - KI discovered Sub-Label → AutoSortRule + created_by-Spuren
+ *   - USER_TOPICS landet im Score-Prompt (Sub-Label-Pool)
+ *   - Empty Pool: kein USER_TOPICS-Block (kein wasted cache_creation)
+ *
+ * Spec 1 (2026-06-02): Score läuft IMMER über den LlmRouter. Der frühere
+ * direkte Anthropic-Segment-Assert (`$call['system'][N]['cache_control']`)
+ * ist nicht mehr möglich — callViaRouter flacht die Segmente in einen
+ * systemPrompt-String. Die Tests prüfen stattdessen, dass der Pool-Inhalt
+ * im Score-Prompt landet (bzw. bei leerem Pool eben NICHT).
  *
  * @group integration
  */
 final class TopicDiscoveryTest extends TestCase
 {
+	use SeedsScoreRouting;
+
+	private const PROVIDER_ID = '00000000-0000-4000-8000-0000000000c2';
+
 	protected function setUp(): void
 	{
 		$this->truncateAll();
@@ -39,9 +54,10 @@ final class TopicDiscoveryTest extends TestCase
 		// wird (TopicDiscoveryTest pinnt das Sprint-6b-Verhalten).
 		$this->pdo()->prepare("UPDATE system_settings SET `value`='auto'
 			WHERE `key`='autosort_create_topic_mode'")->execute();
+		$this->seedScoreRouting(self::PROVIDER_ID, 'TestScoreTopic');
 	}
 
-	private function makeService(FakeClaudeClient $claude): MailScoringService
+	private function makeService(ScriptedLlmProvider $provider): MailScoringService
 	{
 		$pdo = $this->pdo();
 		$budget = new BudgetService(
@@ -50,8 +66,15 @@ final class TopicDiscoveryTest extends TestCase
 			new PricingRepository($pdo),
 			$this->logger(),
 		);
+		$router = new LlmRouter(
+			['anthropic' => $provider],
+			new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo),
+			new NullLogger(),
+			new LlmModelRepository($pdo),
+		);
 		return new MailScoringService(
-			$claude,
+			new FakeClaudeClient(),
 			new MailRepository($pdo),
 			new ScoreRepository($pdo),
 			new CacheRepository($pdo, 30),
@@ -66,7 +89,27 @@ final class TopicDiscoveryTest extends TestCase
 			2048,
 			$this->logger(),
 			new PendingActionRepository($pdo),
+			null,
+			null,
+			null,
+			null,
+			$router,
 		);
+	}
+
+	/**
+	 * Alles was der Score-LLM gesehen hat: System-Prompt (geflachte Segmente)
+	 * + User-Message.
+	 */
+	private function sentPrompt(ScriptedLlmProvider $provider): string
+	{
+		$seen = $provider->seen;
+		$this->assertNotNull($seen, 'Score MUSS über den Router gelaufen sein');
+		$parts = [$seen->systemPrompt];
+		foreach ($seen->messages as $m) {
+			$parts[] = (string)($m['content'] ?? '');
+		}
+		return implode("\n", $parts);
 	}
 
 	private function seedTenantAndMailbox(): array
@@ -103,18 +146,18 @@ final class TopicDiscoveryTest extends TestCase
 	public function testKiDiscoveryCreatesDisabledAutoSortRule(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId);
 
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'auto',
 			'sub_label' => 'GitHub CI', 'sub_label_is_new' => true,
 			'action_required' => false,
 			'action_owner' => 'group', 'action_owner_confidence' => 50,
 			'priority' => 2, 'summary' => 'CI passed', 'reasoning' => 'auto',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
@@ -136,28 +179,28 @@ final class TopicDiscoveryTest extends TestCase
 	public function testEmptySubLabelPoolOmitsUserTopicsSegment(): void
 	{
 		[$tenantId, $userId, $mailboxId] = $this->seedTenantAndMailbox();
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId);
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'auto',
 			'sub_label_is_new' => false,
 			'action_required' => false,
 			'action_owner' => 'group', 'action_owner_confidence' => 30,
 			'priority' => 2, 'summary' => 'x', 'reasoning' => 'y',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
 		], [$this->pdo()->query("SELECT * FROM mails WHERE id = " . $this->pdo()->quote($mailId))->fetch()]);
 
-		$call = $claude->lastCall();
-		$this->assertIsArray($call['system'] ?? null);
-		// Leerer Pool → genau 2 Segmente: System + USER_IDENTITY.
-		// Kein USER_TOPICS, damit kein cache_creation für leeren Block.
-		$this->assertCount(2, $call['system'],
-			'Leerer Sub-Label-Pool darf kein USER_TOPICS-Segment erzeugen');
+		// Leerer Pool → KEIN existing-bucket-Header (USER_SUBLABELS-Pool-Block)
+		// im Score-Prompt. callViaRouter flacht die Segmente; der frühere
+		// Segment-Count-Assert auf $call['system'] entfällt.
+		$sentToLlm = $this->sentPrompt($provider);
+		$this->assertStringNotContainsString('USER_SUBLABELS (existing buckets', $sentToLlm,
+			'Leerer Sub-Label-Pool darf keinen USER_SUBLABELS-Pool-Block erzeugen');
 	}
 
 	public function testPopulatedPoolPutsUserTopicsAsThirdCachedSegment(): void
@@ -168,29 +211,28 @@ final class TopicDiscoveryTest extends TestCase
 			VALUES (:id, :t, :u, "auto", "Bestellung", "Versand", "user")')
 			->execute([':id' => Uuid::v4(), ':t' => $tenantId, ':u' => $userId]);
 
-		$claude = new FakeClaudeClient();
 		$mailId = $this->seedMail($tenantId, $mailboxId);
-		$claude->scriptJson(['results' => [[
+		$provider = new ScriptedLlmProvider();
+		$provider->scriptResults([[
 			'id' => $mailId, 'label' => 'auto',
 			'sub_label' => 'Bestellung', 'sub_label_is_new' => false,
 			'action_required' => false,
 			'action_owner' => 'group', 'action_owner_confidence' => 50,
 			'priority' => 2, 'summary' => 'x', 'reasoning' => 'y',
-		]]]);
+		]]);
 
-		$this->makeService($claude)->scoreBatch($tenantId, [
+		$this->makeService($provider)->scoreBatch($tenantId, [
 			'email' => 'marc@example.de', 'display_name' => 'Marc',
 			'tenant_id' => $tenantId, 'user_id' => $userId,
 			'language' => 'de', 'aliases' => ['Marc'],
 		], [$pdo->query("SELECT * FROM mails WHERE id = " . $pdo->quote($mailId))->fetch()]);
 
-		$call = $claude->lastCall();
-		$this->assertIsArray($call['system'] ?? null);
-		$this->assertCount(3, $call['system'],
-			'Mit gefülltem Pool muss USER_TOPICS als drittes Segment kommen');
-		$this->assertSame('ephemeral', $call['system'][2]['cache_control']['type'] ?? null);
-		$this->assertSame('1h',        $call['system'][2]['cache_control']['ttl']  ?? null);
-		$this->assertStringContainsString('Bestellung', $call['system'][2]['text'] ?? '',
-			'USER_TOPICS-Segment muss die Sub-Label-Namen enthalten');
+		// Mit gefülltem Pool muss der USER_SUBLABELS-Pool-Block mit dem
+		// Sub-Label-Namen im Score-Prompt landen (System-Segment 3, geflacht).
+		$sentToLlm = $this->sentPrompt($provider);
+		$this->assertStringContainsString('USER_SUBLABELS', $sentToLlm,
+			'Mit gefülltem Pool muss der USER_SUBLABELS-Block im Prompt sein');
+		$this->assertStringContainsString('Bestellung', $sentToLlm,
+			'USER_SUBLABELS-Block muss die Sub-Label-Namen enthalten');
 	}
 }
