@@ -265,7 +265,7 @@ final class ScoreOverrideService
 						'mail_id'   => (string)($mail['id'] ?? ''),
 						'rule_id'   => (string)$rule['id'],
 						'mode'      => $mode,
-						'remaining' => 0,
+						'remaining' => $this->matchBudgetLeft ?? 0,
 					]);
 					$budgetFallbackLogged = true;
 				}

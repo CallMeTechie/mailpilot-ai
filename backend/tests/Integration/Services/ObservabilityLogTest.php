@@ -275,6 +275,7 @@ final class ObservabilityLogTest extends TestCase
 		$this->assertCount(1, $hits, 'Budget==0 im suggest-Band emittiert rule_match.budget_exceeded_fallback');
 		$this->assertSame('hybrid', $hits[0]['context']['mode'] ?? null);
 		$this->assertSame('m-budget', $hits[0]['context']['mail_id'] ?? null);
+		$this->assertArrayHasKey('rule_id', $hits[0]['context']);
 	}
 
 	/**
