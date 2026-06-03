@@ -243,6 +243,24 @@ final class ScoreOverrideRepository
 	}
 
 	/**
+	 * Holt eine Regel scoped auf (tenant,user) — null wenn nicht vorhanden/fremd.
+	 * Wird im Feedback-Pfad zur Ownership-Prüfung eingesetzt, bevor eine Regel
+	 * mutiert wird (Task 8 Security-Hardening).
+	 *
+	 * @return array<string,mixed>|null
+	 */
+	public function findByIdForUser(string $tenantId, string $userId, string $ruleId): ?array
+	{
+		$stmt = $this->db->prepare(
+			'SELECT * FROM score_override_rules
+			 WHERE id = :id AND tenant_id = :t AND user_id = :u AND deleted_at IS NULL LIMIT 1'
+		);
+		$stmt->execute([':id' => $ruleId, ':t' => $tenantId, ':u' => $userId]);
+		$row = $stmt->fetch(\PDO::FETCH_ASSOC);
+		return $row === false ? null : $row;
+	}
+
+	/**
 	 * Findet die EINE user-derived Regel für (sender_key, Set-Feld), falls vorhanden.
 	 * @return array<string,mixed>|null
 	 */
