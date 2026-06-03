@@ -268,6 +268,7 @@ final class ScoreOverrideRepository
 
 	/**
 	 * Aktualisiert Set-/Match-Felder einer bestehenden Regel in-place.
+	 * Jedes Feld wird durch denselben Validator/Normalizer verarbeitet wie in create().
 	 * @param array<string,mixed> $fields
 	 */
 	public function updateFields(string $tenantId, string $ruleId, array $fields): void
@@ -278,8 +279,17 @@ final class ScoreOverrideRepository
 		$params = [':id' => $ruleId, ':t' => $tenantId];
 		foreach ($fields as $k => $v) {
 			if (!in_array($k, $allowed, true)) { continue; }
+			$normalized = match ($k) {
+				'set_priority'        => $this->intOrNull($v, 1, 5),
+				'set_action_required' => $v !== null ? (int)(bool)$v : null,
+				'set_label'           => $this->validLabelOrNull($v),
+				'set_folder_segments' => $this->validFolderSegmentsOrNull($v),
+				'match_subject_regex' => $this->validRegex($v),
+				'match_from_local'    => $this->lowerOrNull($v, 120),
+				'enabled'             => (int)(bool)$v,
+			};
 			$sets[] = "`$k` = :$k";
-			$params[":$k"] = is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : $v;
+			$params[":$k"] = $normalized;
 		}
 		if ($sets === []) { return; }
 		$this->db->prepare(
@@ -312,8 +322,8 @@ final class ScoreOverrideRepository
 		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
 		$id = $stmt->fetchColumn();
 		if ($id === false) { return null; }
-		$this->db->prepare('UPDATE score_override_rules SET enabled = 0, updated_at = UTC_TIMESTAMP(3) WHERE id = :id AND tenant_id = :t')
-			->execute([':id' => $id, ':t' => $tenantId]);
+		$this->db->prepare('UPDATE score_override_rules SET enabled = 0, updated_at = UTC_TIMESTAMP(3) WHERE id = :id AND tenant_id = :t AND user_id = :u')
+			->execute([':id' => $id, ':t' => $tenantId, ':u' => $userId]);
 		return (string)$id;
 	}
 
