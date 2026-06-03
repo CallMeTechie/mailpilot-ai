@@ -39,7 +39,7 @@ final class MatchScorer
 			}
 		}
 		if ($rule['match_from_local'] !== null
-			&& (string)$rule['match_from_local'] === strtolower((string)($mail['from_local'] ?? ''))) {
+			&& strtolower((string)$rule['match_from_local']) === strtolower((string)($mail['from_local'] ?? ''))) {
 			$points += self::W_FROM_LOCAL;
 		}
 		if ($rule['match_subject_regex'] !== null) {
