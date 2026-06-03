@@ -24,8 +24,8 @@ final class RuleMatchServiceTest extends TestCase
 	{
 		$this->truncateAll();
 		$pdo = $this->pdo();
-		$pdo->exec("DELETE FROM llm_models WHERE provider_id = '" . self::PID . "'");
-		$pdo->exec("DELETE FROM llm_providers WHERE id = '" . self::PID . "'");
+		$pdo->prepare('DELETE FROM llm_models WHERE provider_id = ?')->execute([self::PID]);
+		$pdo->prepare('DELETE FROM llm_providers WHERE id = ?')->execute([self::PID]);
 		$pdo->prepare("INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
 			VALUES (?, 'M', 'anthropic', 'http://x', 0, 1, 10)")->execute([self::PID]);
 		$pdo->prepare("INSERT INTO llm_models (id, provider_id, model_id, role, enabled, priority)
@@ -50,7 +50,7 @@ final class RuleMatchServiceTest extends TestCase
 		$router = new LlmRouter(['anthropic' => $capture], new LlmProviderRepository($pdo),
 			new SettingsRepository($pdo), new NullLogger(), new LlmModelRepository($pdo));
 
-		$svc = new RuleMatchService($router, new RedactionService(), new SettingsRepository($pdo), new NullLogger());
+		$svc = new RuleMatchService($router, new RedactionService(), new NullLogger());
 		// match_sender_key enthält eine IBAN — muss via D7-Redaction aus dem Payload verschwinden.
 		$rule = ['id' => 'r1', 'match_sender_key' => 'sk:DE89370400440532013000', 'set_priority' => 4];
 		$mail = ['sender_key' => 'sk:acme', 'from_email' => 'a@acme.de', 'subject' => 'IBAN DE89370400440532013000', 'body_text' => 'x'];

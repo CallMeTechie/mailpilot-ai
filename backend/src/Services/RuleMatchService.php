@@ -6,7 +6,6 @@ namespace MailPilot\Services;
 use MailPilot\Llm\LlmAllProvidersDownException;
 use MailPilot\Llm\LlmRouter;
 use MailPilot\Llm\NormalizedRequest;
-use MailPilot\Repositories\SettingsRepository;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -20,7 +19,6 @@ final class RuleMatchService
 	public function __construct(
 		private readonly LlmRouter $router,
 		private readonly RedactionService $redactor,
-		private readonly SettingsRepository $settings,
 		private readonly LoggerInterface $logger,
 	) {
 	}
@@ -32,10 +30,14 @@ final class RuleMatchService
 	 */
 	public function scoreMatch(array $rule, array $mail): ?int
 	{
-		$domain  = ltrim((string)(strstr((string)($mail['from_email'] ?? ''), '@') ?: ''), '@');
+		// RedactionService::reduceFromToDomain() gibt '*@domain.tld' zurück — das
+		// '@' im Präfix würde die Domain-Assertion im Test brechen und ist für den
+		// LLM-Payload hier unnötig. Wir extrahieren daher manuell nur den Domain-Teil.
+		$domain = ltrim((string)(strstr((string)($mail['from_email'] ?? ''), '@') ?: ''), '@');
 		if ($domain === '') {
 			$domain = '(unknown)';
 		}
+		// Betreff vorab redacted; finaler redact()-Pass unten deckt zusätzlich die Regel-Felder ab.
 		$subject  = $this->redactor->redact((string)($mail['subject'] ?? ''));
 		$ruleDesc = $this->describeRule($rule);
 
@@ -55,7 +57,7 @@ final class RuleMatchService
 		);
 		try {
 			$resp = $this->router->complete($req, 'match');
-		} catch (LlmAllProvidersDownException $e) {
+		} catch (LlmAllProvidersDownException | \RuntimeException $e) {
 			$this->logger->info('rule_match.unavailable_fallback_deterministic', ['err' => $e->getMessage()]);
 			return null;
 		}
