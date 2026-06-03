@@ -312,8 +312,8 @@ final class ScoreOverrideRepository
 		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
 		$id = $stmt->fetchColumn();
 		if ($id === false) { return null; }
-		$this->db->prepare('UPDATE score_override_rules SET enabled = 0, updated_at = UTC_TIMESTAMP(3) WHERE id = :id')
-			->execute([':id' => $id]);
+		$this->db->prepare('UPDATE score_override_rules SET enabled = 0, updated_at = UTC_TIMESTAMP(3) WHERE id = :id AND tenant_id = :t')
+			->execute([':id' => $id, ':t' => $tenantId]);
 		return (string)$id;
 	}
 
