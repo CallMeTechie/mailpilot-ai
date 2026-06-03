@@ -4,7 +4,10 @@
 -- summary/draft immer über die volle Chain (haben also Failover). Damit beim
 -- Upgrade kein stiller Failover-Verlust entsteht, wird der Bestand auf
 -- `router` gesetzt. Ein einmaliges Notice-Flag triggert einen Admin-Hinweis.
-UPDATE system_settings SET `value` = 'router' WHERE `key` = 'llm.routing_mode';
+INSERT INTO system_settings (`key`, `value`, `type`, description)
+	VALUES ('llm.routing_mode', 'router', 'string',
+	        'Spec 1: direct = Primary-only (kein Failover), router = volle Chain. Beim Upgrade auf router gesetzt.')
+ON DUPLICATE KEY UPDATE `value` = 'router';
 
 INSERT INTO system_settings (`key`, `value`, `type`, description) VALUES
 	('llm.inference.fallback_chain',
@@ -15,6 +18,7 @@ INSERT INTO system_settings (`key`, `value`, `type`, description) VALUES
 	 '["00000000-0000-4000-8000-000000000050"]',
 	 'json',
 	 'Spec 1: Failover-Chain fuer draft-Calls. Initial nur Anthropic.'),
+	-- routing_mode_upgrade_notice: vom Admin-Routing-Banner (Task 10) gelesen und nach Anzeige auf '0' gesetzt.
 	('llm.routing_mode_upgrade_notice',
 	 '1',
 	 'string',
