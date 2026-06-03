@@ -20,22 +20,23 @@
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 // Vorschlags-Felder lesbar zusammenfassen (priority/action_required/label/folder_segments).
-$fmtProposed = static function (array $p) use ($h): string {
+// Gibt Klartext zurück — kein HTML, kein $h() intern. Der Template-Code escaped am Output.
+$fmtProposed = static function (array $p): string {
 	$parts = [];
 	if (isset($p['priority'])) {
-		$parts[] = 'Priorität → ' . $h((string)(int)$p['priority']);
+		$parts[] = 'Priorität → ' . (string)(int)$p['priority'];
 	}
 	if (isset($p['action_required'])) {
 		$parts[] = 'Aktion erforderlich → ' . ((int)$p['action_required'] === 1 ? 'ja' : 'nein');
 	}
 	if (isset($p['label'])) {
-		$parts[] = 'Label → ' . $h((string)$p['label']);
+		$parts[] = 'Label → ' . (string)$p['label'];
 	}
 	if (isset($p['folder_segments']) && is_array($p['folder_segments']) && $p['folder_segments'] !== []) {
 		$segs = array_map(static fn($s): string => (string)$s, $p['folder_segments']);
-		$parts[] = 'Ordner → ' . $h(implode(' / ', $segs));
+		$parts[] = 'Ordner → ' . implode(' / ', $segs);
 	}
-	return $parts === [] ? '<span class="muted">—</span>' : implode(', ', $parts);
+	return implode(', ', $parts);
 };
 ?>
 
@@ -94,7 +95,12 @@ $fmtProposed = static function (array $p) use ($h): string {
 						<small class="muted"><?= $h($s['match_mode']) ?></small>
 					<?php endif; ?>
 				</td>
-				<td><?= $fmtProposed($s['proposed']) ?></td>
+				<td><?php $proposedText = $fmtProposed($s['proposed']); ?>
+					<?php if ($proposedText === '') : ?>
+						<span class="muted">—</span>
+					<?php else : ?>
+						<?= $h($proposedText) ?>
+					<?php endif; ?></td>
 				<td><small class="muted"><?= $h($s['created_at']) ?></small></td>
 				<td class="actions">
 					<form method="post" action="/admin/llm/suggestions/<?= $h($s['id']) ?>/approve" style="display:inline">
