@@ -68,7 +68,14 @@ final class ScoreOverrideService
 	 * @param array<string,mixed>     $mail          mit at least subject + from_email
 	 * @param array<string,mixed>     $score         mutiert in-place
 	 * @param array<string,mixed>|null $senderBucket optional, fuer sender_key-Match
-	 * @return array{matched:bool, rule_id?:string, changes?:array<string,mixed>}
+	 * @return array{matched:bool, rule_id?:string, rule_ids?:list<string>, changes?:array<string,mixed>, suggested?:list<string>}
+	 *
+	 * Hinweis zum Rueckgabe-Shape:
+	 *   matched  — true NUR wenn der Score tatsaechlich (Auto-Band) veraendert wurde.
+	 *              Kann false sein, waehrend suggested nicht leer ist: das ist gewollt
+	 *              und der dokumentierte Vertrag — Aufrufer duerfen sich darauf verlassen.
+	 *   suggested — Liste der Regel-IDs, die einen Vorschlag (suggest-Band) erzeugt
+	 *               haben — unabhaengig von matched. Nur gesetzt wenn nicht leer.
 	 */
 	public function apply(string $tenantId, string $userId, array $mail, array &$score, ?array $senderBucket = null, bool $wasCacheHit = false): array
 	{
@@ -177,6 +184,13 @@ final class ScoreOverrideService
 	 * @param array<string,mixed> $score mutiert in-place (nur im auto-Band)
 	 * @param list<string> $sticky
 	 * @return array{matched:bool, rule_id?:string, rule_ids?:list<string>, changes?:array<string,mixed>, suggested?:list<string>}
+	 *
+	 * Hinweis zum Rueckgabe-Shape:
+	 *   matched  — true NUR wenn der Score tatsaechlich (Auto-Band) veraendert wurde.
+	 *              Kann false sein, waehrend suggested nicht leer ist: das ist gewollt
+	 *              und der dokumentierte Vertrag — Aufrufer duerfen sich darauf verlassen.
+	 *   suggested — Liste der Regel-IDs, die einen Vorschlag (suggest-Band) erzeugt
+	 *               haben — unabhaengig von matched. Nur gesetzt wenn nicht leer.
 	 */
 	private function applyWithBands(
 		string $tenantId,
@@ -332,6 +346,9 @@ final class ScoreOverrideService
 		if ($rule['set_label'] !== null)           { $proposed['label']            = (string)$rule['set_label']; }
 		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []) {
 			$proposed['folder_segments'] = array_values($rule['set_folder_segments']);
+		}
+		if ($proposed === []) {
+			return null;  // nichts vorzuschlagen — keine leere pending-Row erzeugen
 		}
 		// Dedup-Guard (Spec 2, D4): kein zweiter Vorschlag fuer dieselbe (mail, rule).
 		// Verhindert Duplikate bei Re-Scoring und Click-Time (wasCacheHit=true).
