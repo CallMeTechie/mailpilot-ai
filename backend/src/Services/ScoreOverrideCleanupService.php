@@ -74,6 +74,7 @@ final class ScoreOverrideCleanupService
 		$sql = 'UPDATE score_override_rules
 				SET deleted_at = UTC_TIMESTAMP(3)
 				WHERE deleted_at IS NULL
+				  AND origin_correction_id IS NULL
 				  AND (' . implode(' OR ', $conditions) . ')';
 
 		$stmt = $this->db->prepare($sql);
