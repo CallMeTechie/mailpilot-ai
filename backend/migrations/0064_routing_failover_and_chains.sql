@@ -1,0 +1,22 @@
+-- Spec 1 (Marc 2026-06-02) — routing_mode wird reiner Failover-Schalter.
+--
+-- Mit Spec 1 verliert `direct` das Failover für ALLE Rollen. Heute laufen
+-- summary/draft immer über die volle Chain (haben also Failover). Damit beim
+-- Upgrade kein stiller Failover-Verlust entsteht, wird der Bestand auf
+-- `router` gesetzt. Ein einmaliges Notice-Flag triggert einen Admin-Hinweis.
+UPDATE system_settings SET `value` = 'router' WHERE `key` = 'llm.routing_mode';
+
+INSERT INTO system_settings (`key`, `value`, `type`, description) VALUES
+	('llm.inference.fallback_chain',
+	 '["00000000-0000-4000-8000-000000000050"]',
+	 'json',
+	 'Spec 1: Failover-Chain fuer inference-Calls (Regel-Extraktion). Initial nur Anthropic.'),
+	('llm.draft.fallback_chain',
+	 '["00000000-0000-4000-8000-000000000050"]',
+	 'json',
+	 'Spec 1: Failover-Chain fuer draft-Calls. Initial nur Anthropic.'),
+	('llm.routing_mode_upgrade_notice',
+	 '1',
+	 'string',
+	 'Spec 1: einmaliges Flag → Admin-Hinweis „routing_mode beim Upgrade auf router gesetzt". Vom Admin-Banner auf 0 gesetzt nach Anzeige.')
+ON DUPLICATE KEY UPDATE description = VALUES(description);
