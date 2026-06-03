@@ -46,6 +46,14 @@ final class InferenceUpdateInPlaceTest extends TestCase
 		$this->setSetting('rule_inference_backfill_range', 'future_only');
 		$this->setSetting('autosort_move_mode', 'auto');
 		$this->setSetting('learning.score_rules_soft_cap', '200');
+		// Confidence → Match-Breite haengt an dieser Schwelle: confidence 92 >= 85
+		// → breite Regel (kein match_from_local), confidence 55 < 85 → enge Regel
+		// (match_from_local). Migration 0037 seedet 85, aber system_settings wird
+		// von truncateAll() bewusst NICHT geleert — andere Tests (z.B.
+		// ObservabilityLogTest) schreiben 50 hinein und lassen es stehen. Ohne
+		// explizites Pinnen liest dieser Test je nach Reihenfolge/DB-Zustand 50
+		// statt 85, und confidence 55 wuerde faelschlich als "hoch" gewertet.
+		$this->setSetting('score_rule_auto_enable_threshold', '85');
 		$this->seedInferenceRouting(self::PROVIDER_ID, 'InferUpdateProv');
 	}
 
