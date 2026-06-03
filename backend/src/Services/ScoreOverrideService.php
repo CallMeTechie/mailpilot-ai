@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MailPilot\Services;
 
 use MailPilot\Repositories\ScoreOverrideRepository;
+use MailPilot\Repositories\SettingsRepository;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -31,10 +32,36 @@ use Psr\Log\LoggerInterface;
  */
 final class ScoreOverrideService
 {
+	/**
+	 * Spec 2 (Marc 2026-06-03) — Per-Batch-LLM-Match-Budget. Wird vom
+	 * MailScoringService zu Beginn eines scoreBatch-Runs via
+	 * resetMatchBudget() initialisiert und pro ruleMatch->scoreMatch()-Call
+	 * dekrementiert. null = noch nicht initialisiert (dann lazy aus Settings).
+	 */
+	private ?int $matchBudgetLeft = null;
+
 	public function __construct(
 		private readonly ScoreOverrideRepository $rules,
 		private readonly LoggerInterface $logger,
+		private readonly ?\MailPilot\Services\Scoring\MatchScorer $matchScorer = null,
+		private readonly ?RuleMatchService $ruleMatch = null,
+		private readonly ?SettingsRepository $settings = null,
+		private readonly ?\MailPilot\Repositories\PendingActionRepository $pending = null,
 	) {
+	}
+
+	/**
+	 * Spec 2 — setzt das Per-Batch-LLM-Match-Budget zurück. Vom
+	 * MailScoringService am Anfang jedes scoreBatch()-Runs aufgerufen, damit
+	 * der LLM-Verfeinerungs-Pfad pro Batch gedeckelt ist (kein Kosten-Run-away
+	 * bei grossen Inboxen). Click-Time-Aufrufer rufen es NICHT — dort ist
+	 * $wasCacheHit=true, der LLM-Pfad also ohnehin aus.
+	 */
+	public function resetMatchBudget(): void
+	{
+		$this->matchBudgetLeft = $this->settings !== null
+			? max(0, $this->settings->getInt('learning.match_per_batch_budget', 5))
+			: 0;
 	}
 
 	/**
@@ -43,7 +70,7 @@ final class ScoreOverrideService
 	 * @param array<string,mixed>|null $senderBucket optional, fuer sender_key-Match
 	 * @return array{matched:bool, rule_id?:string, changes?:array<string,mixed>}
 	 */
-	public function apply(string $tenantId, string $userId, array $mail, array &$score, ?array $senderBucket = null): array
+	public function apply(string $tenantId, string $userId, array $mail, array &$score, ?array $senderBucket = null, bool $wasCacheHit = false): array
 	{
 		if ($userId === '') {
 			return ['matched' => false];  // KI-Mini-Calls ohne User-Kontext
@@ -72,6 +99,19 @@ final class ScoreOverrideService
 			$sticky = array_map('trim', explode(',', $stickyRaw));
 		} elseif (is_array($stickyRaw)) {
 			$sticky = array_map('strval', $stickyRaw);
+		}
+
+		// Spec 2 (Marc 2026-06-03): Match-Score + Bänder. NEUER Zweig — laeuft
+		// NUR wenn der MatchScorer injiziert ist (Lern-Loop verdrahtet). Alle
+		// Alt-Aufrufer (matchScorer===null) fallen unveraendert in den binaeren
+		// Legacy-Pfad unten. Der Legacy-Pfad bleibt byte-fuer-byte erhalten,
+		// weil der bestehende ScoreOverrideServiceTest match_label/
+		// match_priority_min/first-match pinnt.
+		if ($this->matchScorer !== null) {
+			return $this->applyWithBands(
+				$tenantId, $userId, $mail, $score, $rules,
+				$senderKey, $subject, $fromLocal, $label, $priority, $sticky, $wasCacheHit,
+			);
 		}
 
 		// Phase 9g (Marc 2026-05-20): orthogonale Regel-Anwendung. Statt
@@ -116,6 +156,208 @@ final class ScoreOverrideService
 			'rule_ids'  => $appliedRules,
 			'changes'   => $allChanges,
 		];
+	}
+
+	/**
+	 * Spec 2 (Marc 2026-06-03) — Match-Score + Bänder. Pro enabled Regel:
+	 *   1. HARTE Gates (NUR match_label + match_priority_min) — match_sender_key/
+	 *      match_from_local/match_subject_regex sind hier KEINE Gates, sondern
+	 *      gehen ausschliesslich als gewichtete Features in den MatchScorer
+	 *      (sonst wuerde der exakte sender_key-Vergleich die Domain-/Fuzzy-Logik
+	 *      des Scorers vorab wegfiltern).
+	 *   2. score = MatchScorer->score(rule, mailFeatures), band = MatchScorer->band.
+	 *   3. match_mode in {llm,hybrid} && !cacheHit && band==suggest && Budget übrig
+	 *      → ruleMatch->scoreMatch() als Verfeinerung (null → deterministisch behalten).
+	 *   4. auto    → applySetFieldsOrthogonal() (Sticky-Schutz unveraendert), Score-Write.
+	 *      suggest → pending_actions-Vorschlag (kind=score_suggestion), KEIN Score-Write.
+	 *      ignore  → nichts.
+	 *
+	 * @param list<array<string,mixed>> $rules
+	 * @param array<string,mixed> $mail
+	 * @param array<string,mixed> $score mutiert in-place (nur im auto-Band)
+	 * @param list<string> $sticky
+	 * @return array{matched:bool, rule_id?:string, rule_ids?:list<string>, changes?:array<string,mixed>, suggested?:list<string>}
+	 */
+	private function applyWithBands(
+		string $tenantId,
+		string $userId,
+		array $mail,
+		array &$score,
+		array $rules,
+		string $senderKey,
+		string $subject,
+		string $fromLocal,
+		string $label,
+		int $priority,
+		array $sticky,
+		bool $wasCacheHit,
+	): array {
+		$mode = $this->settings !== null
+			? $this->settings->getString('learning.match_mode', 'deterministic')
+			: 'deterministic';
+
+		// MatchScorer liest sender_key/from_local/subject aus dem mailFeatures-Array.
+		$mailFeatures = [
+			'sender_key' => $senderKey,
+			'from_local' => $fromLocal,
+			'subject'    => $subject,
+		];
+
+		$allChanges      = [];
+		$appliedRules    = [];
+		$suggestedRules  = [];
+		$fieldsSetByRule = [
+			'priority'         => null,
+			'action_required'  => null,
+			'label'            => null,
+			'folder_segments'  => null,
+		];
+
+		foreach ($rules as $rule) {
+			// Harte Gates: NUR match_label + match_priority_min (siehe Methoden-Doc).
+			if (!$this->matchesHardGates($rule, $label, $priority)) {
+				continue;
+			}
+
+			$mScore = $this->matchScorer->score($rule, $mailFeatures);
+			$band   = $this->matchScorer->band($mScore);
+
+			// LLM-Verfeinerung NUR im llm/hybrid-Modus, bei Cache-Miss, im
+			// suggest-Band und solange Per-Batch-Budget uebrig ist.
+			if (($mode === 'llm' || $mode === 'hybrid')
+				&& !$wasCacheHit
+				&& $band === 'suggest'
+				&& $this->ruleMatch !== null
+				&& $this->consumeMatchBudget()) {
+				$llmScore = $this->ruleMatch->scoreMatch($rule, $mail);
+				if ($llmScore !== null) {
+					$mScore = $llmScore;
+					$band   = $this->matchScorer->band($mScore);
+				}
+				// null → deterministischen Score/Band behalten.
+				// TODO(Task 10): rule_match.budget_exceeded_fallback-Log-Marker.
+			}
+
+			if ($band === 'auto') {
+				$thisChanges = $this->applySetFieldsOrthogonal($rule, $score, $fieldsSetByRule, $sticky);
+				if ($thisChanges !== []) {
+					$ruleId = (string)$rule['id'];
+					$this->rules->recordApply($tenantId, $ruleId);
+					$this->logger->info('score_override.applied', [
+						'rule_id' => $ruleId,
+						'mail_id' => (string)($mail['id'] ?? ''),
+						'score'   => $mScore,
+						'changes' => $thisChanges,
+					]);
+					$allChanges    = array_merge($allChanges, $thisChanges);
+					$appliedRules[] = $ruleId;
+				}
+			} elseif ($band === 'suggest') {
+				$suggestionId = $this->createSuggestion($tenantId, $userId, $rule, $mail, $mScore, $mode);
+				if ($suggestionId !== null) {
+					$suggestedRules[] = (string)$rule['id'];
+				}
+			}
+			// ignore → nichts.
+		}
+
+		if ($allChanges === [] && $suggestedRules === []) {
+			return ['matched' => false];
+		}
+		$result = ['matched' => $allChanges !== []];
+		if ($appliedRules !== []) {
+			$result['rule_id']  = $appliedRules[0];
+			$result['rule_ids'] = $appliedRules;
+			$result['changes']  = $allChanges;
+		}
+		if ($suggestedRules !== []) {
+			$result['suggested'] = $suggestedRules;
+		}
+		return $result;
+	}
+
+	/**
+	 * Spec 2 — HARTE Gates fuer den Banden-Pfad. BEWUSST nur match_label +
+	 * match_priority_min (nicht das alte matches(), das auch sender_key/
+	 * from_local/subject_regex hart gated). Diese drei Felder gehen
+	 * ausschliesslich als gewichtete Features in den MatchScorer.
+	 *
+	 * @param array<string,mixed> $rule
+	 */
+	private function matchesHardGates(array $rule, string $label, int $priority): bool
+	{
+		if ($rule['match_label'] !== null && $label !== $rule['match_label']) {
+			return false;
+		}
+		if ($rule['match_priority_min'] !== null && $priority < (int)$rule['match_priority_min']) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Spec 2 — dekrementiert das Per-Batch-LLM-Match-Budget. Lazy-Init aus
+	 * Settings, falls resetMatchBudget() (noch) nicht gerufen wurde — so
+	 * funktioniert das Budget auch fuer Einzel-apply()-Aufrufe.
+	 * @return bool true wenn ein Budget-Slot verbraucht werden konnte.
+	 */
+	private function consumeMatchBudget(): bool
+	{
+		if ($this->matchBudgetLeft === null) {
+			$this->resetMatchBudget();
+		}
+		if (($this->matchBudgetLeft ?? 0) <= 0) {
+			return false;
+		}
+		$this->matchBudgetLeft--;
+		return true;
+	}
+
+	/**
+	 * Spec 2 — legt einen score_suggestion-Vorschlag in pending_actions an.
+	 * Best-effort: ohne PendingActionRepository (Alt-Aufrufer) No-op → null.
+	 *
+	 * @param array<string,mixed> $rule
+	 * @param array<string,mixed> $mail
+	 * @return string|null pending-action-id oder null
+	 */
+	private function createSuggestion(string $tenantId, string $userId, array $rule, array $mail, int $matchScore, string $mode): ?string
+	{
+		if ($this->pending === null) {
+			return null;
+		}
+		$proposed = [];
+		if ($rule['set_priority'] !== null)        { $proposed['priority']         = (int)$rule['set_priority']; }
+		if ($rule['set_action_required'] !== null) { $proposed['action_required']  = (int)(bool)$rule['set_action_required']; }
+		if ($rule['set_label'] !== null)           { $proposed['label']            = (string)$rule['set_label']; }
+		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []) {
+			$proposed['folder_segments'] = array_values($rule['set_folder_segments']);
+		}
+		// created_under_mode muss ein gueltiger pending_actions-MODE sein
+		// (off|suggest|auto) — der match_mode (deterministic|llm|hybrid) ist es
+		// NICHT. Score-Suggestions entstehen konzeptionell im suggest-Modus.
+		try {
+			return $this->pending->create(
+				$tenantId,
+				$userId,
+				'score_suggestion',
+				[
+					'rule_id'     => (string)$rule['id'],
+					'mail_id'     => (string)($mail['id'] ?? ''),
+					'match_score' => $matchScore,
+					'match_mode'  => $mode,
+					'proposed'    => $proposed,
+				],
+				'suggest',
+			);
+		} catch (\Throwable $e) {
+			$this->logger->warning('score_override.suggestion_failed', [
+				'rule_id' => (string)$rule['id'],
+				'mail_id' => (string)($mail['id'] ?? ''),
+				'err'     => $e->getMessage(),
+			]);
+			return null;
+		}
 	}
 
 	/**

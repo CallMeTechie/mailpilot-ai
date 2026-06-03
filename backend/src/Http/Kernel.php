@@ -184,9 +184,23 @@ class Kernel
 				$this->get(Logger::class),
 			),
 			// Phase 9a: Klassifikations-Overrides
+			// Spec 2 (2026-06-03): Lern-Loop — MatchScorer (Schwellen aus
+			// learning.match_*), RuleMatchService (LLM-Verfeinerung) +
+			// PendingActionRepository (score_suggestion-Vorschlaege) verdrahten.
 			ScoreOverrideService::class => new ScoreOverrideService(
 				$this->get(ScoreOverrideRepository::class),
 				$this->get(Logger::class),
+				new \MailPilot\Services\Scoring\MatchScorer(
+					$this->get(SettingsRepository::class)->getInt('learning.match_auto_threshold', 80),
+					$this->get(SettingsRepository::class)->getInt('learning.match_suggest_threshold', 50),
+				),
+				new \MailPilot\Services\RuleMatchService(
+					$this->get(\MailPilot\Llm\LlmRouter::class),
+					$this->get(RedactionService::class),
+					$this->get(Logger::class),
+				),
+				$this->get(SettingsRepository::class),
+				$this->get(PendingActionRepository::class),
 			),
 			// Phase 9p: Auto-Cleanup fuer Score-Override-Regeln
 			\MailPilot\Services\ScoreOverrideCleanupService::class => new \MailPilot\Services\ScoreOverrideCleanupService(

@@ -153,10 +153,21 @@ final class MailScoringService
 			$this->actionOwner->resolveForCacheHits($userProfile, $cacheHits, $scored);
 		}
 
+		// Spec 2 (2026-06-03): Cache-Hit-Mail-IDs ableiten — der ScoreOverride-
+		// Banden-Pfad darf den LLM-Match NUR bei Cache-Miss aufrufen (kein
+		// LLM-Call fuer bereits gecachte Scores → Kosten-Kontrolle).
+		$cacheHitMailIds = [];
+		foreach ($cacheHits as $ch) {
+			$cid = (string)($ch['mail']['id'] ?? '');
+			if ($cid !== '') {
+				$cacheHitMailIds[] = $cid;
+			}
+		}
+
 		// Phase 3a: Sender-Bucket + Spoof-Erkennung. Mutiert $scored in-place
 		// (haengt spoof_suspect-Flag an jede Row, wenn Resolver verfuegbar).
 		// Phase 9a: zusaetzlich ScoreOverrideService — User-ID aus dem Profile.
-		$this->enrichScoresWithSender($tenantId, $userId, $mails, $scored);
+		$this->enrichScoresWithSender($tenantId, $userId, $mails, $scored, $cacheHitMailIds);
 
 		$this->scores->upsertMany($scored);
 		return $scored;
@@ -174,8 +185,13 @@ final class MailScoringService
 	 * @param list<array<string,mixed>> $mails
 	 * @param list<array<string,mixed>> $scored mutiert in-place
 	 */
-	private function enrichScoresWithSender(string $tenantId, string $userId, array $mails, array &$scored): void
+	private function enrichScoresWithSender(string $tenantId, string $userId, array $mails, array &$scored, array $cacheHitMailIds = []): void
 	{
+		// Spec 2 (2026-06-03): Per-Batch-LLM-Match-Budget zuruecksetzen, damit
+		// der ScoreOverride-Banden-Pfad pro Scoring-Batch gedeckelt LLM-Matches
+		// macht (No-op wenn der Service ohne MatchScorer/Settings verdrahtet ist).
+		$this->scoreOverride?->resetMatchBudget();
+
 		if ($this->senderResolver === null) {
 			return;
 		}
@@ -238,7 +254,8 @@ final class MailScoringService
 				// user-korrigierte Felder schuetzt.
 				$row['user_corrected_fields'] = $stickyByMailId[$mid] ?? '';
 				try {
-					$this->scoreOverride->apply($tenantId, $userId, $mail, $row, $bucketForOverride);
+					$wasCacheHit = in_array($mid, $cacheHitMailIds, true);
+					$this->scoreOverride->apply($tenantId, $userId, $mail, $row, $bucketForOverride, $wasCacheHit);
 				} catch (\Throwable $e) {
 					$this->logger->warning('scoring.override_failed', [
 						'mail_id' => $mid, 'err' => $e->getMessage(),
@@ -286,7 +303,9 @@ final class MailScoringService
 		// Kopie, damit apply() in-place mutiert und wir den Diff vergleichen koennen.
 		$mutated = $score;
 		$mutated['user_corrected_fields'] = $stickyMap[(string)($mail['id'] ?? '')] ?? '';
-		$result  = $this->scoreOverride->apply($tenantId, $userId, $mail, $mutated, $bucket);
+		// Spec 2 (2026-06-03): Click-Time bleibt deterministisch — $wasCacheHit=true
+		// schaltet den LLM-Match aus (kein LLM-Call/Kosten-Ueberraschung pro Klick).
+		$result  = $this->scoreOverride->apply($tenantId, $userId, $mail, $mutated, $bucket, true);
 		if (!($result['matched'] ?? false) || empty($result['changes'])) {
 			return ['matched' => false];
 		}

@@ -27,7 +27,7 @@ use PDO;
 final class PendingActionRepository
 {
 	/** @var list<string> */
-	public const KINDS    = ['move', 'create_topic', 'move_to_pending_topic', 'reply_draft', 'rule_suggestion'];
+	public const KINDS    = ['move', 'create_topic', 'move_to_pending_topic', 'reply_draft', 'rule_suggestion', 'score_suggestion'];
 	/** @var list<string> */
 	public const STATUSES = ['pending', 'approved', 'rejected', 'aged_out'];
 	/** @var list<string> */
@@ -123,7 +123,7 @@ final class PendingActionRepository
 	 * Counts pro kind — UI rendert „Verschieben (3) / Topics (1) / Drafts (2)".
 	 * Auch Banner-Total wird aus der Summe gebaut.
 	 *
-	 * @return array{move:int, create_topic:int, move_to_pending_topic:int, reply_draft:int, total:int}
+	 * @return array{move:int, create_topic:int, move_to_pending_topic:int, reply_draft:int, rule_suggestion:int, score_suggestion:int, total:int}
 	 */
 	public function countByKind(string $tenantId, string $userId): array
 	{
@@ -131,7 +131,7 @@ final class PendingActionRepository
 			WHERE tenant_id = :t AND user_id = :u AND status = "pending"
 			GROUP BY kind');
 		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
-		$out = ['move' => 0, 'create_topic' => 0, 'move_to_pending_topic' => 0, 'reply_draft' => 0, 'total' => 0];
+		$out = ['move' => 0, 'create_topic' => 0, 'move_to_pending_topic' => 0, 'reply_draft' => 0, 'rule_suggestion' => 0, 'score_suggestion' => 0, 'total' => 0];
 		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
 			$out[(string)$r['kind']] = (int)$r['n'];
 			$out['total']           += (int)$r['n'];
