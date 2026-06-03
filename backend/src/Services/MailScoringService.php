@@ -115,7 +115,7 @@ final class MailScoringService
 		$cacheHits = [];
 
 		foreach ($mails as $mail) {
-			$hash = $this->contentHash($mail);
+			$hash = self::contentHash($mail, $this->maxBodyBytes);
 			$cached = $this->cache->get($tenantId, $hash, $promptVersionTag);
 			if ($cached !== null) {
 				$row = $this->buildScoreFromCache($tenantId, $userId, $mail, $cached, $subLabelMap, $promptVersionTag, $activePrompt['model']);
@@ -331,10 +331,10 @@ final class MailScoringService
 		return $result;
 	}
 
-	private function contentHash(array $mail): string
+	public static function contentHash(array $mail, int $maxBodyBytes): string
 	{
 		$body = (string)($mail['body_text'] ?? $mail['body_preview'] ?? '');
-		$slice = substr($body, 0, $this->maxBodyBytes);
+		$slice = substr($body, 0, $maxBodyBytes);
 		return hash('sha256', implode('|', [
 			strtolower((string)($mail['from_email'] ?? '')),
 			trim((string)($mail['subject'] ?? '')),

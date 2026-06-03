@@ -7,6 +7,7 @@ use MailPilot\Graph\GraphClient;
 use MailPilot\Http\Exceptions\HttpException;
 use MailPilot\Http\Request;
 use MailPilot\Http\Response;
+use MailPilot\Repositories\CacheRepository;
 use MailPilot\Repositories\CorrectionRepository;
 use MailPilot\Repositories\DraftRepository;
 use MailPilot\Repositories\MailRepository;
@@ -547,6 +548,14 @@ final class MailController extends BaseController
 				'action_required' => isset($orig['action_required']) ? (bool)$orig['action_required'] : null,
 			],
 		);
+
+		// Spec 2 (2026-06-03): Cache der korrigierten Mail gezielt purgen, damit
+		// der nächste Score-Call den alten Cache-Hit nicht mehr zurückliefert.
+		// maxBodyBytes MUSS identisch mit dem Scoring-Pfad sein (config-Wert),
+		// sonst weicht der Purge-Hash vom Cache-Hash ab und der Purge trifft nie.
+		$maxBodyBytes = (int)$this->kernel->config['limits']['max_body_bytes'];
+		$contentHash  = MailScoringService::contentHash($mail, $maxBodyBytes);
+		$this->kernel->get(CacheRepository::class)->purgeByContentHash($ctx['tenant_id'], $contentHash);
 
 		// Sprint 6g — wenn der User eine Begründung mitgegeben hat,
 		// versucht der RuleInferenceService daraus eine AutoSort-Regel
