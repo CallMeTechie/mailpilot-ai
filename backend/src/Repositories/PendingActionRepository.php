@@ -258,6 +258,23 @@ final class PendingActionRepository
 	}
 
 	/**
+	 * Gibt es bereits einen offenen (pending) score_suggestion-Vorschlag für genau
+	 * diese (mail_id, rule_id)? Verhindert Duplikate bei Re-Scoring / Click-Time.
+	 */
+	public function hasOpenSuggestionFor(string $tenantId, string $userId, string $mailId, string $ruleId): bool
+	{
+		$stmt = $this->db->prepare(
+			"SELECT 1 FROM pending_actions
+			 WHERE tenant_id = :t AND user_id = :u AND kind = 'score_suggestion' AND status = 'pending'
+			   AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.mail_id')) = :mid
+			   AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.rule_id')) = :rid
+			 LIMIT 1"
+		);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId, ':mid' => $mailId, ':rid' => $ruleId]);
+		return $stmt->fetchColumn() !== false;
+	}
+
+	/**
 	 * Age-Out-Worker (PRD §6c). Setzt pending-Actions älter als
 	 * retentionDays auf 'aged_out'. created_under_mode-Auswertung
 	 * macht der Caller — wir markieren hier nur.

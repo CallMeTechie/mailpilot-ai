@@ -25,8 +25,8 @@ final class ScoreOverrideBandsTest extends TestCase
 {
 	protected function setUp(): void
 	{
+		// truncateAll() deckt bereits score_override_rules und pending_actions ab.
 		$this->truncateAll();
-		$this->pdo()->exec('TRUNCATE TABLE score_override_rules');
 	}
 
 	private function makeService(): ScoreOverrideService
@@ -111,6 +111,42 @@ final class ScoreOverrideBandsTest extends TestCase
 		// IGNORE-Regel → weder Score-Change noch Vorschlag.
 		$this->assertNotContains($ignoreRuleId, $result['suggested'] ?? []);
 		$this->assertNotContains($ignoreRuleId, $result['rule_ids'] ?? []);
+	}
+
+	/**
+	 * Spec 2 D4 — Dedup: ein zweites apply() für dieselbe (mail_id, rule_id) darf
+	 * KEINEN zweiten score_suggestion-Row anlegen. Zähler bleibt 1.
+	 */
+	public function testSuggestBand_NoDuplicatePendingAction_OnSecondApply(): void
+	{
+		[$tenantId, $userId] = $this->insertTenantAndUser('dedup@test.de');
+		$repo = new ScoreOverrideRepository($this->pdo());
+
+		// SUGGEST-Regel: gleiche Domain (35) + Betreff-Match (30) = 65 → band=suggest.
+		$repo->create($tenantId, $userId, [
+			'match_sender_key'     => 'noreply@github.com',
+			'match_subject_regex'  => '/deploy/i',
+			'set_label'            => 'auto',
+			'origin_correction_id' => $this->fakeCorrectionId(),
+		]);
+
+		$mail   = ['id' => 'm-dedup', 'subject' => 'Deploy #7 done', 'from_email' => 'notifications@github.com'];
+		$score  = ['label' => 'auto', 'priority' => 3, 'action_required' => false];
+		$bucket = ['sender_key' => 'notifications@github.com'];
+		$svc    = $this->makeService();
+
+		// Erster Aufruf → pending_action wird erstellt.
+		$svc->apply($tenantId, $userId, $mail, $score, $bucket);
+
+		// Zweiter Aufruf (z. B. Re-Scoring / Click-Time) → kein Duplikat.
+		$svc->apply($tenantId, $userId, $mail, $score, $bucket);
+
+		$stmt = $this->pdo()->prepare(
+			"SELECT COUNT(*) FROM pending_actions
+			 WHERE tenant_id = :t AND user_id = :u AND kind = 'score_suggestion' AND status = 'pending'"
+		);
+		$stmt->execute([':t' => $tenantId, ':u' => $userId]);
+		$this->assertSame(1, (int)$stmt->fetchColumn(), 'Dedup: nach zwei apply()-Aufrufen genau ein offener Vorschlag');
 	}
 
 	/** Erzeugt eine syntaktisch gültige UUID; markiert die Regel als user-derived. */

@@ -333,6 +333,14 @@ final class ScoreOverrideService
 		if (isset($rule['set_folder_segments']) && is_array($rule['set_folder_segments']) && $rule['set_folder_segments'] !== []) {
 			$proposed['folder_segments'] = array_values($rule['set_folder_segments']);
 		}
+		// Dedup-Guard (Spec 2, D4): kein zweiter Vorschlag fuer dieselbe (mail, rule).
+		// Verhindert Duplikate bei Re-Scoring und Click-Time (wasCacheHit=true).
+		$mailId = (string)($mail['id'] ?? '');
+		$ruleId = (string)$rule['id'];
+		if ($this->pending->hasOpenSuggestionFor($tenantId, $userId, $mailId, $ruleId)) {
+			return null; // bereits ein offener Vorschlag fuer (mail, rule) — kein Duplikat
+		}
+
 		// created_under_mode muss ein gueltiger pending_actions-MODE sein
 		// (off|suggest|auto) — der match_mode (deterministic|llm|hybrid) ist es
 		// NICHT. Score-Suggestions entstehen konzeptionell im suggest-Modus.
@@ -342,8 +350,8 @@ final class ScoreOverrideService
 				$userId,
 				'score_suggestion',
 				[
-					'rule_id'     => (string)$rule['id'],
-					'mail_id'     => (string)($mail['id'] ?? ''),
+					'rule_id'     => $ruleId,
+					'mail_id'     => $mailId,
 					'match_score' => $matchScore,
 					'match_mode'  => $mode,
 					'proposed'    => $proposed,
@@ -352,8 +360,8 @@ final class ScoreOverrideService
 			);
 		} catch (\Throwable $e) {
 			$this->logger->warning('score_override.suggestion_failed', [
-				'rule_id' => (string)$rule['id'],
-				'mail_id' => (string)($mail['id'] ?? ''),
+				'rule_id' => $ruleId,
+				'mail_id' => $mailId,
 				'err'     => $e->getMessage(),
 			]);
 			return null;
