@@ -632,9 +632,6 @@ final class RuleInferenceService
 		$senderKey = $this->normalizedSenderKey($parsed['match_sender_key'] ?? null);
 		$slotField = $this->scoreSetField($parsed);
 
-		// Bestehende mail_score_corrections.id als Herkunfts-Marker.
-		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
-
 		// Slot-Lookup: existiert schon eine user-derived Regel für
 		// (sender_key, Set-Feld)? Dann UPDATE statt CREATE.
 		$slot = ($senderKey !== null && $slotField !== null)
@@ -673,6 +670,9 @@ final class RuleInferenceService
 			];
 		}
 
+		// Bestehende mail_score_corrections.id als Herkunfts-Marker — wird nur
+		// beim CREATE benötigt (origin_correction_id; first correction wins).
+		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
 				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
@@ -848,8 +848,7 @@ final class RuleInferenceService
 			? ($parsed['match_from_local'] ?? null)
 			: null;
 
-		$senderKey    = $this->normalizedSenderKey($parsed['match_sender_key'] ?? null);
-		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
+		$senderKey = $this->normalizedSenderKey($parsed['match_sender_key'] ?? null);
 
 		// Task 8: Slot-Lookup für (sender_key, folder_segments) — Update-in-place
 		// statt Sibling. Ersetzt den früheren hasSimilarTopicRule-Skip.
@@ -886,6 +885,9 @@ final class RuleInferenceService
 			];
 		}
 
+		// Bestehende mail_score_corrections.id als Herkunfts-Marker — wird nur
+		// beim CREATE benötigt (origin_correction_id; first correction wins).
+		$correctionId = $this->resolveCorrectionId($tenantId, $mailId);
 		try {
 			$ruleId = $this->scoreOverrides->create($tenantId, $userId, [
 				'match_sender_key'    => $parsed['match_sender_key']    ?? null,
