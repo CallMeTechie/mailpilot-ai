@@ -220,6 +220,13 @@ final class ScoreOverrideService
 		$allChanges      = [];
 		$appliedRules    = [];
 		$suggestedRules  = [];
+		// Task 10 (Spec 2, D8): einmaliger Observability-Marker pro
+		// applyWithBands()-Lauf, wenn eine Regel den LLM-Match genutzt HÄTTE,
+		// aber das Per-Batch-Budget erschöpft ist und wir still auf den
+		// deterministischen Score zurückfallen. Nur EINMAL pro Mail loggen
+		// (nicht pro nachfolgender Regel), damit der Log bei grossen Inboxen
+		// nicht flutet.
+		$budgetFallbackLogged = false;
 		$fieldsSetByRule = [
 			'priority'         => null,
 			'action_required'  => null,
@@ -238,18 +245,30 @@ final class ScoreOverrideService
 
 			// LLM-Verfeinerung NUR im llm/hybrid-Modus, bei Cache-Miss, im
 			// suggest-Band und solange Per-Batch-Budget uebrig ist.
-			if (($mode === 'llm' || $mode === 'hybrid')
+			$llmEligible = ($mode === 'llm' || $mode === 'hybrid')
 				&& !$wasCacheHit
 				&& $band === 'suggest'
-				&& $this->ruleMatch !== null
-				&& $this->consumeMatchBudget()) {
-				$llmScore = $this->ruleMatch->scoreMatch($rule, $mail);
-				if ($llmScore !== null) {
-					$mScore = $llmScore;
-					$band   = $this->matchScorer->band($mScore);
+				&& $this->ruleMatch !== null;
+			if ($llmEligible) {
+				if ($this->consumeMatchBudget()) {
+					$llmScore = $this->ruleMatch->scoreMatch($rule, $mail);
+					if ($llmScore !== null) {
+						$mScore = $llmScore;
+						$band   = $this->matchScorer->band($mScore);
+					}
+					// null → deterministischen Score/Band behalten.
+				} elseif (!$budgetFallbackLogged) {
+					// Task 10 (D8): Budget erschöpft — diese Regel HÄTTE den LLM
+					// genutzt, fällt jetzt still auf den deterministischen Score
+					// zurück. Sprechender Marker, einmal pro Mail.
+					$this->logger->info('rule_match.budget_exceeded_fallback', [
+						'mail_id'   => (string)($mail['id'] ?? ''),
+						'rule_id'   => (string)$rule['id'],
+						'mode'      => $mode,
+						'remaining' => 0,
+					]);
+					$budgetFallbackLogged = true;
 				}
-				// null → deterministischen Score/Band behalten.
-				// TODO(Task 10): rule_match.budget_exceeded_fallback-Log-Marker.
 			}
 
 			if ($band === 'auto') {

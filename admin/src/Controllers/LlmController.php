@@ -409,9 +409,20 @@ final class LlmController extends BaseController
 			];
 		}
 
+		// Task 10 (Spec 2, D8) — kleine read-only Lern-Loop-Status-Sektion: macht
+		// die stillen Degradationen sichtbar. Aktuell deaktivierte user-derived
+		// Regeln (origin_correction_id IS NOT NULL AND enabled = 0) — z.B. via
+		// LRU-Soft-Cap (score_override.lru_disabled) oder Verwerfen abgeschaltet.
+		// Cross-Tenant-Überblick wie die Suggestions-Query oben.
+		$disabledUserDerived = (int)$pdo->query(
+			"SELECT COUNT(*) FROM score_override_rules
+			 WHERE origin_correction_id IS NOT NULL AND enabled = 0 AND deleted_at IS NULL"
+		)->fetchColumn();
+
 		$this->render('llm/suggestions', [
-			'suggestions' => $suggestions,
-			'csrfToken'   => $this->csrfToken(),
+			'suggestions'         => $suggestions,
+			'disabledUserDerived' => $disabledUserDerived,
+			'csrfToken'           => $this->csrfToken(),
 		]);
 	}
 

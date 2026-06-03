@@ -15,8 +15,10 @@
  *   match_score:?int, match_mode:?string,
  *   proposed:array<string,mixed>, created_at:string
  * }> $suggestions
+ * @var int $disabledUserDerived  Task 10 (D8): aktuell deaktivierte user-derived Regeln.
  * @var string $csrfToken
  */
+$disabledUserDerived = $disabledUserDerived ?? 0;
 $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 // Vorschlags-Felder lesbar zusammenfassen (priority/action_required/label/folder_segments).
@@ -49,6 +51,19 @@ $fmtProposed = static function (array $p): string {
 		<a class="btn btn-secondary btn-sm" href="/admin/llm/usage">Usage &amp; Kosten →</a>
 	</div>
 </header>
+
+<section class="panel">
+	<h2>Lern-Loop-Status</h2>
+	<p class="muted">
+		Aktuell <strong><?= $h((string)$disabledUserDerived) ?></strong> deaktivierte
+		gelernte Regel(n) (<code>origin_correction_id</code> gesetzt, <code>enabled = 0</code>) —
+		z.&nbsp;B. per LRU-Soft-Cap (<code>score_override.lru_disabled</code>) abgeschaltet
+		oder vom Owner verworfen. Stille Degradationen (Budget-Fallback, fehlendes
+		Match-Modell) erscheinen als Marker im Log
+		(<code>rule_match.budget_exceeded_fallback</code>,
+		<code>rule_match.unavailable_fallback_deterministic</code>).
+	</p>
+</section>
 
 <section class="panel">
 	<p class="muted">
