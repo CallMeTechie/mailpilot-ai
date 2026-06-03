@@ -284,6 +284,7 @@ final class LlmController extends BaseController
 		$this->render('llm/routing', [
 			'privacyMode' => $settings->getString('llm.privacy_mode',   'cloud_allowed'),
 			'routingMode' => $settings->getString('llm.routing_mode',   'direct'),
+			'matchMode'   => $settings->getString('learning.match_mode', 'deterministic'),
 			'chains'      => $chains,
 			'roles'       => $roles,
 			'scoringBatchSize' => $settings->getInt('scoring.batch_size', 20),
@@ -329,6 +330,15 @@ final class LlmController extends BaseController
 		}
 		$settings->set('llm.routing_mode', $routing);
 
+		// Spec 2 (Task 9) — Match-Modus für den Lern-Loop (Score-Override-Matching).
+		// deterministic = gewichtete Features ohne LLM; llm = Rolle „match" pro Mail;
+		// hybrid = deterministisch + „match"-LLM nur für Grenzfälle.
+		$matchMode = (string)($_POST['match_mode'] ?? 'deterministic');
+		if (!in_array($matchMode, ['deterministic', 'llm', 'hybrid'], true)) {
+			$matchMode = 'deterministic';
+		}
+		$settings->set('learning.match_mode', $matchMode);
+
 		$roles = \MailPilot\Llm\LlmRouter::ROLES;
 		foreach ($roles as $role) {
 			$ids = self::parseChainInput($_POST["chain_{$role}"] ?? []);
@@ -340,6 +350,66 @@ final class LlmController extends BaseController
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');
 		$this->redirect('/admin/llm/routing');
+	}
+
+	/**
+	 * Spec 2 (Task 9, Step 2) — Read-only-Review der offenen score_suggestion-
+	 * Vorschläge aus dem Lern-Loop. Cross-Tenant-Überblick (Admin-Pattern:
+	 * direkte PDO-Query wie TenantController), damit der Betreiber sieht,
+	 * welche Score-Override-Vorschläge pro User/Tenant noch offen sind.
+	 *
+	 * BEWUSST read-only: Annehmen/Verwerfen läuft user-scoped über die
+	 * Add-in → Backend-Endpoints (POST /api/v1/pending/{id}/approve|reject),
+	 * weil die Bestätigung user-gebundene Regel-Mutationen mit Ownership-Guard
+	 * auslöst (PendingController::confirm/discardScoreSuggestion). Dieselbe
+	 * Logik im Admin (session-auth, cross-tenant) per Raw-SQL zu duplizieren,
+	 * würde den Ownership-Guard umgehen — daher hier nur die Sichtung.
+	 */
+	public function showSuggestions(array $params): void
+	{
+		$pdo = $this->kernel->get(PDO::class);
+
+		// Mail-Kontext (subject/from) per LEFT JOIN über payload.mail_id —
+		// JSON_UNQUOTE/JSON_EXTRACT wie in PendingActionRepository::hasOpenSuggestionFor.
+		// LIMIT als simpler Schutz gegen Riesen-Listen; Review ist ein Überblick.
+		$rows = $pdo->query(
+			"SELECT pa.id, pa.tenant_id, pa.user_id, pa.payload, pa.created_at,
+					t.name  AS tenant_name,
+					u.email AS user_email,
+					m.subject    AS mail_subject,
+					m.from_email AS mail_from
+			 FROM pending_actions pa
+			 LEFT JOIN tenants t ON t.id = pa.tenant_id
+			 LEFT JOIN users   u ON u.id = pa.user_id
+			 LEFT JOIN mails   m ON m.id = JSON_UNQUOTE(JSON_EXTRACT(pa.payload, '$.mail_id'))
+			                    AND m.tenant_id = pa.tenant_id
+			 WHERE pa.kind = 'score_suggestion' AND pa.status = 'pending'
+			 ORDER BY pa.created_at DESC
+			 LIMIT 200"
+		)->fetchAll(PDO::FETCH_ASSOC);
+
+		$suggestions = [];
+		foreach ($rows as $r) {
+			$payload = is_string($r['payload']) ? json_decode($r['payload'], true) : null;
+			$proposed = (is_array($payload) && isset($payload['proposed']) && is_array($payload['proposed']))
+				? $payload['proposed']
+				: [];
+			$suggestions[] = [
+				'id'           => (string)$r['id'],
+				'tenant_name'  => (string)($r['tenant_name'] ?? $r['tenant_id']),
+				'user_email'   => (string)($r['user_email'] ?? $r['user_id']),
+				'mail_subject' => $r['mail_subject'] !== null ? (string)$r['mail_subject'] : null,
+				'mail_from'    => $r['mail_from'] !== null ? (string)$r['mail_from'] : null,
+				'match_score'  => is_array($payload) && isset($payload['match_score']) ? (int)$payload['match_score'] : null,
+				'match_mode'   => is_array($payload) && isset($payload['match_mode']) ? (string)$payload['match_mode'] : null,
+				'proposed'     => $proposed,
+				'created_at'   => (string)$r['created_at'],
+			];
+		}
+
+		$this->render('llm/suggestions', [
+			'suggestions' => $suggestions,
+		]);
 	}
 
 	public function showGolden(array $params): void

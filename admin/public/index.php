@@ -98,6 +98,7 @@ $routes = [
 	['POST', '#^/admin/llm/golden/(?P<rid>[^/]+)/delete$#', LlmController::class, 'deleteGolden'],
 	['GET',  '#^/admin/llm/routing$#',                    LlmController::class, 'showRouting'],
 	['POST', '#^/admin/llm/routing$#',                    LlmController::class, 'saveRouting'],
+	['GET',  '#^/admin/llm/suggestions$#',                LlmController::class, 'showSuggestions'],
 	['POST', '#^/admin/llm/models/(?P<mid>[^/]+)$#',      LlmController::class, 'saveModel'],
 	['GET',  '#^/admin/llm/(?P<id>[^/]+)$#',              LlmController::class, 'edit'],
 	['POST', '#^/admin/llm/(?P<id>[^/]+)$#',              LlmController::class, 'save'],

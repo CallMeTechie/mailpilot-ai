@@ -15,6 +15,7 @@ $h = fn(?string $s): string => htmlspecialchars((string)($s ?? ''), ENT_QUOTES |
 		<a class="btn btn-secondary" href="/admin/llm/usage">Usage &amp; Kosten →</a>
 		<a class="btn btn-secondary" href="/admin/llm/golden">Golden-Set Quality →</a>
 		<a class="btn btn-secondary" href="/admin/llm/routing">Routing &amp; Privacy-Mode →</a>
+		<a class="btn btn-secondary" href="/admin/llm/suggestions">Score-Vorschläge →</a>
 	</div>
 </header>
 

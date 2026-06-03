@@ -4,6 +4,7 @@
  *
  * @var string $privacyMode
  * @var string $routingMode
+ * @var string $matchMode
  * @var array<string, array{configured:list<string>, available:list<array<string,mixed>>}> $chains
  * @var list<string> $roles
  * @var int $scoringBatchSize
@@ -16,6 +17,21 @@ $routingModeLabels = ['direct' => 'Direkt (kein Failover)', 'router' => 'Router 
 $privacyLabels     = ['cloud_allowed' => 'Cloud erlaubt', 'local_preferred' => 'Lokal bevorzugt', 'local_only' => 'Nur lokal'];
 $pl = fn(string $k): string => $privacyLabels[$k] ?? $k;
 $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
+
+// Spec 2 (Task 9) — Match-Modus für den Lern-Loop: Label + Konsequenz-Text
+// aus der Spec-Tabelle. Steuert wie Score-Override-Regeln gegen eine Mail
+// matchen (gewichtete Features vs. „match"-LLM pro Mail vs. Hybrid).
+$matchModeLabels = [
+	'deterministic' => 'Deterministisch (Default)',
+	'llm'           => 'LLM („match"-Rolle)',
+	'hybrid'        => 'Hybrid',
+];
+$matchModeConsequences = [
+	'deterministic' => 'Gewichtete Features, kein LLM — Kosten 0, sofort, voll erklärbar, vorhersehbar; erkennt nur, was gewichtet ist.',
+	'llm'           => 'Rolle „match" bewertet pro Mail (gebündelt, nur bei Cache-Miss) — semantisch/flexibel; Kosten/Latenz gebunden.',
+	'hybrid'        => 'Deterministisch für klare Fälle, „match"-LLM nur für die Grenzfälle — billig für die Masse, schlau bei Grenzfällen.',
+];
+$mml = fn(string $k): string => $matchModeLabels[$k] ?? $k;
 ?>
 
 <header class="page-head">
@@ -25,6 +41,7 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 		<a class="btn btn-secondary btn-sm" href="/admin/llm">← LLM-Provider</a>
 		<a class="btn btn-secondary btn-sm" href="/admin/llm/usage">Usage &amp; Kosten</a>
 		<a class="btn btn-secondary btn-sm" href="/admin/llm/golden">Golden-Set Quality</a>
+		<a class="btn btn-secondary btn-sm" href="/admin/llm/suggestions">Score-Vorschläge</a>
 	</div>
 </header>
 
@@ -56,6 +73,27 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 		</p>
 		<label><input type="radio" name="routing_mode" value="direct" <?= $routingMode === 'direct' ? 'checked' : '' ?>> <?= $h($rl('direct')) ?></label><br>
 		<label><input type="radio" name="routing_mode" value="router" <?= $routingMode === 'router' ? 'checked' : '' ?>> <?= $h($rl('router')) ?></label>
+	</section>
+
+	<section class="panel">
+		<h2>Match-Modus (Lern-Loop)</h2>
+		<p class="muted">
+			Steuert, wie Score-Override-Regeln gegen eingehende Mails gematcht werden.
+			Greift in der Rolle <code>match</code> (siehe Fallback-Chain unten).
+		</p>
+		<label class="settings-field">
+			<span class="settings-key">Match-Modus</span>
+			<select name="match_mode" id="match-mode-select">
+				<?php foreach ($matchModeLabels as $mmKey => $mmLabel): ?>
+					<option value="<?= $h($mmKey) ?>" <?= $matchMode === $mmKey ? 'selected' : '' ?>><?= $h($mmLabel) ?></option>
+				<?php endforeach; ?>
+			</select>
+		</label>
+		<?php foreach ($matchModeConsequences as $mmKey => $mmText): ?>
+			<p class="muted mp-match-consequence" data-match-mode="<?= $h($mmKey) ?>" <?= $matchMode === $mmKey ? '' : 'hidden' ?>>
+				<strong><?= $h($mml($mmKey)) ?>:</strong> <?= $h($mmText) ?>
+			</p>
+		<?php endforeach; ?>
 	</section>
 
 	<section class="panel">
@@ -101,6 +139,9 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 			?>
 			<details <?= $role === 'score' ? 'open' : '' ?>>
 				<summary><strong><?= $h($role) ?></strong> — <?= count($configured) ?> Provider in der Chain</summary>
+				<?php if ($role === 'match'): ?>
+					<p class="muted"><strong>Hinweis:</strong> Die Rolle <code>match</code> läuft <strong>pro Mail</strong> (gebündelt, nur bei Cache-Miss) und wird nur genutzt, wenn der Match-Modus oben auf <strong><?= $h($mml('llm')) ?></strong> oder <strong><?= $h($mml('hybrid')) ?></strong> steht. Bei <strong><?= $h($mml('deterministic')) ?></strong> wird hier kein Modell aufgerufen.</p>
+				<?php endif; ?>
 				<p class="muted">Reihenfolge = Priorität: Slot 1 = Primary, danach Fallbacks. „— (leer)" lässt den Slot weg.</p>
 				<?php for ($i = 0; $i < $slotCount; $i++): $sel = $configured[$i] ?? ''; ?>
 					<label class="settings-field">
@@ -121,3 +162,19 @@ $rl = fn(string $k): string => $routingModeLabels[$k] ?? $k;
 		<button type="submit" class="btn btn-primary">Routing speichern</button>
 	</div>
 </form>
+
+<script>
+// Spec 2 (Task 9): Konsequenz-Text live zum gewählten Match-Modus zeigen.
+// Progressive Enhancement — ohne JS sind alle drei Texte serverseitig
+// gerendert (nur der aktive ist sichtbar).
+(function () {
+	var sel = document.getElementById('match-mode-select');
+	if (!sel) return;
+	var texts = document.querySelectorAll('.mp-match-consequence');
+	sel.addEventListener('change', function () {
+		texts.forEach(function (el) {
+			el.hidden = el.getAttribute('data-match-mode') !== sel.value;
+		});
+	});
+})();
+</script>

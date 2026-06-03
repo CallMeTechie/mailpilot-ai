@@ -206,6 +206,7 @@ function renderPending(res) {
 	if (filterCount('move'))            filterCount('move').textContent = String((counts.move ?? 0) + (counts.move_to_pending_topic ?? 0));
 	if (filterCount('create_topic'))    filterCount('create_topic').textContent = String(counts.create_topic ?? 0);
 	if (filterCount('rule_suggestion')) filterCount('rule_suggestion').textContent = String(counts.rule_suggestion ?? 0);
+	if (filterCount('score_suggestion')) filterCount('score_suggestion').textContent = String(counts.score_suggestion ?? 0);
 	if (filterCount('reply_draft'))     filterCount('reply_draft').textContent = String(counts.reply_draft ?? 0);
 
 	// Banner
@@ -268,7 +269,22 @@ const PENDING_KIND_META = {
 	move_to_pending_topic:  { icon: '📁', label: 'Verschieben (wartet auf Topic)' },
 	reply_draft:            { icon: '✉️', label: 'Reply-Draft' },
 	rule_suggestion:        { icon: '⚙️', label: 'Regel-Vorschlag' },
+	score_suggestion:       { icon: '🎯', label: 'Score-Vorschlag' },
 };
+
+// Spec 2 (Task 9) — lesbare Labels für die vorgeschlagenen Score-Änderungen.
+const SCORE_PROPOSED_LABELS = {
+	priority:        'Priorität',
+	action_required: 'Aktion erforderlich',
+	label:           'Label',
+	folder_segments: 'Ordner',
+};
+
+function formatProposedValue(key, value) {
+	if (key === 'action_required') return Number(value) === 1 ? 'ja' : 'nein';
+	if (key === 'folder_segments' && Array.isArray(value)) return value.join(' / ');
+	return String(value);
+}
 
 function pendingTitle(item) {
 	const p = item.payload ?? {};
@@ -277,6 +293,13 @@ function pendingTitle(item) {
 	}
 	if (item.kind === 'create_topic') {
 		return p.sub_label || p.primary || '(unbenannt)';
+	}
+	if (item.kind === 'score_suggestion') {
+		// Payload trägt kein Subject (nur mail_id) — Titel beschreibt die
+		// vorgeschlagene Anpassung: bevorzugt das neue Label, sonst generisch.
+		const prop = p.proposed ?? {};
+		if (prop.label) return 'Score → ' + prop.label;
+		return 'Score-Anpassung';
 	}
 	// move / move_to_pending_topic / reply_draft: Mail-Subject ist primär.
 	// Fallback-Reihenfolge: subject > target_folder > sub_label > '(ohne Betreff)'.
@@ -354,6 +377,8 @@ function buildPendingCard(item) {
 
 	if (item.kind === 'rule_suggestion') {
 		buildRuleSuggestionBody(body, item);
+	} else if (item.kind === 'score_suggestion') {
+		buildScoreSuggestionBody(body, item);
 	} else if (item.kind === 'create_topic' && affectedCount > 0) {
 		const note = document.createElement('p');
 		note.className = 'mp-muted';
@@ -587,6 +612,56 @@ function buildRuleSuggestionBody(body, item) {
 	// approvePending() greift später über li.querySelector('.mp-pending-card-body')
 	// drauf zu (.__ruleCheckboxes).
 	body.__ruleCheckboxes = checkboxes;
+}
+
+// Spec 2 (Task 9) — Score-Vorschlag-Body: zeigt die vorgeschlagene
+// Score-Änderung + Match-Kontext. Annehmen/Verwerfen nutzt denselben
+// generischen approvePending/rejectPending-Pfad (api.pending.approve|reject).
+function buildScoreSuggestionBody(body, item) {
+	const p = item.payload ?? {};
+	const proposed = p.proposed ?? {};
+
+	// 1) Vorgeschlagene Änderung als kleine Definitionsliste.
+	const box = document.createElement('div');
+	box.className = 'mp-pending-rule-summary';
+	Object.keys(SCORE_PROPOSED_LABELS).forEach((key) => {
+		if (!(key in proposed)) return;
+		const row = document.createElement('div');
+		const label = document.createElement('span');
+		label.className = 'mp-pending-rule-label';
+		label.textContent = SCORE_PROPOSED_LABELS[key] + ': ';
+		row.appendChild(label);
+		const val = document.createElement('code');
+		val.textContent = formatProposedValue(key, proposed[key]);
+		row.appendChild(val);
+		box.appendChild(row);
+	});
+	if (box.children.length === 0) {
+		const note = document.createElement('p');
+		note.className = 'mp-muted';
+		note.textContent = 'Keine konkrete Änderung im Vorschlag.';
+		box.appendChild(note);
+	}
+	body.appendChild(box);
+
+	// 2) Match-Kontext (Score + Modus), falls vorhanden.
+	if (typeof p.match_score === 'number' || p.match_mode) {
+		const metaLine = document.createElement('div');
+		metaLine.className = 'mp-pending-card-meta';
+		if (typeof p.match_score === 'number') {
+			const c = document.createElement('span');
+			c.className = 'mp-pending-conf';
+			c.textContent = `Match ${p.match_score}`;
+			metaLine.appendChild(c);
+		}
+		if (p.match_mode) {
+			const s = document.createElement('span');
+			s.className = 'mp-muted';
+			s.textContent = `Modus: ${p.match_mode}`;
+			metaLine.appendChild(s);
+		}
+		body.appendChild(metaLine);
+	}
 }
 
 async function approvePending(item) {
