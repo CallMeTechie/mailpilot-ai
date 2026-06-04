@@ -120,4 +120,46 @@ final class RuleMatchServiceTest extends TestCase
 		self::assertContains('rule_match.unparseable_fallback_deterministic', $logger->messages,
 			'stille Degradation muss als D8-Marker geloggt werden');
 	}
+
+	/**
+	 * Reales Haiku-Verhalten im Match-Fall: gefenctes JSON + angehängte
+	 * **Begründung:**-Prosa NACH dem schließenden Fence. json_decode scheitert
+	 * an Trailing-Garbage → der Regex-Fallback muss den Score (85) ziehen.
+	 * (Reproduziert exakt den live auf nas3 beobachteten Fehlschlag.)
+	 */
+	public function testFencedJsonWithTrailingProseStillExtractsScore(): void
+	{
+		$this->truncateAll();
+		$pdo = $this->pdo();
+		$pdo->prepare('DELETE FROM llm_models WHERE provider_id = ?')->execute([self::PID]);
+		$pdo->prepare('DELETE FROM llm_providers WHERE id = ?')->execute([self::PID]);
+		$pdo->prepare("INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
+			VALUES (?, 'M', 'anthropic', 'http://x', 0, 1, 10)")->execute([self::PID]);
+		$pdo->prepare("INSERT INTO llm_models (id, provider_id, model_id, role, enabled, priority)
+			VALUES (?, ?, 'claude-haiku-4-5-20251001', 'match', 1, 10)")->execute([Uuid::v4(), self::PID]);
+		foreach ([['llm.routing_mode', 'router'], ['llm.privacy_mode', 'cloud_allowed'],
+			['llm.match.fallback_chain', '["' . self::PID . '"]']] as [$k, $v]) {
+			$pdo->prepare('INSERT INTO system_settings (`key`,`value`,`type`) VALUES (?,?,"string")
+				ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)')->execute([$k, $v]);
+		}
+
+		$proseProvider = new class implements LlmProvider {
+			public function kind(): string { return 'anthropic'; }
+			public function isHealthy(): bool { return true; }
+			public function complete(NormalizedRequest $r): NormalizedResponse
+			{
+				$content = "```json\n{\"score\": 85}\n```\n\n**Begründung:**\n- ✅ Absender-Domain passt zur Regel (hohe Konfidenz)";
+				return new NormalizedResponse($content, ['inputTokens' => 121, 'outputTokens' => 40], 'max_tokens', $r->modelHint, 'anthropic');
+			}
+			public function listModels(): array { return []; }
+		};
+		$router = new LlmRouter(['anthropic' => $proseProvider], new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo), new NullLogger(), new LlmModelRepository($pdo));
+
+		$svc   = new RuleMatchService($router, new RedactionService(), new NullLogger());
+		$score = $svc->scoreMatch(['id' => 'r1', 'match_sender_key' => 'sk:acme', 'set_priority' => 4],
+			['sender_key' => 'sk:acme', 'from_email' => 'a@acme.de', 'subject' => 'Rechnung faellig']);
+
+		self::assertSame(85, $score, 'Score muss trotz Trailing-Prosa nach dem JSON extrahiert werden');
+	}
 }

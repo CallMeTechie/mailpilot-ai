@@ -43,7 +43,8 @@ final class RuleMatchService
 		$ruleDesc = $this->describeRule($rule);
 
 		$system = 'Du bewertest, wie gut eine E-Mail zu einer gelernten Sortier-Regel passt. '
-			. 'Antworte NUR mit JSON {"score": <0-100>}. 0 = passt nicht, 100 = passt perfekt.';
+			. 'Antworte AUSSCHLIESSLICH mit JSON {"score": <0-100>}. 0 = passt nicht, 100 = passt perfekt. '
+			. 'Keine Begründung, kein weiterer Text, keine Markdown-Codefences.';
 		$user = $this->redactor->redact(
 			"REGEL:\n$ruleDesc\n\nMAIL:\nAbsender-Domain: $domain\nBetreff: $subject"
 		);
@@ -62,20 +63,37 @@ final class RuleMatchService
 			$this->logger->info('rule_match.unavailable_fallback_deterministic', ['err' => $e->getMessage()]);
 			return null;
 		}
-		// Reale Modelle (z.B. Anthropic Haiku) wrappen JSON oft in ```json … ```
-		// Fences — Anthropic kennt keinen nativen json_object-Mode. Vor dem Decode
-		// strippen, wie scoring/inference es tun (gemeinsamer Helper).
-		$content = ScoringPromptBuilder::stripCodeFences($resp->content);
-		$parsed  = json_decode($content, true);
-		if (!is_array($parsed) || !isset($parsed['score'])) {
-			// Erfolgreicher Call, aber unparsebare Antwort → stille Degradation
+		$score = $this->extractScore($resp->content);
+		if ($score === null) {
+			// Erfolgreicher Call, aber kein Score extrahierbar → stille Degradation
 			// sichtbar machen (D8), dann deterministischer Fallback.
 			$this->logger->info('rule_match.unparseable_fallback_deterministic', [
 				'raw' => mb_substr($resp->content, 0, 200),
 			]);
 			return null;
 		}
-		return max(0, min(100, (int)$parsed['score']));
+		return max(0, min(100, $score));
+	}
+
+	/**
+	 * Extrahiert den Score robust aus der Modell-Antwort. Reale Modelle (z.B.
+	 * Anthropic Haiku) wrappen JSON in ```json … ``` Fences UND hängen teils
+	 * Prosa-Begründungen an (kein nativer json_object-Mode). Strategie:
+	 *   1) Fences strippen + json_decode (wie scoring/inference) — der saubere Fall.
+	 *   2) Fällt das aus (z.B. Trailing-Prosa nach dem JSON), den Score per Regex
+	 *      aus dem Roh-Content ziehen.
+	 * Liefert null, wenn gar kein Score gefunden wird.
+	 */
+	private function extractScore(string $raw): ?int
+	{
+		$parsed = json_decode(ScoringPromptBuilder::stripCodeFences($raw), true);
+		if (is_array($parsed) && isset($parsed['score']) && is_numeric($parsed['score'])) {
+			return (int)$parsed['score'];
+		}
+		if (preg_match('/"score"\s*:\s*(\d{1,3})/', $raw, $m) === 1) {
+			return (int)$m[1];
+		}
+		return null;
 	}
 
 	/** @param array<string,mixed> $rule */
