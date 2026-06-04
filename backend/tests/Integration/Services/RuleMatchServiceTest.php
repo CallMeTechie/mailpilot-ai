@@ -43,7 +43,8 @@ final class RuleMatchServiceTest extends TestCase
 			public function complete(NormalizedRequest $r): NormalizedResponse
 			{
 				$this->seen = $r;
-				return new NormalizedResponse('{"score":90}', ['inputTokens' => 5, 'outputTokens' => 2], 'end_turn', $r->modelHint, 'anthropic');
+				// Reales Anthropic-Haiku-Verhalten: JSON in ```json … ``` Fences gewrappt.
+				return new NormalizedResponse("```json\n{\"score\": 90}\n```", ['inputTokens' => 5, 'outputTokens' => 2], 'end_turn', $r->modelHint, 'anthropic');
 			}
 			public function listModels(): array { return []; }
 		};
@@ -71,5 +72,52 @@ final class RuleMatchServiceTest extends TestCase
 	public function testLlmRouterRolesContainsMatch(): void
 	{
 		self::assertContains('match', LlmRouter::ROLES);
+	}
+
+	/**
+	 * Erfolgreicher Call, aber unparsebare Antwort (kein JSON, keine Fence)
+	 * → scoreMatch()=null UND D8-Marker rule_match.unparseable_fallback_deterministic.
+	 * (Reproduziert die live entdeckte stille Degradation.)
+	 */
+	public function testUnparseableResponseFallsBackToNullWithMarker(): void
+	{
+		$this->truncateAll();
+		$pdo = $this->pdo();
+		$pdo->prepare('DELETE FROM llm_models WHERE provider_id = ?')->execute([self::PID]);
+		$pdo->prepare('DELETE FROM llm_providers WHERE id = ?')->execute([self::PID]);
+		$pdo->prepare("INSERT INTO llm_providers (id, name, kind, base_url, is_local, enabled, priority)
+			VALUES (?, 'M', 'anthropic', 'http://x', 0, 1, 10)")->execute([self::PID]);
+		$pdo->prepare("INSERT INTO llm_models (id, provider_id, model_id, role, enabled, priority)
+			VALUES (?, ?, 'claude-haiku-4-5-20251001', 'match', 1, 10)")->execute([Uuid::v4(), self::PID]);
+		foreach ([['llm.routing_mode', 'router'], ['llm.privacy_mode', 'cloud_allowed'],
+			['llm.match.fallback_chain', '["' . self::PID . '"]']] as [$k, $v]) {
+			$pdo->prepare('INSERT INTO system_settings (`key`,`value`,`type`) VALUES (?,?,"string")
+				ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)')->execute([$k, $v]);
+		}
+
+		$garbage = new class implements LlmProvider {
+			public function kind(): string { return 'anthropic'; }
+			public function isHealthy(): bool { return true; }
+			public function complete(NormalizedRequest $r): NormalizedResponse
+			{
+				return new NormalizedResponse('Ich wuerde das mit 85 bewerten.', ['inputTokens' => 5, 'outputTokens' => 7], 'end_turn', $r->modelHint, 'anthropic');
+			}
+			public function listModels(): array { return []; }
+		};
+		$router = new LlmRouter(['anthropic' => $garbage], new LlmProviderRepository($pdo),
+			new SettingsRepository($pdo), new NullLogger(), new LlmModelRepository($pdo));
+
+		$logger = new class extends \Psr\Log\AbstractLogger {
+			/** @var list<string> */
+			public array $messages = [];
+			public function log($level, $message, array $context = []): void { $this->messages[] = (string)$message; }
+		};
+
+		$svc   = new RuleMatchService($router, new RedactionService(), $logger);
+		$score = $svc->scoreMatch(['id' => 'r1', 'match_sender_key' => 'sk:acme'], ['sender_key' => 'sk:acme', 'from_email' => 'a@acme.de', 'subject' => 's']);
+
+		self::assertNull($score, 'unparsebare Antwort → deterministischer Fallback (null)');
+		self::assertContains('rule_match.unparseable_fallback_deterministic', $logger->messages,
+			'stille Degradation muss als D8-Marker geloggt werden');
 	}
 }
