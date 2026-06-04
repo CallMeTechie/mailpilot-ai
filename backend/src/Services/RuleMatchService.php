@@ -6,6 +6,7 @@ namespace MailPilot\Services;
 use MailPilot\Llm\LlmAllProvidersDownException;
 use MailPilot\Llm\LlmRouter;
 use MailPilot\Llm\NormalizedRequest;
+use MailPilot\Services\Scoring\ScoringPromptBuilder;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -61,8 +62,17 @@ final class RuleMatchService
 			$this->logger->info('rule_match.unavailable_fallback_deterministic', ['err' => $e->getMessage()]);
 			return null;
 		}
-		$parsed = json_decode($resp->content, true);
+		// Reale Modelle (z.B. Anthropic Haiku) wrappen JSON oft in ```json … ```
+		// Fences — Anthropic kennt keinen nativen json_object-Mode. Vor dem Decode
+		// strippen, wie scoring/inference es tun (gemeinsamer Helper).
+		$content = ScoringPromptBuilder::stripCodeFences($resp->content);
+		$parsed  = json_decode($content, true);
 		if (!is_array($parsed) || !isset($parsed['score'])) {
+			// Erfolgreicher Call, aber unparsebare Antwort → stille Degradation
+			// sichtbar machen (D8), dann deterministischer Fallback.
+			$this->logger->info('rule_match.unparseable_fallback_deterministic', [
+				'raw' => mb_substr($resp->content, 0, 200),
+			]);
 			return null;
 		}
 		return max(0, min(100, (int)$parsed['score']));
