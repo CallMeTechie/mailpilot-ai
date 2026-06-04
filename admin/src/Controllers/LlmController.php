@@ -10,6 +10,8 @@ use MailPilot\Repositories\LlmCallLogRepository;
 use MailPilot\Repositories\LlmGoldenRepository;
 use MailPilot\Repositories\LlmModelRepository;
 use MailPilot\Repositories\LlmProviderRepository;
+use MailPilot\Repositories\PendingActionRepository;
+use MailPilot\Repositories\ScoreOverrideRepository;
 use MailPilot\Repositories\SettingsRepository;
 use MailPilot\Security\SecretBox;
 use PDO;
@@ -284,6 +286,7 @@ final class LlmController extends BaseController
 		$this->render('llm/routing', [
 			'privacyMode' => $settings->getString('llm.privacy_mode',   'cloud_allowed'),
 			'routingMode' => $settings->getString('llm.routing_mode',   'direct'),
+			'matchMode'   => $settings->getString('learning.match_mode', 'deterministic'),
 			'chains'      => $chains,
 			'roles'       => $roles,
 			'scoringBatchSize' => $settings->getInt('scoring.batch_size', 20),
@@ -329,6 +332,15 @@ final class LlmController extends BaseController
 		}
 		$settings->set('llm.routing_mode', $routing);
 
+		// Spec 2 (Task 9) — Match-Modus für den Lern-Loop (Score-Override-Matching).
+		// deterministic = gewichtete Features ohne LLM; llm = Rolle „match" pro Mail;
+		// hybrid = deterministisch + „match"-LLM nur für Grenzfälle.
+		$matchMode = (string)($_POST['match_mode'] ?? 'deterministic');
+		if (!in_array($matchMode, ['deterministic', 'llm', 'hybrid'], true)) {
+			$matchMode = 'deterministic';
+		}
+		$settings->set('learning.match_mode', $matchMode);
+
 		$roles = \MailPilot\Llm\LlmRouter::ROLES;
 		foreach ($roles as $role) {
 			$ids = self::parseChainInput($_POST["chain_{$role}"] ?? []);
@@ -340,6 +352,187 @@ final class LlmController extends BaseController
 
 		$this->flash('success', 'Routing-Einstellungen gespeichert.');
 		$this->redirect('/admin/llm/routing');
+	}
+
+	/**
+	 * Spec 2 (Task 9, Step 2) — Read-only-Review der offenen score_suggestion-
+	 * Vorschläge aus dem Lern-Loop. Cross-Tenant-Überblick (Admin-Pattern:
+	 * direkte PDO-Query wie TenantController), damit der Betreiber sieht,
+	 * welche Score-Override-Vorschläge pro User/Tenant noch offen sind.
+	 *
+	 * BEWUSST read-only: Annehmen/Verwerfen läuft user-scoped über die
+	 * Add-in → Backend-Endpoints (POST /api/v1/pending/{id}/approve|reject),
+	 * weil die Bestätigung user-gebundene Regel-Mutationen mit Ownership-Guard
+	 * auslöst (PendingController::confirm/discardScoreSuggestion). Dieselbe
+	 * Logik im Admin (session-auth, cross-tenant) per Raw-SQL zu duplizieren,
+	 * würde den Ownership-Guard umgehen — daher hier nur die Sichtung.
+	 */
+	public function showSuggestions(array $params): void
+	{
+		$pdo = $this->kernel->get(PDO::class);
+
+		// Mail-Kontext (subject/from) per LEFT JOIN über payload.mail_id —
+		// JSON_UNQUOTE/JSON_EXTRACT wie in PendingActionRepository::hasOpenSuggestionFor.
+		// LIMIT als simpler Schutz gegen Riesen-Listen; Review ist ein Überblick.
+		$rows = $pdo->query(
+			"SELECT pa.id, pa.tenant_id, pa.user_id, pa.payload, pa.created_at,
+					t.name  AS tenant_name,
+					u.email AS user_email,
+					m.subject    AS mail_subject,
+					m.from_email AS mail_from
+			 FROM pending_actions pa
+			 LEFT JOIN tenants t ON t.id = pa.tenant_id
+			 LEFT JOIN users   u ON u.id = pa.user_id
+			 LEFT JOIN mails   m ON m.id = JSON_UNQUOTE(JSON_EXTRACT(pa.payload, '$.mail_id'))
+			                    AND m.tenant_id = pa.tenant_id
+			 WHERE pa.kind = 'score_suggestion' AND pa.status = 'pending'
+			 ORDER BY pa.created_at DESC
+			 LIMIT 200"
+		)->fetchAll(PDO::FETCH_ASSOC);
+
+		$suggestions = [];
+		foreach ($rows as $r) {
+			$payload = is_string($r['payload']) ? json_decode($r['payload'], true) : null;
+			$proposed = (is_array($payload) && isset($payload['proposed']) && is_array($payload['proposed']))
+				? $payload['proposed']
+				: [];
+			$suggestions[] = [
+				'id'           => (string)$r['id'],
+				'tenant_name'  => (string)($r['tenant_name'] ?? $r['tenant_id']),
+				'user_email'   => (string)($r['user_email'] ?? $r['user_id']),
+				'mail_subject' => $r['mail_subject'] !== null ? (string)$r['mail_subject'] : null,
+				'mail_from'    => $r['mail_from'] !== null ? (string)$r['mail_from'] : null,
+				'match_score'  => is_array($payload) && isset($payload['match_score']) ? (int)$payload['match_score'] : null,
+				'match_mode'   => is_array($payload) && isset($payload['match_mode']) ? (string)$payload['match_mode'] : null,
+				'proposed'     => $proposed,
+				'created_at'   => (string)$r['created_at'],
+			];
+		}
+
+		// Task 10 (Spec 2, D8) — kleine read-only Lern-Loop-Status-Sektion: macht
+		// die stillen Degradationen sichtbar. Aktuell deaktivierte user-derived
+		// Regeln (origin_correction_id IS NOT NULL AND enabled = 0) — z.B. via
+		// LRU-Soft-Cap (score_override.lru_disabled) oder Verwerfen abgeschaltet.
+		// Cross-Tenant-Überblick wie die Suggestions-Query oben.
+		$disabledUserDerived = (int)$pdo->query(
+			"SELECT COUNT(*) FROM score_override_rules
+			 WHERE origin_correction_id IS NOT NULL AND enabled = 0 AND deleted_at IS NULL"
+		)->fetchColumn();
+
+		$this->render('llm/suggestions', [
+			'suggestions'         => $suggestions,
+			'disabledUserDerived' => $disabledUserDerived,
+			'csrfToken'           => $this->csrfToken(),
+		]);
+	}
+
+	/**
+	 * Spec 2 (Task 9, D4 + Marc-Entscheidung #1) — Admin nimmt einen offenen
+	 * score_suggestion ADMINISTRATIV an: zählt einen Apply-Hit + (re-)aktiviert
+	 * die zugehörige Score-Override-Regel, dann wird die pending-Action auf
+	 * 'approved' geschlossen.
+	 *
+	 * Owner-Kontext: der Admin handelt mit tenant_id + user_id DER ROW (nicht
+	 * cross-user). So bleibt der Ownership-Guard exakt erhalten —
+	 * findByIdForUser($rowTenant,$rowUser,$ruleId) muss die Regel diesem User
+	 * zuordnen, sonst wird NICHTS mutiert (die pending-Action wird dennoch
+	 * geschlossen, analog zum Backend-Pfad PendingController::confirm...).
+	 *
+	 * Die Mutationssequenz wird hier bewusst REPLIZIERT (statt den Backend-
+	 * PendingController zu instanziieren): dessen confirm/discardScoreSuggestion
+	 * sind private und an den Request-/JWT-Lebenszyklus gekoppelt. Das Nachbilden
+	 * der 2-3-Zeilen-Sequenz über die geteilten Repositories ist die risikoärmere
+	 * Variante und hält den Ownership-Guard identisch.
+	 */
+	public function approveSuggestion(array $params): void
+	{
+		$this->verifyCsrf();
+		$id  = (string)($params['id'] ?? '');
+		$row = $this->loadPendingScoreSuggestionOrFlash($id);
+		if ($row === null) {
+			$this->redirect('/admin/llm/suggestions');
+		}
+
+		[$tenantId, $userId, $ruleId] = $row;
+
+		$overrides = $this->kernel->get(ScoreOverrideRepository::class);
+		// Ownership-Guard: nur mutieren, wenn die Regel diesem (tenant,user) gehört.
+		if ($ruleId !== null && $overrides->findByIdForUser($tenantId, $userId, $ruleId) !== null) {
+			$overrides->recordApply($tenantId, $ruleId);
+			$overrides->updateFields($tenantId, $ruleId, ['enabled' => 1]);
+		}
+
+		// pending-Action immer schließen (auch wenn die Regel fehlt/fremd ist).
+		$this->kernel->get(PendingActionRepository::class)
+			->setStatus($tenantId, $userId, $id, 'approved');
+
+		$this->flash('success', 'Vorschlag angenommen — Regel (sofern vorhanden) aktiviert.');
+		$this->redirect('/admin/llm/suggestions');
+	}
+
+	/**
+	 * Spec 2 (Task 9, D4 + Marc-Entscheidung #1) — Admin verwirft einen offenen
+	 * score_suggestion ADMINISTRATIV: deaktiviert die zugehörige Regel
+	 * (enabled=0, keine neue Regel, kein Hard-Delete), dann wird die pending-
+	 * Action auf 'rejected' geschlossen. Owner-Kontext + Ownership-Guard wie in
+	 * approveSuggestion().
+	 */
+	public function rejectSuggestion(array $params): void
+	{
+		$this->verifyCsrf();
+		$id  = (string)($params['id'] ?? '');
+		$row = $this->loadPendingScoreSuggestionOrFlash($id);
+		if ($row === null) {
+			$this->redirect('/admin/llm/suggestions');
+		}
+
+		[$tenantId, $userId, $ruleId] = $row;
+
+		$overrides = $this->kernel->get(ScoreOverrideRepository::class);
+		// Ownership-Guard: nur mutieren, wenn die Regel diesem (tenant,user) gehört.
+		if ($ruleId !== null && $overrides->findByIdForUser($tenantId, $userId, $ruleId) !== null) {
+			$overrides->updateFields($tenantId, $ruleId, ['enabled' => 0]);
+		}
+
+		$this->kernel->get(PendingActionRepository::class)
+			->setStatus($tenantId, $userId, $id, 'rejected');
+
+		$this->flash('success', 'Vorschlag verworfen — Regel (sofern vorhanden) deaktiviert.');
+		$this->redirect('/admin/llm/suggestions');
+	}
+
+	/**
+	 * Lädt eine pending_action per Primärschlüssel (cross-tenant ist im Admin
+	 * legitim — Raw-PDO wie in showSuggestions()), und stellt sicher, dass es
+	 * sich um einen OFFENEN score_suggestion handelt. Bei Verstoß: Flash + null.
+	 *
+	 * @return array{0:string,1:string,2:?string}|null  [tenant_id, user_id, rule_id]
+	 */
+	private function loadPendingScoreSuggestionOrFlash(string $id): ?array
+	{
+		if ($id === '') {
+			$this->flash('error', 'Vorschlags-ID fehlt.');
+			return null;
+		}
+		$stmt = $this->kernel->get(PDO::class)->prepare(
+			'SELECT tenant_id, user_id, kind, status, payload
+			 FROM pending_actions WHERE id = :id LIMIT 1'
+		);
+		$stmt->execute([':id' => $id]);
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if ($row === false) {
+			$this->flash('error', 'Vorschlag nicht gefunden.');
+			return null;
+		}
+		if ((string)$row['kind'] !== 'score_suggestion' || (string)$row['status'] !== 'pending') {
+			$this->flash('error', 'Vorschlag ist kein offener Score-Vorschlag (bereits entschieden?).');
+			return null;
+		}
+		$payload = is_string($row['payload']) ? json_decode($row['payload'], true) : null;
+		$ruleId  = (is_array($payload) && isset($payload['rule_id']) && is_string($payload['rule_id']) && $payload['rule_id'] !== '')
+			? (string)$payload['rule_id']
+			: null;
+		return [(string)$row['tenant_id'], (string)$row['user_id'], $ruleId];
 	}
 
 	public function showGolden(array $params): void

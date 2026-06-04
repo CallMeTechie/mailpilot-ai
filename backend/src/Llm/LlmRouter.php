@@ -28,7 +28,7 @@ use Psr\Log\LoggerInterface;
 final class LlmRouter
 {
 	/** Kanonische Rollen-Liste — Single Source für UI-Iteration (Routing-Chain + Modell-Dropdowns). */
-	public const ROLES = ['score', 'summary', 'draft', 'inference'];
+	public const ROLES = ['score', 'summary', 'draft', 'inference', 'match'];
 
 	/**
 	 * @param array<string, LlmProvider> $providersByKind  z.B. ['anthropic'=>...,'openai'=>...]

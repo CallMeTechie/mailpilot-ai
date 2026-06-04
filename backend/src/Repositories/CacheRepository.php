@@ -82,6 +82,14 @@ final class CacheRepository
 		return $stmt->rowCount();
 	}
 
+	/** Invalidiert gezielt alle Cache-Rows einer Mail (alle Prompt-Versionen). */
+	public function purgeByContentHash(string $tenantId, string $contentHash): int
+	{
+		$stmt = $this->db->prepare('DELETE FROM claude_cache WHERE tenant_id = :t AND content_hash = :h');
+		$stmt->execute([':t' => $tenantId, ':h' => $contentHash]);
+		return $stmt->rowCount();
+	}
+
 	/**
 	 * Wipes every cache row whose prompt_version starts with the given
 	 * key prefix (e.g. "P-SCORE@" matches "P-SCORE@1.0", "P-SCORE@1.2",
