@@ -82,6 +82,29 @@ final class ObservabilityLogTest extends TestCase
 			->execute([':k' => $key, ':v' => $value]);
 	}
 
+	/**
+	 * Stellt alle von diesem Test mutierten system_settings auf die
+	 * Migrations-Defaults zurueck (Test-Isolation: system_settings wird
+	 * in truncateAll() bewusst NICHT geleert).
+	 */
+	protected function tearDown(): void
+	{
+		parent::tearDown();
+
+		$defaults = [
+			'learning.match_mode'              => 'deterministic',
+			'learning.match_auto_threshold'    => '80',
+			'learning.match_suggest_threshold' => '50',
+			'learning.match_per_batch_budget'  => '5',
+			'learning.score_rules_soft_cap'    => '200',
+			'score_rule_auto_enable_threshold' => '85',
+		];
+
+		foreach ($defaults as $key => $value) {
+			$this->setSetting($key, $value);
+		}
+	}
+
 	// ========================================================================
 	// 1) score_override.lru_disabled
 	// ========================================================================
